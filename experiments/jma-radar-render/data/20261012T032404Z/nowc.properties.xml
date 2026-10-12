@@ -1,0 +1,1221 @@
+<properties>
+  <!--
+      nowcプロパティ(PC・スマホ共通)
+      @author JMA
+      @version 2026.05.25
+      相対パスはコンテンツHTMLを基点とする
+  -->
+  <!-- コンテンツ識別子 -->
+  <contentsId>nowc</contentsId>
+  <!-- プライマリカラー -->
+  <primaryColor>#4caf50</primaryColor>
+  <!-- セカンダリカラー -->
+  <secondaryColor>#e91e63</secondaryColor>
+  <!-- データルートURL -->
+  <dataRootUrl>../jmatile/data/nowc</dataRootUrl>
+  <!-- 時刻管理ファイル名(複数指定可) -->
+  <timeFile>targetTimes_N1.json</timeFile>
+  <timeFile>targetTimes_N2.json</timeFile>
+  <timeFile>targetTimes_N3.json</timeFile>
+  <!-- データステータスファイル名 -->
+  <dataStatusFile>dataStatus.json</dataStatusFile>
+  <!-- デフォルト要素
+       カンマ区切りの要素id -->
+  <defaultElements>hrpns,slmcs</defaultElements>
+  <!-- データ領域定義 -->
+  <dataArea>
+    <!-- 緯度最小値 -->
+    <minLat>20</minLat>
+    <!-- 緯度最大値 -->
+    <maxLat>48</maxLat>
+    <!-- 経度最小値 -->
+    <minLon>118</minLon>
+    <!-- 経度最大値 -->
+    <maxLon>150</maxLon>
+  </dataArea>
+  <!-- 日本語コンテンツ -->
+  <jp>
+    <!-- モバイル端末用メニュータイトルアイコンURL -->
+    <mobileMenuTitleIconUrl>../jmatile/images/jmalogo_57x57.png</mobileMenuTitleIconUrl>
+    <!-- jmatile設定を上書き
+      タイトル
+      @id{String} 識別子
+    -->
+    <notation id="title">ナウキャスト（雨雲の動き・雷・竜巻）</notation>
+    <notation id="mobile_title">ナウキャスト</notation>
+    <notation id="mobile_menu_title">ナウキャスト&lt;br /&gt;（雨雲の動き・雷・竜巻）</notation>
+    <!-- お知らせメッセージ掲載URL -->
+    <messageUrl>//www.data.jma.go.jp/highresorad_notice/data/text-k.txt</messageUrl>
+    <!-- 状態通知 -->
+    <notation id="data_status_Slmcs">気象防災速報（線状降水帯発生）が発表されています！キキクルを併せて確認してください！</notation>
+    <notation id="data_status_SlmcsSjfcst">気象防災速報（線状降水帯発生）が発表されています！キキクルを併せて確認してください！&lt;br /&gt;気象防災速報（線状降水帯直前予測）が発表されています！キキクルを併せて確認してください！</notation>
+    <notation id="data_status_Sjfcst">気象防災速報（線状降水帯直前予測）が発表されています！キキクルを併せて確認してください！</notation>
+    <!-- 時刻スライダー設定 -->
+    <timeSlider>
+      <!-- ツールチップ(cdateのフォーマット) -->
+      <tooltip>HH:mm</tooltip>
+      <!--
+        目盛り間隔(min)
+        @type {String} "absolute"(default) : 対象時刻が間隔で割り切れる場合が表示対象となる
+                       "relative"          : 対象時刻と最新解析時刻の時間差が間隔で割り切れる場合が表示対象となる
+       -->
+      <scaleStep type="relative">60</scaleStep>
+      <!--
+         時刻スライダー目盛り(cdateのフォーマット)
+         absoluteScale {String} scaleStep[@type="absolute"]指定時に必須
+         relativePastScale {String} scaleStep[@type="relative"]指定時に必須 過去時刻と最新時刻の差分に適用
+           @mode {String} "absolute"          : 過去時刻に適用
+                          "relative"(default) : 過去時刻と最新時刻の差分に適用
+         relativeCurrentScale {String} scaleStep[@type="relative"]指定時に必須 最新時刻に適用
+         relativeFutureScale {String} scaleStep[@type="relative"]指定時に必須 未来時刻と最新時刻の差分に適用
+           @mode {String} "absolute"          : 未来時刻に適用
+                          "relative"(default) : 未来時刻と最新時刻の差分に適用
+      -->
+      <relativePastScale mode="relative">-H時間</relativePastScale>
+      <relativeCurrentScale>HH:mm</relativeCurrentScale>
+      <relativeFutureScale mode="relative">+H時間</relativeFutureScale>
+    </timeSlider>
+    <!-- モバイル端末用時刻スライダー目盛り(cdateのフォーマット) -->
+    <mobileTimeSliderScale>HH:mm</mobileTimeSliderScale>
+    <!-- 地図出典 -->
+    <mapsourceHTML>
+      <p><a href="https://maps.gsi.go.jp/development/ichiran.html" target="gsi" tabindex="-1">地理院タイル</a>（加工して利用）</p>
+      <p style="font-size:90%;">
+        Shoreline data is derived from: United States. National Imagery and Mapping Agency. "Vector Map Level 0 (VMAP0)." Bethesda, MD: Denver, CO: The Agency; USGS Information Services, 1997.
+      </p>
+    </mapsourceHTML>
+    <!-- 地図画像種別 -->
+    <mapImageTypes>
+      <!--
+         画像種別
+         @id {String} 識別子
+         @name {String} 名称
+         @type {String} "tile"          : L.tileLayerを適用
+                                          属性値に応じてCSS filterを適用 | L.tileLayer.webGLImageFilterを適用
+                        "geojson"       : geojson-vtを利用してL.GridLayerを適用
+                        "pbf"           : L.vectorGrid.protobufを適用(バイナリベクトルタイル)
+                        (以下は/properties/jp|en/element/imageTypeのみ)
+                        "canvas"        : L.tileLayer.canvasを適用(内製プラグイン：タイル画像をcanvasに転写)
+         @crossOrigin {String} crossOriginオプション(true|false(default))
+         @changeColorDepth {String} 色の濃さ変更フラグ(true|false(default))
+         @imagePixlated {String} ピクセル化画像フラグ(true|false(default))
+         @zoomUse {String} ズームレベル利用符号(all:全て,even:偶数のみ,odd:奇数のみ)(未指定: all)
+                           @type="tile|pbf"の時のみ有効
+         @grayscale {Number} グレースケール(%)(未指定: 0)
+                             @type="tile"の時のみ有効
+         @brightness {Number} 輝度(%)(未指定: 100)
+                              @type="tile"の時のみ有効
+         @observation {String} 観測データフラグ(true|false(default))
+                               未来時刻へのリクエストを抑止する
+                               GeoJSONデータの時のみ有効
+         @geojsonNodataCheck {Boolean} GeoJSONデータのチェック対象フラグ(true(default)|false)
+                                       @type="geojson"の時のみ有効
+         @geojsonExtent {Number} geojson-vtのオプションextentのタイルサイズに対する比率(未指定: 4096)
+                                 @type="geojson"の時のみ有効
+         @geojsonBuffer {Number} geojson-vtのオプションbufferのタイルサイズに対する比率(未指定: 64)
+                                 @type="geojson"の時のみ有効
+      -->
+      <!-- 淡色地図 -->
+      <imageType id="gsi_pale" name="地名あり" type="tile" crossOrigin="true" grayscale="100" brightness="66">
+        <!-- URL -->
+        <url>/tile/gsi/pale/{z}/{x}/{y}.png</url>
+        <!-- 帰属HTML -->
+        <attributionHTML>
+          <span class="jmatile-attribution-dummylink">地図出典：地理院タイル（加工して利用）</span><br />
+          &amp;copy; Japan Meteorological Agency 2020
+        </attributionHTML>
+        <!-- モバイル端末用帰属HTML -->
+        <mobileAttributionHTML>
+          <div class="jmatile-xx-small">
+            <span class="jmatile-attribution-dummylink">地図出典：地理院タイル<br />（加工して利用）</span><br />
+            &amp;copy; JMA 2020
+          </div>
+        </mobileAttributionHTML>
+        <!-- 最小ズームレベル -->
+        <minZoom>4</minZoom>
+        <!-- 最大ズームレベル -->
+        <maxZoom>14</maxZoom>
+        <!--
+          zoom変更時のアニメーション対象フラグ
+            {Number} 0 : 対象外(default)
+                     1 : 対象
+                     2 : IE,Edge以外では対象   
+        -->
+        <zoomAnimation>1</zoomAnimation>
+        <!-- z-index -->
+        <zIndex>1</zIndex>
+      </imageType>
+      <!-- 淡色地図2 -->
+      <imageType id="gsi_pale2" name="地名なし" type="tile" crossOrigin="true" grayscale="100" brightness="66">
+        <url>/tile/gsi/pale2/{z}/{x}/{y}.png</url>
+        <attributionHTML>
+          <span class="jmatile-attribution-dummylink">地図出典：地理院タイル（加工して利用）</span><br />
+          &amp;copy; Japan Meteorological Agency 2020
+        </attributionHTML>
+        <mobileAttributionHTML>
+          <div class="jmatile-xx-small">
+            <span class="jmatile-attribution-dummylink">地図出典：地理院タイル<br />（加工して利用）</span><br />
+            &amp;copy; JMA 2020
+          </div>
+        </mobileAttributionHTML>
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zoomAnimation>1</zoomAnimation>
+        <zIndex>1</zIndex>
+      </imageType>
+      <!-- マスク地図 -->
+      <imageType id="mask" type="tile">
+        <url>../jmatile/data/map/none/none/none/surf/mask/{z}/{x}/{y}.png</url>
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>201</zIndex>
+      </imageType>
+      <!-- 市町村名 -->
+      <imageType id="municipality_name" type="geojson" geojsonExtent="4096" geojsonBuffer="1200">
+        <url>../jmatile/data/map/none/none/none/surf/municipality_name/data.geojson</url>
+        <minZoom>11</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>301</zIndex>
+        <!--
+          L.GridLayer.createTileで利用するstyle設定
+          strokeColor: {String|Function(properties, zoom)} 線色(未指定: 線を描画しない)
+          bgStrokeColor: {String|Function(properties, zoom)} 縁取り線色(未指定: 縁取り線を描画しない)
+          strokeWidth: {Number|Function(properties, zoom)} 線の太さ(未指定: 1)
+          fillColor: {String|CanvasPattern|Function(properties, zoom[, context])} 塗り色(未指定: 塗り描画しない)
+                     overlayGeoJSONタグ内では、String|CanvasPattern[]を設定/関数の返り値としてもよい
+          fillOpacity: {Number} 塗り不透明度(未指定: 1)
+          globalCompositeOperation: {String|Function(properties, zoom)} 合成処理(未指定: source-over)
+                                    overlayGeoJSONタグ内でのみ有効、String[]を設定/関数の返り値としてもよい
+          stringStyle: {Object} Point Featureに適用する文字スタイル(未指定:文字描画しない)
+              fontWeight: {String} フォントウェイト(未指定:normal)
+              fontSize: {Number|Function(properties, zoom)} フォントサイズpx(未指定:12)
+              color: {String|Function(properties, zoom)} 文字色(未指定:文字を描画しない)
+              bgColor: {String|Function(properties, zoom)} 縁取り色(未指定:縁取り描画しない)
+              viewProp: {String} 表示するGeoJSONプロパティ名(未指定:文字を描画しない)
+              convert: {Function(text)} 文字列変換処理(未指定:変換しない)
+          propStringStyle: {Object} Featureに適用する文字スタイル(未指定:文字描画しない)
+              stringStyleを拡張
+              latProp: {String} 表示位置(緯度)を定義するGeoJSONプロパティ名(未指定:文字を描画しない)
+              lonProp: {String} 表示位置(経度)を定義するGeoJSONプロパティ名(未指定:文字を描画しない)
+          symbolStyle: {Object} Point Featureに適用するシンボルスタイル(未指定：シンボル描画しない)
+              iconId: {String|Function(properties, zoom)} 予めDOMに追加したシンボルimgのid
+              size: {Number[]|Function(properties, zoom)} シンボル描画サイズ
+          featureAscSortPropName: {String} GeJSON featureの昇順ソートのキーとなるプロパティ名(未指定:ソートしない)
+          featureDescSortPropName: {String} GeJSON featureの降順ソートのキーとなるプロパティ名(未指定:ソートしない)
+        -->
+        <gridLayerStyle>
+          {
+            stringStyle: {
+              fontSize: function(properties, zoom) {
+                  var size = (properties.type === 'ward') ? 10 : 12;
+                  size += 2*(zoom - 11);
+                  return size;
+              },
+              color: function(properties, zoom) {
+                  return (properties.type === 'ward') ? '#808080' : '#333333';
+              },
+              bgColor: '#ffffff',
+              viewProp: 'nameJP'
+            }
+          }
+        </gridLayerStyle>
+      </imageType>
+    </mapImageTypes>
+    <!--
+      地図画像種別切替
+      @defaultSelect {String} デフォルト選択(地図画像種別の識別子)
+    -->
+    <mapImageSwitch defaultSelect="gsi_pale">
+      <!-- 選択肢(地図画像種別の識別子 type=tileに限る) -->
+      <option>gsi_pale</option>
+      <option>gsi_pale2</option>
+    </mapImageSwitch>
+    <!-- 地形画像種別 -->
+    <terrainImageTypes>
+      <!-- @type=tile -->
+      <imageType id="gsi_hillshademap" type="tile" crossOrigin="true" grayscale="100" brightness="66">
+        <url>/tile/gsi/hillshademap/{z}/{x}/{y}.png</url>
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zoomAnimation>2</zoomAnimation>
+        <zIndex>2</zIndex>
+      </imageType>
+    </terrainImageTypes>
+    <!--
+      要素
+      @id {String} 識別子
+      @group {String} グループ
+      @mapOpacity {Number} 地図レイヤの不透明度(0-100 default:100)
+      @selectable {String} 選択可能フラグ(true(default)|false)
+    -->
+    <!-- 高解像度降水ナウキャスト -->
+    <element id="hrpns" group="nowc">
+      <!-- 名称 -->
+      <name>雨雲の動き</name>
+      <!-- 標題 -->
+      <title>雨雲の動き</title>
+      <!-- 予報時刻標題(cdateのフォーマット) -->
+      <titleValidtime>YYYY年M月D日HH時mm分</titleValidtime>
+      <!-- モバイル端末用予報時刻標題(cdateのフォーマット) -->
+      <mobileTitleValidtime>M月D日HH時mm分</mobileTitleValidtime>
+      <!--  初期時刻標題(cdateのフォーマット)
+            予報表示の場合のみ有効 -->
+      <titleBasetime>（D日HH時mm分の解析に基づく予想）</titleBasetime>
+      <!-- ツールチップ(オプション)
+           未指定時はtitle|tooltipをツールチップに利用する -->
+      <tooltip>雨雲の動き（高解像度降水ナウキャスト）</tooltip>
+      <!-- 凡例HTML -->
+      <legendHTML>
+        <div class="jmatile-showhide-colorDepth-thin">
+          <img src="../nowc/images/legend_jp_thin_hrpns.svg" width="80" height="196" alt="凡例" />
+        </div>
+        <div class="jmatile-showhide-colorDepth-normal">
+          <img src="../nowc/images/legend_jp_normal_hrpns.svg" width="80" height="196" alt="凡例" />
+        </div>
+        <div class="jmatile-showhide-colorDepth-deep">
+          <img src="../nowc/images/legend_jp_deep_hrpns.svg" width="80" height="196" alt="凡例" />
+        </div>
+      </legendHTML>
+      <!-- 凡例の向き
+           portrait:縦(デフォルト)
+           landscape:横 -->
+      <legendOrientation>portrait</legendOrientation>
+      <imageType id="hrpns" type="tile" changeColorDepth="true" imagePixlated="true" zoomUse="even">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <!-- 画像が実在する最大ズームレベル -->
+        <maxNativeZoom>10</maxNativeZoom>
+        <zoomAnimation>2</zoomAnimation>
+        <zIndex>101</zIndex>
+      </imageType>
+      <imageType id="hrpns_nd" type="geojson">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>102</zIndex>
+        <gridLayerStyle>
+          {
+            strokeColor: '#e0e0e0',
+            fillColor: function(properties, zoom, context) {
+                return context.createPattern(document.getElementById('texture_ND'), 'repeat');
+            },
+            fillOpacity: 0.75
+          }
+        </gridLayerStyle>
+      </imageType>
+    </element>
+    <!-- 雷ナウキャスト -->
+    <element id="thns" group="nowc">
+      <name>雷活動度</name>
+      <title>雷活動度</title>
+      <titleValidtime>YYYY年M月D日HH時mm分</titleValidtime>
+      <mobileTitleValidtime>M月D日HH時mm分</mobileTitleValidtime>
+      <titleBasetime>（D日HH時mm分の解析に基づく予想）</titleBasetime>
+      <tooltip>雷活動度（雷ナウキャスト）</tooltip>
+      <legendHTML>
+        <div class="jmatile-showhide-colorDepth-thin">
+          <img src="../nowc/images/legend_jp_thin_thns.svg" width="64" height="108" alt="凡例" />
+        </div>
+        <div class="jmatile-showhide-colorDepth-normal">
+          <img src="../nowc/images/legend_jp_normal_thns.svg" width="64" height="108" alt="凡例" />
+        </div>
+        <div class="jmatile-showhide-colorDepth-deep">
+          <img src="../nowc/images/legend_jp_deep_thns.svg" width="64" height="108" alt="凡例" />
+        </div>
+      </legendHTML>
+      <legendOrientation>portrait</legendOrientation>
+      <imageType id="thns" type="tile" changeColorDepth="true" imagePixlated="true" zoomUse="even">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <maxNativeZoom>9</maxNativeZoom>
+        <zoomAnimation>2</zoomAnimation>
+        <zIndex>101</zIndex>
+        <!-- 初期時刻間隔(分)
+             時刻管理ファイル内の時刻間隔と異なる場合に指定 -->
+        <basetimeInterval>10</basetimeInterval>
+        <!-- 予報時刻間隔(分)
+             時刻管理ファイル内の時刻間隔と異なる場合に指定 -->
+        <validtimeInterval>10</validtimeInterval>
+      </imageType>
+      <imageType id="thns_nd" type="geojson">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>102</zIndex>
+        <gridLayerStyle>
+          {
+            strokeColor: '#e0e0e0',
+            fillColor: function(properties, zoom, context) {
+                return context.createPattern(document.getElementById('texture_ND'), 'repeat');
+            },
+            fillOpacity: 0.75
+          }
+        </gridLayerStyle>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+      </imageType>
+    </element>
+    <!-- 竜巻ナウキャスト -->
+    <element id="trns" group="nowc">
+      <name>竜巻発生確度</name>
+      <title>竜巻発生確度</title>
+      <titleValidtime>YYYY年M月D日HH時mm分</titleValidtime>
+      <mobileTitleValidtime>M月D日HH時mm分</mobileTitleValidtime>
+      <titleBasetime>（D日HH時mm分の解析に基づく予想）</titleBasetime>
+      <tooltip>竜巻発生確度（竜巻ナウキャスト）</tooltip>
+      <legendHTML>
+        <div class="jmatile-showhide-colorDepth-thin">
+          <img src="../nowc/images/legend_jp_thin_trns.svg" width="86" height="68" alt="凡例" />
+        </div>
+        <div class="jmatile-showhide-colorDepth-normal">
+          <img src="../nowc/images/legend_jp_normal_trns.svg" width="86" height="68" alt="凡例" />
+        </div>
+        <div class="jmatile-showhide-colorDepth-deep">
+          <img src="../nowc/images/legend_jp_deep_trns.svg" width="86" height="68" alt="凡例" />
+        </div>
+      </legendHTML>
+      <legendOrientation>portrait</legendOrientation>
+      <imageType id="trns" type="tile" changeColorDepth="true" imagePixlated="true" zoomUse="even">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <maxNativeZoom>9</maxNativeZoom>
+        <zoomAnimation>2</zoomAnimation>
+        <zIndex>101</zIndex>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+      </imageType>
+      <imageType id="trns_nd" type="geojson">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>102</zIndex>
+        <gridLayerStyle>
+          {
+            strokeColor: '#e0e0e0',
+            fillColor: function(properties, zoom, context) {
+                return context.createPattern(document.getElementById('texture_ND'), 'repeat');
+            },
+            fillOpacity: 0.75
+          }
+        </gridLayerStyle>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+      </imageType>
+    </element>
+    <!-- AMeDAS -->
+    <element id="amds_rain10m" group="amds_rain10m">
+      <name>１０分間雨量</name>
+      <!-- サブ標題 -->
+      <subtitle>アメダス１０分間雨量</subtitle>
+      <!-- 予報時刻サブ標題(cdateのフォーマット) -->
+      <subtitleValidtime>HH時mm分</subtitleValidtime>
+      <!-- データなし時のサブ標題表記(GeoJSONデータのみ有効) -->
+      <nodataSubtitle>データなし</nodataSubtitle>
+      <legendHTML>
+        <img src="../nowc/images/legend_jp_amds_rain10m.svg" width="100" height="154" alt="凡例" />
+      </legendHTML>
+      <legendOrientation>portrait</legendOrientation>
+      <imageType id="amds_rain10m" type="geojson" observation="true" geojsonExtent="4096" geojsonBuffer="1200">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>402</zIndex>
+        <gridLayerStyle>
+          {
+            stringStyle: {
+              fontWeight: 'bold',
+              fontSize: function(properties, zoom) {
+                  return Math.min(4 + (zoom - 3)*2, 24);
+              },
+              color: function(properties, zoom) {
+                  if(zoom &lt; 8) return undefined;
+                  var rain10m = Number(properties.rain10m);
+                  if(isNaN(rain10m)) return undefined;
+                  if(rain10m >= 15)      return '#ff2800';
+                  else if(rain10m >= 10) return '#ffaa00';
+                  else if(rain10m >= 5)  return '#faf500';
+                  else if(rain10m >= 1)  return '#00aaff';
+                  else                   return '#f2f2ff';
+              },
+              bgColor: function(properties, zoom) {
+                  if(zoom &lt; 8) return undefined;
+                  var rain10m = Number(properties.rain10m);
+                  if(isNaN(rain10m)) return undefined;
+                  if(rain10m >= 15)      return '#c0c0c0';
+                  else                   return '#404040';
+              },
+              viewProp: 'rain10m',
+              convert: function(text) {
+                  return (text === '0.0') ? '0' : text;
+              }
+            },
+            symbolStyle: {
+              iconId: function(properties, zoom) {
+                  if(zoom >= 8) return undefined;
+                  var rain10m = Number(properties.rain10m);
+                  if(isNaN(rain10m) || rain10m &lt;= 0) return undefined;
+                  if(rain10m >= 15)      return 'circle_255_040_000';
+                  else if(rain10m >= 10) return 'circle_255_170_000';
+                  else if(rain10m >= 5)  return 'circle_250_245_000';
+                  else if(rain10m >= 1)  return 'circle_000_170_255';
+                  else                   return 'circle_242_242_255';
+              },
+              size: function(properties, zoom) {
+                  var size = Math.min(10 + (zoom - 3)*2, 24) - 8;
+                  return [size, size];
+              }
+            }
+          }
+        </gridLayerStyle>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+        <!-- データ遅延(分) -->
+        <dataDelay>10</dataDelay>
+      </imageType>
+    </element>
+    <!-- LIDEN -->
+    <element id="liden" group="liden">
+      <name>雷</name>
+      <subtitle>前５分間の雷の状況</subtitle>
+      <subtitleValidtime>HH時mm分</subtitleValidtime>
+      <nodataSubtitle>データなし</nodataSubtitle>
+      <legendHTML>
+        <img src="../nowc/images/legend_jp_liden.svg" width="125" height="45" alt="凡例" />
+      </legendHTML>
+      <legendOrientation>landscape</legendOrientation>
+      <imageType id="liden" type="geojson" observation="true" geojsonExtent="4096" geojsonBuffer="1200">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>401</zIndex>
+        <gridLayerStyle>
+          {
+            symbolStyle: {
+              iconId: function(properties, zoom) {
+                  return 'icon_' + ((properties.type === 4) ? 'CG' : 'CC');
+              },
+              size: function(properties, zoom) {
+                  var size = Math.min(10 + (zoom - 3)*2, 24);
+                  return [size, size];
+              }
+            }
+          }
+        </gridLayerStyle>
+      </imageType>
+    </element>
+    <!-- 線状降水帯(代表楕円表示方式) -->
+    <element id="slmcs" group="slmcs" restrictionElements="hrpns">
+      <name>線状降水帯</name>
+      <subtitle>線状降水帯</subtitle>
+      <subtitleValidtime>HH時mm分</subtitleValidtime>
+      <subtitleBasetime>（HH時mm分の解析に基づく予想）</subtitleBasetime>
+      <nodataSubtitle>データなし</nodataSubtitle>
+      <!-- GeoJSONデータが空ファイルか否かのサブ標題表記【空データではないときの表記,空データの表記】(GeoJSONデータのみ有効)-->
+      <presenceSubtitle>あり,なし</presenceSubtitle>
+      <legendHTML>
+        <img src="../kaikotan/images/legend_jp_slmcs.svg" width="190" height="80" alt="凡例" />
+      </legendHTML>
+      <legendOrientation>landscape</legendOrientation>
+      <tooltip>線状降水帯の楕円</tooltip>
+      <imageType id="slmcs_unify" type="geojson">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>351</zIndex>
+        <gridLayerStyle>
+          {
+            bgStrokeColor: '#ffffff',
+            strokeColor: '#ff0000',
+            strokeWidth: 4
+          }
+        </gridLayerStyle>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+        <dataDelay>10</dataDelay>
+	<maxFt>30</maxFt>
+      </imageType>
+      <imageType id="slmcs_unifyfcst" type="geojson">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>351</zIndex>
+        <gridLayerStyle>
+          {
+            bgStrokeColor: '#ffffff',
+            strokeColor: '#ff0000',
+            strokeWidth: 4
+          }
+        </gridLayerStyle>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+        <dataDelay>10</dataDelay>
+	<maxFt>30</maxFt>
+      </imageType>
+    </element>
+    <!-- 線状降水帯(従来表示) -->
+    <element id="slmcs_all" group="slmcs_all" restrictionElements="slmcs" replaceElement="slmcs">
+      <name>線状降水帯</name>
+      <subtitle eachImageType="true">線状降水帯</subtitle>
+      <subtitleValidtime>HH時mm分</subtitleValidtime>
+      <subtitleBasetime>（HH時mm分の解析に基づく予想）</subtitleBasetime>
+      <nodataSubtitle>データなし</nodataSubtitle>
+      <legendHTML>
+        <img src="../kaikotan/images/legend_jp_slmcs_a.svg" width="190" height="80" alt="凡例" style="display:block;" />
+        <img src="../kaikotan/images/legend_jp_slmcs_f.svg" width="190" height="80" alt="凡例" style="display:block;" />
+      </legendHTML>
+      <legendOrientation>landscape</legendOrientation>
+      <tooltip>線状降水帯の楕円（詳細）</tooltip>
+      <imageType id="slmcs" type="geojson" observation="true">
+        <subtitle>線状降水帯(現在時刻の解析)</subtitle>
+        <nodataSubtitle>データなし</nodataSubtitle>
+        <presenceSubtitle>あり,なし</presenceSubtitle>
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>351</zIndex>
+        <gridLayerStyle>
+          {
+            bgStrokeColor: '#ffffff',
+            strokeColor: '#ff0000',
+            strokeWidth: 4
+          }
+        </gridLayerStyle>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+        <dataDelay>10</dataDelay>
+	<maxFt>30</maxFt>
+      </imageType>
+      <imageType id="slmcs_fcst" type="geojson">
+        <subtitle>線状降水帯(10～30分先の解析)</subtitle>
+        <nodataSubtitle>データなし</nodataSubtitle>
+        <presenceSubtitle>あり,なし</presenceSubtitle>
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>350</zIndex>
+        <gridLayerStyle>
+          {
+            bgStrokeColor: '#ffffff',
+            strokeColor: '#ff0000',
+            strokeWidth: 4,
+            dashArray: function(properties, zoom) {
+                return [2*(zoom - 2), zoom - 2];
+            }
+          }
+        </gridLayerStyle>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+        <dataDelay>10</dataDelay>
+        <!-- データが存在するFTの最大値 -->
+        <maxFt>30</maxFt>
+      </imageType>
+    </element>
+    <!-- 要素ボタン隣の参照リンク 
+         pcCss: PC版cssクラス
+         title: リンク表示文字列
+         url: リンク先URL-->
+    <refLink pcCss="jmatile-inline-block jmatile-link-to-nowc" title="線状降水帯予測マップ" url="../kaikotan/#elements:slmcs&amp;slmcs_fcst&amp;sjfcstmap"  element_id="slmcs"/>
+    <!--
+      解説HTML
+      replaceURL {String} [[replace_text]]使用時に必須
+    -->
+    <explainHTML replaceURL="//www.data.jma.go.jp/gijutsu/hp_taiki_message/explain_nowc.html">
+      <div>
+        <p>
+          本ページの「雨雲の動き（雨・雷・竜巻）」より軽快に動作する、<a href="//www.jma.go.jp/bosai/rain/">軽量版「雨雲の動き（雨・雷・竜巻）」</a>を提供しております。ご自身の環境に応じてご利用ください。
+          なお、気象庁ホームページへのアクセスが集中した場合には、安定的な情報提供のため、「雨雲の動き（雨・雷・竜巻）」は軽量版のみの提供となることがあります。<br />
+        </p>
+      </div>
+      <div class="jmatile-showhide-element" showelements="hrpns">
+        <p>
+          <div>
+            レーダー観測に基づく5分毎の降水強度分布、5分毎の60分先までの降水強度分布の予測を表示します。
+            詳細は<a href="//www.jma.go.jp/jma/kishou/know/kurashi/highres_nowcast.html">高解像度降水ナウキャストについて</a>でご確認いただけます。
+          </div>
+          <table>
+            <tr>
+              <td><div class="jmatile-state-slmcs-on small"></div></td>
+              <td><a href="//www.jma.go.jp/jma/kishou/know/bosai/kishojoho_senjoukousuitai.html#d">気象防災速報（線状降水帯発生）</a>が発表された際に、大雨による災害発生の危険度が急激に高まっている線状降水帯の雨域（現在時刻及び10～30分先の解析）を赤い楕円で表示します。</td>
+            </tr>
+            <tr>
+              <td><div class="jmatile-state-slmcs_all-on small"></div></td>
+	      <td>このボタンを押すと、現在時刻に解析された楕円は実線で、10～30分先に解析された楕円は破線で表示します。（初期設定では、このボタンはオフになっており、現在時刻に一番近い時刻で解析された楕円のみを表示します。）</td>
+            </tr>
+          </table>
+          レーダーの運用休止に伴い該当する地域の降水強度が表示されないか、弱めに表示されることがあります。
+          また、<a href="//www.jma.go.jp/jma/kishou/know/radar/kaisetsu.html#tokusei">レーダー観測の特性</a>により強めに表示されたり、降水のないところに降水が現れることがあります。
+          表示期間内の休止レーダーは<a href="//www.jma.go.jp/bosai/radar_operation/">レーダー運用情報</a>でご確認いただけます。<br />
+          １時間よりも先の降水予報をご覧になりたい場合は、15時間先までは<a href="../kaikotan/#elements:rasrf">今後の雨（降水短時間予報）</a>、明日の２４時までは<a href="../wdist/#elements:r3">天気分布予報（降水量）</a>をご覧ください。
+        </p>
+      </div>
+      <div class="jmatile-showhide-element" showelements="thns">
+        <p>
+          雷ナウキャストについて<br />
+          活動度は、最新の落雷の状況と雨雲の分布によって、以下のように区分しています。
+        </p>
+        <ul>
+          <li>活動度４は、「激しい雷」で、落雷が多数発生していることを意味します。</li>
+          <li>活動度３は、「やや激しい雷」で、落雷があることを意味します。</li>
+          <li>活動度２は、「雷あり」で、電光が見えたり雷鳴が聞こえる。または、現在は、発雷していないが、間もなく落雷する可能性が高くなっていることを意味します。</li>
+          <li>活動度１は、「雷可能性あり」で、1時間以内に落雷の可能性があることを意味します。</li>
+        </ul>
+        <p>
+          活動度２～４が予測された場合は、落雷の危険が高くなっていますので、建物の中など安全な場所へ速やかに避難して下さい。
+          また、避難に時間がかかる場合は、雷注意報や活動度１が予測された段階から早めの対応をとることが必要です。<br />
+          なお、雷注意報や活動度１～４が発表されていない地域でも雷雲が急発達して落雷が発生する場合がありますので、天気の急変には留意して下さい。
+        </p>
+        <p>
+          さらに詳しい説明は<a href="//www.jma.go.jp/jma/kishou/know/toppuu/thunder0-0.html" tabindex="-1">雷について</a>をご確認ください。
+        </p>
+        <p>
+          表示期間内の休止レーダーは<a href="//www.jma.go.jp/bosai/radar_operation/">レーダー運用情報</a>でご確認いただけます。
+        </p>
+      </div>
+      <div class="jmatile-showhide-element" showelements="trns">
+        <p>
+          竜巻ナウキャストについて<br />
+          発生確度２となった地域で、竜巻などの激しい突風が発生する可能性（予測の適中率）は7～14％程度です。
+          発生確度１は、発生確度２で見逃す事例を補うように設定しており、広がりや出現する回数が多くなります。
+          このため、発生確度１以上の地域では、見逃しが少ない反面、予測の適中率は1～7％程度と低くなります。<br />
+          竜巻などの激しい突風は、人の一生のうちほとんど経験しない極めて希な現象です。
+          従って、発生確度１や2程度の可能性でも、普段に比べると竜巻などの激しい突風に遭遇する可能性は格段に高い状況ですので、発達した積乱雲が近づく兆候がある場合は、頑丈な建物内に入るなど安全確保に努めて下さい。<br />
+          なお、発生確度１や２が予測されていない地域でも雲が急発達して竜巻などの激しい突風が発生する場合がありますので、天気の急変には留意して下さい。
+        </p>
+        <p>
+          さらに詳しい説明は<a href="//www.jma.go.jp/jma/kishou/know/toppuu/tornado0-0.html" tabindex="-1">竜巻などの激しい突風について</a>をご確認ください。
+        </p>
+        <p>
+          表示期間内の休止レーダーは<a href="//www.jma.go.jp/bosai/radar_operation/">レーダー運用情報</a>でご確認いただけます。
+        </p>
+      </div>
+      <hr />
+      [[replace_text]]
+      <p>新着情報（2026年5月28日）</p>
+      <ul>
+        <li>線状降水帯の雨域（現在時刻の解析、10～30分先の解析）を囲む楕円の表示を変更しました。初期設定では、現在時刻に一番近い時刻で解析された楕円のみを表示します。（ボタンを押すことにより、従来の表示と同様に、現在時刻の解析の楕円を実線で、10～30分先の解析の楕円を破線で表示します。）</li>
+      </ul>
+      <p>新着情報（2023年5月25日）</p>
+      <ul>
+        <li>線状降水帯の雨域（10～30分先の解析）を囲む楕円の表示を開始しました。</li>
+      </ul>
+      <p>新着情報（2023年2月2日）</p>
+      <ul>
+        <li>コンテンツ初期化処理を効率化しました。</li>
+        <li>コンテンツ上部のメニューを整理しました。</li>
+      </ul>
+      <p>新着情報（2021年12月7日）</p>
+      <ul>
+        <li>
+          <a href="//www.jma.go.jp/bosai/rain/">軽量版「雨雲の動き」</a>の提供を開始しました。
+        </li>
+      </ul>
+      <p>新着情報（2021年6月17日）</p>
+      <ul>
+        <li>線状降水帯の雨域を囲む楕円の表示を開始しました。</li>
+      </ul>
+      <p>新着情報（2021年3月30日）</p>
+      <ul>
+        <li>説明に<a href="//www.jma.go.jp/bosai/radar_operation/">レーダー運用情報</a>へのリンクを追加しました。</li>
+      </ul>
+      <p>新着情報（2021年3月17日）</p>
+      <ul>
+        <li class="jmatile-showhide-device" showdevice="pc">ブラウザ幅に余裕がある場合の地図上部メニューのレイアウトを再度調整し、地図表示部分の高さを大きくしました。</li>
+        <li>ベース地図を「地名あり」と「地名なし」に切り替えられるようにしました。</li>
+      </ul>
+      <p>新着情報（2021年3月11日）</p>
+      <ul>
+        <li>地図を暗くして降水分布などを見やすくしました。</li>
+        <li>動画の速さを５段階調整できるようにしました。</li>
+        <li>位置情報を取得した際に、現在地にマーカーを表示してズームするようにしました。</li>
+        <li class="jmatile-showhide-device" showdevice="pc">幅広の画面で見やすいように、地図上部のメニューを整理しました。色の濃さは、<i class="material-icons" style="font-size:1.2em;vertical-align:sub;">opacity</i>ボタンから変更できます。</li>
+        <li class="jmatile-showhide-device" showdevice="pc">地図の下端をドラッグして高さを変更できることに加えて、右端をドラッグして幅を変更できるようにしました。<i class="material-icons" style="font-size:1.2em;vertical-align:sub;">fit_screen</i>ボタンにより、地図を画面最大に戻すことができます。</li>
+      </ul>
+    </explainHTML>
+  </jp>
+  <!-- 英語コンテンツ -->
+  <en>
+    <mobileMenuTitleIconUrl>../jmatile/images/jmalogo_57x57.png</mobileMenuTitleIconUrl>
+    <notation id="title">Nowcasts (Precipitation, Thunder, Tornadoes)</notation>
+    <notation id="mobile_title">Nowcasts</notation>
+    <notation id="mobile_menu_title">Nowcasts&lt;br /&gt;(Precipitation, Thunder, Tornadoes)</notation>
+    <messageUrl>//www.data.jma.go.jp/gijutsu/hp_taiki_message/message_en_nowc.txt</messageUrl>
+    <notation id="data_status_Slmcs">Localized torrential rain is occurring. Be sure to also check the Risk Maps.</notation>
+    <notation id="data_status_SlmcsSjfcst">Localized torrential rain is occurring. Be sure to also check the Risk Maps.</notation>
+    <notation id="data_status_Sjfcst">Localized torrential rain is expected. Be sure to also check the Risk Maps.</notation>
+    <timeSlider>
+      <tooltip>HH:mm</tooltip>
+      <scaleStep type="relative">60</scaleStep>
+      <relativePastScale mode="relative">-H [h]</relativePastScale>
+      <relativeCurrentScale>HH:mm</relativeCurrentScale>
+      <relativeFutureScale mode="relative">+H [h]</relativeFutureScale>
+    </timeSlider>
+    <mobileTimeSliderScale>HH:mm</mobileTimeSliderScale>
+    <mapsourceHTML>
+      <p>
+        <a href="http://www.gsi.go.jp/ENGLISH/index.html" target="gsi" tabindex="-1">Geospatial Information Authority of Japan</a><br />
+        Created by editing GSI Tiles (Digital Topographic Map)
+      </p>
+      <p style="font-size:90%;">
+        The bathymetric contours are derived from those contained within the GEBCO Digital Atlas, published by the BODC on behalf of IOC and IHO (2003)
+        (<a href="https://www.gebco.net/" target="gebco" tabindex="-1">https://www.gebco.net/</a>)<br />
+        海上保安庁許可第292502号（水路業務法第25条に基づく類似刊行物）
+      </p>
+      <p style="font-size:90%;">
+        Shoreline data is derived from: United States. National Imagery and Mapping Agency. "Vector Map Level 0 (VMAP0)." Bethesda, MD: Denver, CO: The Agency; USGS Information Services, 1997.
+      </p>
+    </mapsourceHTML>
+    <mapImageTypes>
+      <imageType id="gsi_english" name="With place names" type="tile" crossOrigin="true" grayscale="100" brightness="66">
+        <url>/tile/gsi/english/{z}/{x}/{y}.png</url>
+        <attributionHTML>
+          <div style="text-align:left;">
+            <span class="jmatile-attribution-dummylink">
+              Map source: Geospatial Information Authority of Japan<br />
+              Created by editing GSI Tiles (Digital Topographic Map)
+            </span>
+          </div>
+          &amp;copy; Japan Meteorological Agency 2020
+        </attributionHTML>
+        <mobileAttributionHTML>
+          <div class="jmatile-xx-small">
+            <span class="jmatile-attribution-dummylink">Map source: GSI</span><br />
+            &amp;copy; JMA 2020
+          </div>
+        </mobileAttributionHTML>
+        <minZoom>4</minZoom>
+        <maxZoom>10</maxZoom>
+        <zoomAnimation>1</zoomAnimation>
+        <zIndex>1</zIndex>
+      </imageType>
+      <imageType id="gsi_pale2" name="Without place names" type="tile" crossOrigin="true" grayscale="100" brightness="66">
+        <url>/tile/gsi/pale2/{z}/{x}/{y}.png</url>
+        <attributionHTML>
+          <div style="text-align:left;">
+            <span class="jmatile-attribution-dummylink">
+              Map source: Geospatial Information Authority of Japan<br />
+              Created by editing GSI Tiles (Digital Topographic Map)
+            </span>
+          </div>
+          &amp;copy; Japan Meteorological Agency 2020
+        </attributionHTML>
+        <mobileAttributionHTML>
+          <div class="jmatile-xx-small">
+            <span class="jmatile-attribution-dummylink">Map source: GSI</span><br />
+            &amp;copy; JMA 2020
+          </div>
+        </mobileAttributionHTML>
+        <minZoom>4</minZoom>
+        <maxZoom>10</maxZoom>
+        <zoomAnimation>1</zoomAnimation>
+        <zIndex>1</zIndex>
+      </imageType>
+      <imageType id="gsi_pale2_ext" type="tile" crossOrigin="true" grayscale="100" brightness="66">
+        <url>/tile/gsi/pale2/{z}/{x}/{y}.png</url>
+        <minZoom>11</minZoom>
+        <maxZoom>14</maxZoom>
+        <zoomAnimation>1</zoomAnimation>
+        <zIndex>1</zIndex>
+      </imageType>
+      <imageType id="mask" type="tile">
+        <url>../jmatile/data/map/none/none/none/surf/mask/{z}/{x}/{y}.png</url>
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>201</zIndex>
+      </imageType>
+      <imageType id="municipality_name" type="geojson" geojsonExtent="4096" geojsonBuffer="1200">
+        <url>../jmatile/data/map/none/none/none/surf/municipality_name/data.geojson</url>
+        <minZoom>11</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>301</zIndex>
+        <gridLayerStyle>
+          {
+            stringStyle: {
+              fontSize: function(properties, zoom) {
+                 var size = (properties.type === 'ward') ? 12 : 14;
+                 size += 2*(zoom - 12);
+                 return size;
+              },
+              fontWeight: 'bold',
+              color: function(properties, zoom) {
+                  return (properties.type === 'ward') ? '#808080' : '#333333';
+              },
+              bgColor: '#ffffff',
+              viewProp: 'nameEN'
+            }
+          }
+        </gridLayerStyle>
+      </imageType>
+    </mapImageTypes>
+    <mapImageSwitch defaultSelect="gsi_english">
+      <option>gsi_english</option>
+      <option>gsi_pale2</option>
+    </mapImageSwitch>
+    <terrainImageTypes>
+      <imageType id="gsi_hillshademap" type="tile" crossOrigin="true" grayscale="100" brightness="66">
+        <url>/tile/gsi/hillshademap/{z}/{x}/{y}.png</url>
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zoomAnimation>2</zoomAnimation>
+        <zIndex>2</zIndex>
+      </imageType>
+    </terrainImageTypes>
+    <element id="hrpns" group="nowc">
+      <name>Precipitation&lt;br /&gt;(intensity)</name>
+      <title>Precipitation</title>
+      <titleValidtime>HH:mm [JST], D MMMM YYYY</titleValidtime>
+      <mobileTitleValidtime>HH:mm [JST], D MMM</mobileTitleValidtime>
+      <titleBasetime>[Initial time :] HH:mm [JST], D MMMM</titleBasetime>
+      <!-- モバイル端末用初期時刻標題(cdateのフォーマット)
+           予報表示の場合のみ有効 -->
+      <mobileTitleBasetime>[Initial time :] HH:mm [JST], D MMM</mobileTitleBasetime>
+      <tooltip>High-resolution Precipitation Nowcasts</tooltip>
+      <legendHTML>
+        <div class="jmatile-showhide-colorDepth-thin">
+          <img src="../nowc/images/legend_en_thin_hrpns.svg" width="144" height="196" alt="Legend" />
+        </div>
+        <div class="jmatile-showhide-colorDepth-normal">
+          <img src="../nowc/images/legend_en_normal_hrpns.svg" width="144" height="196" alt="Legend" />
+        </div>
+        <div class="jmatile-showhide-colorDepth-deep">
+          <img src="../nowc/images/legend_en_deep_hrpns.svg" width="144" height="196" alt="Legend" />
+        </div>
+      </legendHTML>
+      <legendOrientation>portrait</legendOrientation>
+      <imageType id="hrpns" type="tile" changeColorDepth="true" imagePixlated="true" zoomUse="even">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <maxNativeZoom>10</maxNativeZoom>
+        <zoomAnimation>2</zoomAnimation>
+        <zIndex>101</zIndex>
+      </imageType>
+      <imageType id="hrpns_nd" type="geojson">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>102</zIndex>
+        <gridLayerStyle>
+          {
+            strokeColor: '#e0e0e0',
+            fillColor: function(properties, zoom, context) {
+                return context.createPattern(document.getElementById('texture_ND'), 'repeat');
+            },
+            fillOpacity: 0.75
+          }
+        </gridLayerStyle>
+      </imageType>
+    </element>
+    <element id="thns" group="nowc">
+      <name>Lightning&lt;br /&gt;(activity)</name>
+      <title>Lightning</title>
+      <titleValidtime>HH:mm [JST], D MMMM YYYY</titleValidtime>
+      <mobileTitleValidtime>HH:mm [JST], D MMM</mobileTitleValidtime>
+      <titleBasetime>[Initial time :] HH:mm [JST], D MMMM</titleBasetime>
+      <mobileTitleBasetime>[Initial time :] HH:mm [JST], D MMM</mobileTitleBasetime>
+      <tooltip>Thunder Nowcasts</tooltip>
+      <legendHTML>
+        <div class="jmatile-showhide-colorDepth-thin">
+          <img src="../nowc/images/legend_en_thin_thns.svg" width="64" height="108" alt="Legend" />
+        </div>
+        <div class="jmatile-showhide-colorDepth-normal">
+          <img src="../nowc/images/legend_en_normal_thns.svg" width="64" height="108" alt="Legend" />
+        </div>
+        <div class="jmatile-showhide-colorDepth-deep">
+          <img src="../nowc/images/legend_en_deep_thns.svg" width="64" height="108" alt="Legend" />
+        </div>
+      </legendHTML>
+      <legendOrientation>portrait</legendOrientation>
+      <imageType id="thns" type="tile" changeColorDepth="true" imagePixlated="true" zoomUse="even">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <maxNativeZoom>9</maxNativeZoom>
+        <zoomAnimation>2</zoomAnimation>
+        <zIndex>101</zIndex>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+      </imageType>
+      <imageType id="thns_nd" type="geojson">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>102</zIndex>
+        <gridLayerStyle>
+          {
+            strokeColor: '#e0e0e0',
+            fillColor: function(properties, zoom, context) {
+                return context.createPattern(document.getElementById('texture_ND'), 'repeat');
+            },
+            fillOpacity: 0.75
+          }
+        </gridLayerStyle>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+      </imageType>
+    </element>
+    <element id="trns" group="nowc">
+      <name>Tornadoes&lt;br /&gt;(probability)</name>
+      <title>tornadoes</title>
+      <titleValidtime>HH:mm [JST], D MMMM YYYY</titleValidtime>
+      <mobileTitleValidtime>HH:mm [JST], D MMM</mobileTitleValidtime>
+      <titleBasetime>[Initial time :] HH:mm [JST], D MMMM</titleBasetime>
+      <mobileTitleBasetime>[Initial time :] HH:mm [JST], D MMM</mobileTitleBasetime>
+      <tooltip>Hazardous Wind Potential Nowcasts</tooltip>
+      <legendHTML>
+        <div class="jmatile-showhide-colorDepth-thin">
+          <img src="../nowc/images/legend_en_thin_trns.svg" width="80" height="68" alt="Legend" />
+        </div>
+        <div class="jmatile-showhide-colorDepth-normal">
+          <img src="../nowc/images/legend_en_normal_trns.svg" width="80" height="68" alt="Legend" />
+        </div>
+        <div class="jmatile-showhide-colorDepth-deep">
+          <img src="../nowc/images/legend_en_deep_trns.svg" width="80" height="68" alt="Legend" />
+        </div>
+      </legendHTML>
+      <legendOrientation>portrait</legendOrientation>
+      <imageType id="trns" type="tile" changeColorDepth="true" imagePixlated="true" zoomUse="even">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <maxNativeZoom>9</maxNativeZoom>
+        <zoomAnimation>2</zoomAnimation>
+        <zIndex>101</zIndex>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+      </imageType>
+      <imageType id="trns_nd" type="geojson">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>102</zIndex>
+        <gridLayerStyle>
+          {
+            strokeColor: '#e0e0e0',
+            fillColor: function(properties, zoom, context) {
+                return context.createPattern(document.getElementById('texture_ND'), 'repeat');
+            },
+            fillOpacity: 0.75
+          }
+        </gridLayerStyle>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+      </imageType>
+    </element>
+    <element id="amds_rain10m" group="amds_rain10m">
+      <name>Rain gauges</name>
+      <subtitle>10-min. precipitation</subtitle>
+      <subtitleValidtime>HH:mm</subtitleValidtime>
+      <nodataSubtitle>No Data</nodataSubtitle>
+      <legendHTML>
+        <img src="../nowc/images/legend_en_amds_rain10m.svg" width="140" height="154" alt="Legend" />
+      </legendHTML>
+      <legendOrientation>portrait</legendOrientation>
+      <imageType id="amds_rain10m" type="geojson" observation="true" geojsonExtent="4096" geojsonBuffer="1200">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>402</zIndex>
+        <gridLayerStyle>
+          {
+            stringStyle: {
+              fontWeight: 'bold',
+              fontSize: function(properties, zoom) {
+                  return Math.min(4 + (zoom - 3)*2, 24);
+              },
+              color: function(properties, zoom) {
+                  if(zoom &lt; 8) return undefined;
+                  var rain10m = Number(properties.rain10m);
+                  if(isNaN(rain10m)) return undefined;
+                  if(rain10m >= 15)      return '#ff2800';
+                  else if(rain10m >= 10) return '#ffaa00';
+                  else if(rain10m >= 5)  return '#faf500';
+                  else if(rain10m >= 1)  return '#00aaff';
+                  else                   return '#f2f2ff';
+              },
+              bgColor: function(properties, zoom) {
+                  if(zoom &lt; 8) return undefined;
+                  var rain10m = Number(properties.rain10m);
+                  if(isNaN(rain10m)) return undefined;
+                  if(rain10m >= 15)      return '#c0c0c0';
+                  else                   return '#404040';
+              },
+              viewProp: 'rain10m',
+              convert: function(text) {
+                  return (text === '0.0') ? '0' : text;
+              }
+            },
+            symbolStyle: {
+              iconId: function(properties, zoom) {
+                  if(zoom >= 8) return undefined;
+                  var rain10m = Number(properties.rain10m);
+                  if(isNaN(rain10m) || rain10m &lt;= 0) return undefined;
+                  if(rain10m >= 15)      return 'circle_255_040_000';
+                  else if(rain10m >= 10) return 'circle_255_170_000';
+                  else if(rain10m >= 5)  return 'circle_250_245_000';
+                  else if(rain10m >= 1)  return 'circle_000_170_255';
+                  else                   return 'circle_242_242_255';
+              },
+              size: function(properties, zoom) {
+                  var size = Math.min(10 + (zoom - 3)*2, 24) - 8;
+                  return [size, size];
+              }
+            }
+          }
+        </gridLayerStyle>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+        <dataDelay>10</dataDelay>
+      </imageType>
+    </element>
+    <element id="liden" group="liden">
+      <name>Lightning</name>
+      <subtitle>5-min. lightning detection</subtitle>
+      <subtitleValidtime>HH:mm</subtitleValidtime>
+      <nodataSubtitle>No Data</nodataSubtitle>
+      <legendHTML>
+        <img src="../nowc/images/legend_en_liden.svg" width="192" height="45" alt="Legend" />
+      </legendHTML>
+      <legendOrientation>landscape</legendOrientation>
+      <imageType id="liden" type="geojson" observation="true" geojsonExtent="4096" geojsonBuffer="1200">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>401</zIndex>
+        <gridLayerStyle>
+          {
+            symbolStyle: {
+              iconId: function(properties, zoom) {
+                  return 'icon_' + ((properties.type === 4) ? 'CG' : 'CC');
+              },
+              size: function(properties, zoom) {
+                  var size = Math.min(10 + (zoom - 3)*2, 24);
+                  return [size, size];
+              }
+            }
+          }
+        </gridLayerStyle>
+      </imageType>
+    </element>
+    <element id="slmcs" group="slmcs" restrictionElements="hrpns">
+      <name>Localized Torrential Rain</name>
+      <subtitle>Localized Torrential Rain</subtitle>
+      <subtitleValidtime>HH:mm</subtitleValidtime>
+      <subtitleBasetime>[Initial time :] HH:mm [JST], D MMMM</subtitleBasetime>
+      <mobileSubtitleBasetime>[Initial time :] HH:mm [JST], D MMM</mobileSubtitleBasetime>
+      <presenceSubtitle>Occurring,Not Occurring</presenceSubtitle>
+      <nodataSubtitle>No Data</nodataSubtitle>
+      <legendHTML>
+        <img src="../kaikotan/images/legend_en_slmcs.svg" width="180" height="60" alt="Legend" />
+      </legendHTML>
+      <tooltip>Localized Torrential Rain</tooltip>
+      <legendOrientation>landscape</legendOrientation>
+      <imageType id="slmcs_unify" type="geojson">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>350</zIndex>
+        <gridLayerStyle>
+          {
+            bgStrokeColor: '#ffffff',
+            strokeColor: '#ff0000',
+            strokeWidth: 4
+          }
+        </gridLayerStyle>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+        <dataDelay>10</dataDelay>
+	<maxFt>30</maxFt>
+      </imageType>
+      <imageType id="slmcs_unifyfcst" type="geojson">
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>350</zIndex>
+        <gridLayerStyle>
+          {
+            bgStrokeColor: '#ffffff',
+            strokeColor: '#ff0000',
+            strokeWidth: 4
+          }
+        </gridLayerStyle>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+        <dataDelay>10</dataDelay>
+	<maxFt>30</maxFt>
+      </imageType>
+    </element>
+    <element id="slmcs_all" group="slmcs_all" restrictionElements="slmcs" replaceElement="slmcs">
+      <name>Localized Torrential Rain (10~30min Ahead)</name>
+      <subtitle eachImageType="true">Localized Torrential Rain (10~30min Ahead)</subtitle>
+      <subtitleValidtime>HH:mm</subtitleValidtime>
+      <subtitleBasetime>[Initial time :] HH:mm z, D MMMM</subtitleBasetime>
+      <mobileSubtitleBasetime>[Initial time :] HH:mm [JST], D MMM</mobileSubtitleBasetime>
+      <nodataSubtitle>No Data</nodataSubtitle>
+      <legendHTML>
+        <img src="../kaikotan/images/legend_en_slmcs_a.svg" width="180" height="60" alt="Legend" style="display:block;" />
+        <img src="../kaikotan/images/legend_en_slmcs_f.svg" width="180" height="60" alt="Legend" style="display:block;" />
+      </legendHTML>
+      <tooltip>Localized Torrential Rain (Details)</tooltip>
+      <legendOrientation>landscape</legendOrientation>
+      <imageType id="slmcs" type="geojson" observation="true">
+        <subtitle>Localized Torrential Rain (Current Time)</subtitle>
+        <nodataSubtitle>No Data</nodataSubtitle>
+        <presenceSubtitle>Occurring,Not Occurring</presenceSubtitle>
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>351</zIndex>
+        <gridLayerStyle>
+          {
+            bgStrokeColor: '#ffffff',
+            strokeColor: '#ff0000',
+            strokeWidth: 4
+          }
+        </gridLayerStyle>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+        <dataDelay>10</dataDelay>
+        <maxFt>30</maxFt>
+      </imageType>
+      <imageType id="slmcs_fcst" type="geojson">
+        <subtitle>Localized Torrential Rain (10~30min Ahead)</subtitle>
+        <nodataSubtitle>No Data</nodataSubtitle>
+        <presenceSubtitle>Occurring,Not Occurring</presenceSubtitle>
+        <minZoom>4</minZoom>
+        <maxZoom>14</maxZoom>
+        <zIndex>350</zIndex>
+        <gridLayerStyle>
+          {
+            bgStrokeColor: '#ffffff',
+            strokeColor: '#ff0000',
+            strokeWidth: 4,
+            dashArray: function(properties, zoom) {
+                return [2*(zoom - 2), zoom - 2];
+            }
+          }
+        </gridLayerStyle>
+        <basetimeInterval>10</basetimeInterval>
+        <validtimeInterval>10</validtimeInterval>
+        <dataDelay>10</dataDelay>
+        <maxFt>30</maxFt>
+      </imageType>
+    </element>
+    <explainHTML>
+      <div class="jmatile-showhide-element" showelements="hrpns">
+        <p>
+          Any out-of-operation radars may cause radar echoes in affected areas to be weaker than they should be or not displayed at all.
+        </p>
+        <ul class="jmatile-showhide-device" showdevice="pc">
+          <li><a href="//www.jma.go.jp/jma/en/Activities/highres_nowcast.html" tabindex="-1">Overview</a></li>
+        </ul>
+        <table class="jmatile-showhide-device jmatile-link-table" showdevice="mobile">
+          <tr><td><a href="//www.jma.go.jp/jma/en/Activities/highres_nowcast.html" tabindex="-1">Overview</a></td></tr>
+        </table>
+      </div>
+      <div class="jmatile-showhide-element" showelements="thns">
+        <p>
+          Activity levels are defined as follows:
+        </p>
+        <ul>
+          <li>Activity 4: frequent lightning strikes</li>
+          <li>Activity 3: lightning strikes</li>
+          <li>Activity 2: thunder</li>
+          <li>Activity 1: potential for thunder</li>
+        </ul>
+        <p>
+          When the activity level is 2 &amp;ndash; 4, seek shelter in a safe place such as a large building.
+          If it will take time to evacuate to a safe place, seek shelter as soon as an Activity 1 situation develops.
+          As lightning can occur even if no activity level or thunderstorm advisory is announced, it is important to pay attention to sudden changes in the weather.
+        </p>
+      </div>
+      <div class="jmatile-showhide-element" showelements="trns">
+        <p>
+          The probability of hazardous winds such as tornadoes within any given hour is 7 &amp;ndash; 14% in Level 2 areas and 1 &amp;ndash; 7% in Level 1 areas.
+          Although hazardous winds are rare, they can cause widespread fatalities.
+          Accordingly, even though there is only a low risk of hazardous winds in Level 1 or 2 areas, it is advisable to seek shelter in a sturdy building when thunder or lightning occur or when dark threatening clouds gather.
+          As hazardous winds can occur even in areas where the risk is lower than Level 1, it is important to pay attention to sudden changes in the weather.
+        </p>
+      </div>
+    </explainHTML>
+  </en>
+</properties>

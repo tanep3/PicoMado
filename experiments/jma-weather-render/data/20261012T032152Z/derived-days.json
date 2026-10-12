@@ -1,0 +1,72 @@
+[
+  {
+    "date_jst": "2026-10-12",
+    "weather_code": "111",
+    "weather_source": "短期",
+    "min_c": null,
+    "max_c": "27",
+    "humidity": null,
+    "temp_min_source": null,
+    "temp_max_source": "短期"
+  },
+  {
+    "date_jst": "2026-10-13",
+    "weather_code": "201",
+    "weather_source": "短期",
+    "min_c": "17",
+    "max_c": "25",
+    "humidity": null,
+    "temp_min_source": "短期",
+    "temp_max_source": "短期"
+  },
+  {
+    "date_jst": "2026-10-14",
+    "weather_code": "200",
+    "weather_source": "短期",
+    "min_c": "18",
+    "max_c": "27",
+    "humidity": null,
+    "temp_min_source": "週間",
+    "temp_max_source": "週間"
+  },
+  {
+    "date_jst": "2026-10-15",
+    "weather_code": "201",
+    "weather_source": "週間",
+    "min_c": "18",
+    "max_c": "23",
+    "humidity": null,
+    "temp_min_source": "週間",
+    "temp_max_source": "週間"
+  },
+  {
+    "date_jst": "2026-10-16",
+    "weather_code": "101",
+    "weather_source": "週間",
+    "min_c": "16",
+    "max_c": "24",
+    "humidity": null,
+    "temp_min_source": "週間",
+    "temp_max_source": "週間"
+  },
+  {
+    "date_jst": "2026-10-17",
+    "weather_code": "201",
+    "weather_source": "週間",
+    "min_c": "15",
+    "max_c": "24",
+    "humidity": null,
+    "temp_min_source": "週間",
+    "temp_max_source": "週間"
+  },
+  {
+    "date_jst": "2026-10-18",
+    "weather_code": "201",
+    "weather_source": "週間",
+    "min_c": "16",
+    "max_c": "24",
+    "humidity": null,
+    "temp_min_source": "週間",
+    "temp_max_source": "週間"
+  }
+]

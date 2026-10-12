@@ -1,0 +1,41 @@
+{
+  "generation": "20261012T032152Z",
+  "request": {
+    "url": "https://www.jma.go.jp/bosai/forecast/data/forecast/130000.json",
+    "status": 200,
+    "retrieved_utc": "2026-10-12T03:21:52.867714+00:00",
+    "response_date": "Mon, 12 Oct 2026 03:21:53 GMT",
+    "last_modified": "Mon, 12 Oct 2026 01:42:36 GMT",
+    "bytes": 5981
+  },
+  "issuing_office": "気象庁",
+  "short_issued_jst": "2026-10-12T11:00:00+09:00",
+  "weekly_issued_jst": "2026-10-12T11:00:00+09:00",
+  "forecast_area": {
+    "code": "130010",
+    "name": "東京地方"
+  },
+  "temperature_point": {
+    "code": "44132",
+    "name": "東京"
+  },
+  "mapping": "東京駅 -> 東京地方 (予報) + 東京 (気温代表地点)",
+  "reruns": 3,
+  "days": [
+    "2026-10-12",
+    "2026-10-13",
+    "2026-10-14",
+    "2026-10-15",
+    "2026-10-16",
+    "2026-10-17",
+    "2026-10-18"
+  ],
+  "missing_temperatures": [
+    {
+      "date": "2026-10-12",
+      "field": "min_c"
+    }
+  ],
+  "humidity": "not present in forecast JSON; omitted",
+  "today_jst": "2026-10-12"
+}

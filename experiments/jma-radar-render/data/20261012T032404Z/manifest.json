@@ -1,0 +1,423 @@
+{
+  "generation": "20261012T032404Z",
+  "source": "JMA high-resolution precipitation nowcast (hrpns intensity)",
+  "element": "hrpns",
+  "nodata_element": "hrpns_nd",
+  "zoom": 4,
+  "bbox_wsen": [
+    125.0,
+    24.0,
+    148.0,
+    47.0
+  ],
+  "official_properties_xml": "https://www.jma.go.jp/bosai/nowc/table/nowc.properties__7d6f7d8dc6f16a416574.xml",
+  "official_site_js": "https://www.jma.go.jp/bosai/jmatile/js/jmatile.bundle__6888179e2a40840a12d6.js",
+  "latest_observed": {
+    "basetime": "20261012032000",
+    "validtime": "20261012032000",
+    "elements": [
+      "hrpns",
+      "hrpns_nd"
+    ]
+  },
+  "N1_bounds_utc": [
+    "20261012002000",
+    "20261012032000"
+  ],
+  "N2_bounds_utc": [
+    "20261012032500",
+    "20261012042000"
+  ],
+  "hourly_frames": [
+    {
+      "basetime": "20261012002000",
+      "validtime": "20261012002000",
+      "kind": "観測",
+      "offset_h": -3
+    },
+    {
+      "basetime": "20261012012000",
+      "validtime": "20261012012000",
+      "kind": "観測",
+      "offset_h": -2
+    },
+    {
+      "basetime": "20261012022000",
+      "validtime": "20261012022000",
+      "kind": "観測",
+      "offset_h": -1
+    },
+    {
+      "basetime": "20261012032000",
+      "validtime": "20261012032000",
+      "kind": "観測",
+      "offset_h": 0
+    },
+    {
+      "basetime": "20261012032000",
+      "validtime": "20261012042000",
+      "kind": "予測",
+      "offset_h": 1
+    }
+  ],
+  "requests": [
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:14.457853+00:00",
+      "response_date": "Mon, 12 Oct 2026 03:23:21 GMT",
+      "last_modified": "Mon, 12 Oct 2026 03:20:29 GMT",
+      "content_type": "application/json",
+      "bytes": 3667
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N2.json",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:14.662714+00:00",
+      "response_date": "Mon, 12 Oct 2026 03:24:08 GMT",
+      "last_modified": "Mon, 12 Oct 2026 03:21:27 GMT",
+      "content_type": "application/json",
+      "bytes": 1192
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/nowc/table/nowc.properties__7d6f7d8dc6f16a416574.xml",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:14.882852+00:00",
+      "response_date": "Sun, 11 Oct 2026 16:37:06 GMT",
+      "last_modified": "Tue, 14 Jul 2026 04:00:33 GMT",
+      "content_type": "text/xml",
+      "bytes": 61431
+    },
+    {
+      "url": "https://www.jma.go.jp/tile/gsi/pale2/4/13/5.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:15.135926+00:00",
+      "response_date": "Sun, 11 Oct 2026 19:36:53 GMT",
+      "last_modified": "Wed, 27 Nov 2024 09:56:50 GMT",
+      "content_type": "image/png",
+      "bytes": 1649
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012002000/none/20261012002000/surf/hrpns/4/13/5.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:15.359759+00:00",
+      "response_date": "Mon, 12 Oct 2026 00:20:20 GMT",
+      "last_modified": null,
+      "content_type": "image/png",
+      "bytes": 334
+    },
+    {
+      "url": "https://www.jma.go.jp/tile/gsi/pale2/4/13/6.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:15.579994+00:00",
+      "response_date": "Sun, 11 Oct 2026 19:36:53 GMT",
+      "last_modified": "Wed, 27 Nov 2024 09:56:50 GMT",
+      "content_type": "image/png",
+      "bytes": 9736
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012002000/none/20261012002000/surf/hrpns/4/13/6.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:15.785156+00:00",
+      "response_date": "Mon, 12 Oct 2026 00:20:44 GMT",
+      "last_modified": "Mon, 12 Oct 2026 00:20:18 GMT",
+      "content_type": "image/png",
+      "bytes": 1682
+    },
+    {
+      "url": "https://www.jma.go.jp/tile/gsi/pale2/4/14/5.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:15.988644+00:00",
+      "response_date": "Sun, 11 Oct 2026 23:46:07 GMT",
+      "last_modified": "Wed, 27 Nov 2024 09:56:50 GMT",
+      "content_type": "image/png",
+      "bytes": 6223
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012002000/none/20261012002000/surf/hrpns/4/14/5.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:16.218275+00:00",
+      "response_date": "Mon, 12 Oct 2026 00:20:45 GMT",
+      "last_modified": "Mon, 12 Oct 2026 00:20:18 GMT",
+      "content_type": "image/png",
+      "bytes": 284
+    },
+    {
+      "url": "https://www.jma.go.jp/tile/gsi/pale2/4/14/6.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:16.471055+00:00",
+      "response_date": "Sun, 11 Oct 2026 20:05:47 GMT",
+      "last_modified": "Wed, 27 Nov 2024 09:56:50 GMT",
+      "content_type": "image/png",
+      "bytes": 2492
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012002000/none/20261012002000/surf/hrpns/4/14/6.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:16.668931+00:00",
+      "response_date": "Mon, 12 Oct 2026 00:20:21 GMT",
+      "last_modified": "Mon, 12 Oct 2026 00:20:18 GMT",
+      "content_type": "image/png",
+      "bytes": 539
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012002000/none/20261012002000/surf/hrpns_nd/data.geojson",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:16.971425+00:00",
+      "response_date": "Mon, 12 Oct 2026 00:20:20 GMT",
+      "last_modified": "Mon, 12 Oct 2026 00:20:17 GMT",
+      "content_type": "application/geo+json",
+      "bytes": 994372
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012012000/none/20261012012000/surf/hrpns/4/13/5.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:17.497367+00:00",
+      "response_date": "Mon, 12 Oct 2026 01:20:45 GMT",
+      "last_modified": null,
+      "content_type": "image/png",
+      "bytes": 334
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012012000/none/20261012012000/surf/hrpns/4/13/6.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:17.734826+00:00",
+      "response_date": "Mon, 12 Oct 2026 01:20:45 GMT",
+      "last_modified": "Mon, 12 Oct 2026 01:20:20 GMT",
+      "content_type": "image/png",
+      "bytes": 1487
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012012000/none/20261012012000/surf/hrpns/4/14/5.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:17.932660+00:00",
+      "response_date": "Mon, 12 Oct 2026 01:20:46 GMT",
+      "last_modified": "Mon, 12 Oct 2026 01:20:20 GMT",
+      "content_type": "image/png",
+      "bytes": 350
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012012000/none/20261012012000/surf/hrpns/4/14/6.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:18.138311+00:00",
+      "response_date": "Mon, 12 Oct 2026 01:20:45 GMT",
+      "last_modified": "Mon, 12 Oct 2026 01:20:20 GMT",
+      "content_type": "image/png",
+      "bytes": 561
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012012000/none/20261012012000/surf/hrpns_nd/data.geojson",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:18.540014+00:00",
+      "response_date": "Mon, 12 Oct 2026 01:20:45 GMT",
+      "last_modified": "Mon, 12 Oct 2026 01:20:18 GMT",
+      "content_type": "application/geo+json",
+      "bytes": 994372
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012022000/none/20261012022000/surf/hrpns/4/13/5.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:19.152711+00:00",
+      "response_date": "Mon, 12 Oct 2026 02:20:46 GMT",
+      "last_modified": null,
+      "content_type": "image/png",
+      "bytes": 334
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012022000/none/20261012022000/surf/hrpns/4/13/6.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:19.352381+00:00",
+      "response_date": "Mon, 12 Oct 2026 02:20:46 GMT",
+      "last_modified": "Mon, 12 Oct 2026 02:20:29 GMT",
+      "content_type": "image/png",
+      "bytes": 1379
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012022000/none/20261012022000/surf/hrpns/4/14/5.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:19.555029+00:00",
+      "response_date": "Mon, 12 Oct 2026 02:20:47 GMT",
+      "last_modified": "Mon, 12 Oct 2026 02:20:29 GMT",
+      "content_type": "image/png",
+      "bytes": 322
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012022000/none/20261012022000/surf/hrpns/4/14/6.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:19.772134+00:00",
+      "response_date": "Mon, 12 Oct 2026 02:20:47 GMT",
+      "last_modified": "Mon, 12 Oct 2026 02:20:29 GMT",
+      "content_type": "image/png",
+      "bytes": 630
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012022000/none/20261012022000/surf/hrpns_nd/data.geojson",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:20.092511+00:00",
+      "response_date": "Mon, 12 Oct 2026 02:20:43 GMT",
+      "last_modified": "Mon, 12 Oct 2026 02:20:27 GMT",
+      "content_type": "application/geo+json",
+      "bytes": 994372
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012032000/none/20261012032000/surf/hrpns/4/13/5.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:20.512145+00:00",
+      "response_date": "Mon, 12 Oct 2026 03:20:44 GMT",
+      "last_modified": null,
+      "content_type": "image/png",
+      "bytes": 334
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012032000/none/20261012032000/surf/hrpns/4/13/6.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:20.957378+00:00",
+      "response_date": "Mon, 12 Oct 2026 03:20:45 GMT",
+      "last_modified": "Mon, 12 Oct 2026 03:20:27 GMT",
+      "content_type": "image/png",
+      "bytes": 1312
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012032000/none/20261012032000/surf/hrpns/4/14/5.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:21.177603+00:00",
+      "response_date": "Mon, 12 Oct 2026 03:20:45 GMT",
+      "last_modified": "Mon, 12 Oct 2026 03:20:27 GMT",
+      "content_type": "image/png",
+      "bytes": 283
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012032000/none/20261012032000/surf/hrpns/4/14/6.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:21.396371+00:00",
+      "response_date": "Mon, 12 Oct 2026 03:20:45 GMT",
+      "last_modified": "Mon, 12 Oct 2026 03:20:27 GMT",
+      "content_type": "image/png",
+      "bytes": 699
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012032000/none/20261012032000/surf/hrpns_nd/data.geojson",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:27.152801+00:00",
+      "response_date": "Mon, 12 Oct 2026 03:20:39 GMT",
+      "last_modified": "Mon, 12 Oct 2026 03:20:26 GMT",
+      "content_type": "application/geo+json",
+      "bytes": 994372
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012032000/none/20261012042000/surf/hrpns/4/13/5.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:27.609427+00:00",
+      "response_date": "Mon, 12 Oct 2026 03:22:27 GMT",
+      "last_modified": null,
+      "content_type": "image/png",
+      "bytes": 334
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012032000/none/20261012042000/surf/hrpns/4/13/6.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:27.825689+00:00",
+      "response_date": "Mon, 12 Oct 2026 03:22:29 GMT",
+      "last_modified": "Mon, 12 Oct 2026 03:21:17 GMT",
+      "content_type": "image/png",
+      "bytes": 1287
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012032000/none/20261012042000/surf/hrpns/4/14/5.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:28.056816+00:00",
+      "response_date": "Mon, 12 Oct 2026 03:22:31 GMT",
+      "last_modified": "Mon, 12 Oct 2026 03:21:17 GMT",
+      "content_type": "image/png",
+      "bytes": 233
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012032000/none/20261012042000/surf/hrpns/4/14/6.png",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:28.273204+00:00",
+      "response_date": "Mon, 12 Oct 2026 03:22:32 GMT",
+      "last_modified": "Mon, 12 Oct 2026 03:21:17 GMT",
+      "content_type": "image/png",
+      "bytes": 569
+    },
+    {
+      "url": "https://www.jma.go.jp/bosai/jmatile/data/nowc/20261012032000/none/20261012042000/surf/hrpns_nd/data.geojson",
+      "status": 200,
+      "retrieved_utc": "2026-10-12T03:24:28.491928+00:00",
+      "response_date": "Mon, 12 Oct 2026 03:22:12 GMT",
+      "last_modified": "Mon, 12 Oct 2026 03:21:16 GMT",
+      "content_type": "application/geo+json",
+      "bytes": 251012
+    }
+  ],
+  "reruns": 4,
+  "map_attribution": "国土地理院 地理院タイル 淡色地図 (気象庁サイト配信 /tile/gsi/pale2); JMA precipitation data",
+  "tile_formula": "{dataRootUrl}/{basetime}/none/{validtime}/surf/hrpns/{z}/{x}/{y}.png (JMA jmatile JS)",
+  "frames_checked": [
+    {
+      "frame": {
+        "basetime": "20261012002000",
+        "validtime": "20261012002000",
+        "kind": "観測",
+        "offset_h": -3
+      },
+      "tile_count": 4,
+      "nd_pixels": 43230,
+      "rain_alpha_pixels": 1414,
+      "lcd": "lcd-00-20261012002000.png",
+      "eink": "eink-00-20261012002000.png"
+    },
+    {
+      "frame": {
+        "basetime": "20261012012000",
+        "validtime": "20261012012000",
+        "kind": "観測",
+        "offset_h": -2
+      },
+      "tile_count": 4,
+      "nd_pixels": 43230,
+      "rain_alpha_pixels": 1170,
+      "lcd": "lcd-01-20261012012000.png",
+      "eink": "eink-01-20261012012000.png"
+    },
+    {
+      "frame": {
+        "basetime": "20261012022000",
+        "validtime": "20261012022000",
+        "kind": "観測",
+        "offset_h": -1
+      },
+      "tile_count": 4,
+      "nd_pixels": 43230,
+      "rain_alpha_pixels": 1226,
+      "lcd": "lcd-02-20261012022000.png",
+      "eink": "eink-02-20261012022000.png"
+    },
+    {
+      "frame": {
+        "basetime": "20261012032000",
+        "validtime": "20261012032000",
+        "kind": "観測",
+        "offset_h": 0
+      },
+      "tile_count": 4,
+      "nd_pixels": 43230,
+      "rain_alpha_pixels": 1263,
+      "lcd": "lcd-03-20261012032000.png",
+      "eink": "eink-03-20261012032000.png"
+    },
+    {
+      "frame": {
+        "basetime": "20261012032000",
+        "validtime": "20261012042000",
+        "kind": "予測",
+        "offset_h": 1
+      },
+      "tile_count": 4,
+      "nd_pixels": 43456,
+      "rain_alpha_pixels": 1070,
+      "lcd": "lcd-04-20261012042000.png",
+      "eink": "eink-04-20261012042000.png"
+    }
+  ]
+}
