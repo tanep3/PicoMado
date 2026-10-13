@@ -1,5 +1,7 @@
 # Pico W ⇄ Pi5 tethering/TailSocks reachability experiment
 
+2026-10-13の製品LCD端末では、既存subnet routingを使うTailSocks経由でLAN宛先 `192.168.0.120:16153` のWebSocket・Hello・画像ACKまで成功した。[実機検証記録](results-2026-10-13-picomado-away-lan.md)。以下は2026-10-11の独立したA/B/C実験手順で、Tailnet IPv4宛の値を保持する。LAN到達はTailnet参加だけで保証せず、別環境は実経路を確認する。
+
 This is an isolated network probe for the **new** Pico W. It does not use the LCD, buttons, YouTube player, or E-ink device. The three paths each carry a small test ID and ACK:
 
 | Path | Initiator | Proof |

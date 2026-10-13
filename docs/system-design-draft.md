@@ -1,7 +1,7 @@
 # ピコ窓 システム設計書ドラフト v0.4
 
 - 作成日：2026-10-12 UTC
-- 状態：設計案。初期ポート TCP 16153 と確認済み初期値を反映。サービス起動・稼働設定変更は未実施。
+- 状態：構成・責務の設計案。初期ポート TCP 16153 と確認済み初期値を反映。LCD１台のサービス導入とHOME/AWAY接続実測は2026-10-13までの検証記録を参照。OS・ネットワーク設定変更は本書の指示外。
 - 要件の正本：[全体・受入条件](requirements/README.md)、[共通カーネル](requirements/kernel.md)、[YouTube](requirements/plugins/youtube.md)、[風刺画](requirements/plugins/caricature.md)、[天気](requirements/plugins/weather.md)、[雨雲レーダー](requirements/plugins/rain-radar.md)
 
 本文の「要件」は上記文書で合意済みの事項を指す。「設計案」はその実現方法であり、実測前に数値・ライブラリ・ファーム書込み手順を確定しない。初版の受入実機は LCD・４ボタン１台。複数端末を扱える構造は初版から設計し、E-ink と複数実機の確認は端末が用意された後に行う。既存の本番サービス、既存 E-ink 製品、ネットワーク設定は本書の対象外とする。
@@ -27,7 +27,7 @@ flowchart LR
 
 Pi5 では単一 Rust サービスが Web/API と端末通信を同じポートで受ける。`systemd` は起動・監視に限り、端末のオンライン判定はサービスが行う。カーネルは端末 ID、能力、接続、選択プラグイン、共通入力モード、送信経路を管理する。プラグインは内容、取得・更新、固有設定、エラー描画、共有範囲、宛先を決める。カーネルは「同じプラグインの全端末に同じ内容を送る」と仮定しない。端末側は Wi-Fi 接続、待機、接続中表示、共通メニューの局所的な入力・描画を扱う。[R-03～R-05](requirements/README.md#要件-id-と移動先受入条件の対応)
 
-自宅では Pico から Pi5 の自宅 LAN へ直接 TCP 接続する。外出時は Pico からスマートフォンの TailSocks SOCKS5 へ接続し、Pi5 の Tailnet アドレスへ進む。どちらも **Pico が発起した接続**上でサーバから画面を PUSH し、Pico が ACK を返す。外出接続方式（旧 U-19）は家 direct TCP／外 TailSocks として要件化済み。TailSocks の実験で確認したのは SOCKS5 認証後の TCP と PUSH/ACK までであり、本設計案の HTTP Upgrade、長時間接続、動画帯域は追加検証が必要。スマートフォンのテザリング全体を透過 VPN とみなさない。[接続技術ガイド](home-away-connectivity-technical-guide.md)、[R-05](requirements/README.md#要件-id-と移動先受入条件の対応)
+自宅では Pico から Pi5 の自宅 LAN へ直接 TCP 接続する。外出時は Pico からスマートフォンの TailSocks SOCKS5 へ接続し、同ノードから到達を確認した Pi5 宛先へ進む。2026-10-13の本環境では既存 subnet routing により LAN 宛先 `192.168.0.120:16153` を利用でき、追加 listener は不要だった。Tailnet参加だけでLAN到達を保証せず、別環境では経路受入・アクセス許可・対象待受を確認する。どちらも **Pico が発起した接続**上でサーバから画面を PUSH し、Pico が ACK を返す。外出接続方式（旧 U-19）は家 direct TCP／外 TailSocks として要件化済み。2026-10-11の実験は SOCKS5 認証後の TCP と PUSH/ACKまで、2026-10-13のLCD端末試験はLAN宛先のHTTP Upgrade、Hello、画像受信ACK・描画ACKまで確認した。長時間接続、動画帯域、HOME全操作の安定性は追加検証が必要。スマートフォンのテザリング全体を透過 VPN とみなさない。[接続技術ガイド](home-away-connectivity-technical-guide.md)、[R-05](requirements/README.md#要件-id-と移動先受入条件の対応)
 
 ## 2. 遷移を契約で組み立てる
 
@@ -93,7 +93,7 @@ HTTP API の候補は「端末一覧・設定」「共通順序」「プラグ�
 
 ## 5. 通信・世代・描画 ACK の設計案
 
-**選定した通信方式：** HTTP/1.1 で Web と API を提供し、Pico は同じ番号のポートにある端末用経路を WebSocket Upgrade して双方向接続を維持する。端末は自宅 direct TCP／外出 TailSocks の SOCKS5 CONNECT のいずれかから発起する。同一ポートで Web/API と端末通信を扱え、WebSocket のフレーム境界を利用できるため選ぶ。既存実験が証明したのは SOCKS5 後の TCP と PUSH/ACK までであり、WebSocket の Pico W メモリ使用量・長時間接続・動画帯域は未実証である。製品取り込み前の隔離試験で成立しなければ、同じポート・端末発起・型と長さの検証を満たす多重化方式へ設計を改める。[U-02・U-03・U-08](requirements/README.md#未確定事項と設計時の選択)
+**選定した通信方式：** HTTP/1.1 で Web と API を提供し、Pico は同じ番号のポートにある端末用経路を WebSocket Upgrade して双方向接続を維持する。端末は自宅 direct TCP／外出 TailSocks の SOCKS5 CONNECT のいずれかから発起する。同一ポートで Web/API と端末通信を扱え、WebSocket のフレーム境界を利用できるため選ぶ。2026-10-13のLCD端末１台では、AWAYのSOCKS5からLAN宛先へのWebSocket、Hello、静止画像ACKまで実測した。WebSocketのメモリ使用量の受入閾値・長時間接続・動画帯域は未実証である。[今回の接続検証](../experiments/tether-tailnet/results-2026-10-13-picomado-away-lan.md)。製品取り込み前の隔離試験で成立しなければ、同じポート・端末発起・型と長さの検証を満たす多重化方式へ設計を改める。[U-02・U-03・U-08](requirements/README.md#未確定事項と設計時の選択)
 
 端末ストリーム上では制御と画像を型付きメッセージで区別する。候補となる共通フィールドは `protocol_version`、`kind`、`message_id`、`session_epoch`、`display_epoch`、`payload_length`。`Hello` に `device_id` と能力・ファーム版を含め、成立後はサーバが割り当てたセッション ID に接続を束縛する。`Input`、`RenderRequest`、`FrameChunk`、`ReceiptAck`、`RenderedAck`、`Heartbeat`、`Error` を概念上のメッセージ種別とする。名前・バイト順・最大長・圧縮・実フレーム形式は性能測定で固定する。WebSocket の境界に加えてアプリケーション envelope の長さ・種別を検証し、分割受信、異常長、破損、タイムアウト時は接続を安全に終える。[AC-14](requirements/README.md#ac-14)
 

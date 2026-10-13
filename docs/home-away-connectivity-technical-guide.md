@@ -1,25 +1,27 @@
 # 自宅・外出先接続 技術検証ガイド
 
-更新: 2026-10-12 UTC。対象は新しい Pico W と Pi5 の通信経路。仕様の決定事項は [要件定義書](requirements/README.md) に置き、この文書は接続方式、実測、再現上の注意を記録する。
+更新: 2026-10-13 UTC。対象は新しい Pico W と Pi5 の通信経路。仕様の決定事項は [要件定義書](requirements/README.md) に置き、この文書は接続方式、実測、再現上の注意を記録する。
 
 ## 結論と適用範囲
 
-外出先では、Pico W がスマートフォンのテザリングへ接続し、スマートフォン上の TailSocks SOCKS5 プロキシへ **自分から** TCP 接続する方式で、Pi5 への HTTP POST と Pi5 からの PUSH/ACK を実測できた。Pi5 から Pico への新規接続は必要ない。自宅 Wi-Fi では Pi5 の自宅 LAN アドレスへの直接接続を採用する方針だが、今回の TailSocks 成功試験がその経路を検証したわけではない。動画の帯域、長時間維持、切断復帰、複数端末は未検証。
+2026-10-11 は、Pico W → スマートフォンの TailSocks SOCKS5 → Pi5 の Tailnet IPv4 で HTTP POST と持続 TCP の PUSH/ACK を実測した。2026-10-13 は、LCD端末 `PicoMado-lcd1` の AWAY プロファイルから、同じ SOCKS5 経路で **Pi5 の LAN 宛先 `192.168.0.120:16153`** へ接続できた。端末側の METHOD/AUTH/CONNECT 成功・ACTIVE/READY と、サーバ側の WebSocket Hello・画像受信ACK・描画ACKを時刻で照合した。本環境の既存 subnet routing を利用して LAN 宛先へ到達できたため、追加の Tailnet listener は不要だった。[今回の検証記録](../experiments/tether-tailnet/results-2026-10-13-picomado-away-lan.md)
+
+自宅 direct TCP もLCD１台でHelloと画像ACKまで確認済み。HOMEの全操作中の再接続問題が解消したとは断定しない。動画帯域、長時間維持、回線切替・省電力後の復帰、複数実機は受入未完了。
 
 この方式で tailnet のノードになるのは **スマートフォンの TailSocks** と Pi5 であり、Pico W 自体ではない。Pico がテザリングで得る IPv4 と、Pi5 の Tailscale IPv4 は異なるネットワークのアドレスである。[TailSocks 公式 README](https://github.com/bropines/tailsocks) は、SOCKS5 プロキシと LAN 上の機器への公開を機能として説明している。
 
 ## 経路とアドレス
 
-### 自宅: 直接接続の採用方針（未実測）
+### 自宅: 直接接続（LCD１台で実測）
 
 ```text
 Pico W ──自宅 Wi-Fi──> Pi5 の自宅 LAN IPv4:アプリのポート
           Pico 起点の持続 TCP 上で Pi5 が PUSH、Pico が応答
 ```
 
-今回の既知の Pi5 自宅 LAN IPv4 は `192.168.0.120`。固定の製品設定とみなさず、運用時の値を確認する。自宅からの A/C 成功試験はこの資料の対象実績にはない。既存の YouTube プレーヤーもこの新方式へ移行していない。
+今回の既知の Pi5 自宅 LAN IPv4 は `192.168.0.120`。運用時の値を確認する。2026-10-12〜13のLCD端末試験では `192.168.0.120:16153` の WebSocket、Hello、画像ACKを確認した。2026-10-11の A/C 実験とは別の実績であり、HOMEの全ボタン操作・長期安定性の受入は継続する。[実機記録](../firmware/verification-2026-10-12.md)
 
-### 外出先: 成功した SOCKS5 中継経路
+### 外出先: 2026-10-11に成功した Tailnet IPv4 宛の経路
 
 ```text
 Pico W 10.101.65.11 (テザリング DHCP)
@@ -30,7 +32,22 @@ Pico W 10.101.65.11 (テザリング DHCP)
 
 上記は 2026-10-11 の試験値であり、DHCP アドレスやプロキシの待受値は毎回確認する。`10.101.65.232` はこの時のスマホのテザリング側アドレス、`100.64.0.18` はユーザー申告の TailSocks ノードアドレス、`100.64.0.9` は Pi5 の Tailscale IPv4。Pi5 は A/C の接続元を `100.64.0.18` と観測した。SOCKS5 は Pico が指定した **TCP 接続**をスマホが中継するもので、テザリング子機の全通信を自動で tailnet に通す設定ではない。今回の実装は宛先を IPv4 リテラルで指定し、DNS を使っていない。
 
+### 外出先: 2026-10-13に成功した LAN IPv4 宛の経路
+
+```text
+PicoMado-lcd1 (AWAY / テザリング)
+    └─SOCKS5認証・CONNECT─> スマホのTailSocks独立ノード
+        └─既存subnet routing─> Pi5 192.168.0.120:16153 /device
+            WebSocket Hello → 画像片 → 受信ACK / 描画ACK
+```
+
+サーバの待受は既存の `192.168.0.120:16153` だけで成功した。この試験で route の広告・承認・受入、ACL、OS、ルータ、スマホのネットワーク設定を変更していない。**Tailnetに参加するだけで全LANへ到達できるという意味ではない。** LAN宛先を使うには、対象subnetの経路が既存環境で広告・承認され、TailSocks側で利用でき、アクセスが許可されている必要がある。別環境では同じTailSocksから対象IP/portへの実通信で確認する。
+
+通常のスマホTailscaleアプリとTailSocksは独立したノード・設定として扱う。通常アプリでのLAN到達やPi自身のroute出力だけでは、TailSocksの経路受入を証明できない。今回の証拠はAWAYの端末CDCと同時刻のサーバセッション・画像ACKである。サーバは接続元 `192.168.0.160` を観測したが、これだけでsubnet routerの全構成や経由ホップを断定しない。
+
 ## 試験の証拠
+
+2026-10-13のWebSocket・画像ACK・ACK競合修正の実機証拠は[今回の検証記録](../experiments/tether-tailnet/results-2026-10-13-picomado-away-lan.md)に記載する。以下のA/B/C表は2026-10-11の実験結果である。
 
 すべて小さな `trial-001` 付きデータで検証した。詳しいログは [TailSocks 成功記録](../experiments/tether-tailnet/results-2026-10-11-tailsocks.md) と [実験手順](../experiments/tether-tailnet/README.md) にある。
 
@@ -64,8 +81,8 @@ TailSocks に既に接続したスマホ上の通常 Tailscale アプリだけ�
 
 ## 製品への取り込み方針と未決事項
 
-- Wi-Fi の接続先と Pi5 への経路を一組のプロファイルとして扱う案。自宅プロファイルは自宅 SSID と Pi5 LAN への直接 TCP、外出プロファイルはスマホのテザリング SSID、TailSocks のテザリング側 SOCKS5、Pi5 Tailscale IPv4 を持つ。各プロファイルのアドレスは現地値に依存する。
+- Wi-Fi の接続先と Pi5 への経路を一組のプロファイルとして扱う案。自宅プロファイルは自宅 SSID と Pi5 LAN への直接 TCP、外出プロファイルはスマホのテザリング SSID、TailSocks のテザリング側 SOCKS5、同ノードから到達を確認した Pi5 宛先を持つ。本環境では既存 subnet routing で Pi5 LAN IPv4 を利用できた。Tailnet IPv4を使う別構成では、その宛先のサービス待受も確認する。各プロファイルのアドレスは現地値に依存する。
 - アプリ層では Pi5 と Pico の間に一つの双方向セッションを設け、接続時の `device_id`、メッセージ ID、ACK、再送・再接続を共通に扱う案。SOCKS5 認証情報だけでデバイス識別やアプリ認証を済ませたことにはしない。
-- 家／外出先プロファイルの手動選択、選択中プロファイルでの再試行、サーバ不達時の表示と本体設定操作は[要件定義書](requirements/README.md)で決定済み。試行間隔・設定保存方式などは U-18、セッション復帰の実装詳細は U-02。自宅経路の実測、外出経路の長時間維持、スマホの省電力・再起動後の復帰、映像配信の帯域・遅延は追加検証が必要。
+- 家／外出先プロファイルの手動選択、選択中プロファイルでの再試行、サーバ不達時の表示と本体設定操作は[要件定義書](requirements/README.md)で決定済み。試行間隔・設定保存方式などは U-18、セッション復帰の実装詳細は U-02。HOME操作の通信安定性、外出経路の長時間維持、スマホの省電力・再起動後の復帰、映像配信の帯域・遅延は追加検証が必要。
 
 このガイドと実験プログラムは既存の YouTube プレーヤーおよび E-ink 端末を変更しない。Pi5 の一時受信プロセスは試験後に終了し、常駐設定やルート・VPN・ACL 変更は行っていない。

@@ -924,6 +924,25 @@ impl App {
             })
     }
 
+    /// Past/current-generation ACKs may be delayed or repeated. Values beyond
+    /// any allocated frame/display/owner generation are protocol violations.
+    pub fn frame_ack_within_known_generations(&self, token: &FrameToken) -> bool {
+        token.frame_id > 0
+            && token.frame_id < self.runtime.world.next_frame_id
+            && self
+                .runtime
+                .world
+                .devices
+                .get(&token.device_id)
+                .is_some_and(|device| {
+                    token.incarnation == device.incarnation
+                        && token.session_epoch == device.session_epoch
+                        && token.display_epoch > 0
+                        && token.display_epoch <= device.display_epoch
+                        && token.screen_owner_epoch <= device.screen_owner_epoch
+                })
+    }
+
     pub fn hello(
         &mut self,
         id: &str,
@@ -1159,12 +1178,16 @@ impl App {
         ) {
             return Err(AppError::Invalid("unsupported terminal event"));
         }
-        let changed = self.change(|engine, state| {
-            let decision = engine
-                .handle(&state.world, &event)
-                .map_err(|_| AppError::Conflict("terminal event rejected"))?;
-            state.accept(decision)
-        })?;
+        let decision = self
+            .engine
+            .handle(&self.runtime.world, &event)
+            .map_err(|_| AppError::Conflict("terminal event rejected"))?;
+        // A delayed/duplicate ACK is a Rule no-op, so it must not create a
+        // SQLite write on every retry. State-changing events still commit.
+        if decision.applied.is_none() {
+            return Ok(false);
+        }
+        let changed = self.change(|_, state| state.accept(decision))?;
         if changed {
             match &event {
                 Event::ReceiptAck { token } => eprintln!(
@@ -1400,6 +1423,49 @@ pub struct AppView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ignored_frame_acks_do_not_write_sqlite() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = App::open(&temp.path().join("state.db")).unwrap();
+        let session = app.hello("desk", caps(), 1).unwrap();
+        let frame = app
+            .queue_lcd_frame(
+                &session,
+                "youtube",
+                vec![0; crate::protocol::LCD_FRAME_BYTES],
+            )
+            .unwrap();
+        assert!(app
+            .terminal_event(Event::RenderedAck {
+                token: frame.clone()
+            })
+            .unwrap());
+        let changes = |app: &App| {
+            app.connection
+                .query_row("SELECT total_changes()", [], |row| row.get::<_, u64>(0))
+                .unwrap()
+        };
+        let before = changes(&app);
+        for _ in 0..100 {
+            assert!(!app
+                .terminal_event(Event::RenderedAck {
+                    token: frame.clone()
+                })
+                .unwrap());
+        }
+        assert_eq!(changes(&app), before);
+        app.button(&session, ButtonAction::Next).unwrap();
+        let before = changes(&app);
+        assert!(!app
+            .terminal_event(Event::ReceiptAck { token: frame })
+            .unwrap());
+        assert_eq!(changes(&app), before);
+        assert_eq!(
+            app.view().devices[0].selected.as_deref(),
+            Some("caricature")
+        );
+    }
 
     struct SwitchDayClock(std::sync::atomic::AtomicU8);
 

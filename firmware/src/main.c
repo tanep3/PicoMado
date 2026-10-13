@@ -4,6 +4,7 @@
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
 #include "pico/unique_id.h"
+#include "pico/stdio_usb.h"
 #include "hardware/flash.h"
 #include "hardware/sync.h"
 #include "hardware/regs/addressmap.h"
@@ -60,6 +61,30 @@ static const char *link_name(int link){
     }
 }
 static int logged_wifi_link=99,logged_tcpip_link=99;
+static const char *app_name(void){
+    switch(state){case WIFI:return "WIFI";case SERVER:return "SERVER";
+    case SESSION:return "SESSION";case ACTIVE:return "ACTIVE";case MENU:return "MENU";
+    case STANDBY:return "STANDBY";case RETRY:return "RETRY";default:return "UNKNOWN";}
+}
+static const char *transport_name(void){
+    switch(pm_net_state()){case PM_NET_DOWN:return "DOWN";case PM_NET_TCP:return "TCP";
+    case PM_NET_SOCKS:return "SOCKS";case PM_NET_WS:return "WS";case PM_NET_READY:return "READY";
+    case PM_NET_FAILED:return "FAILED";default:return "UNKNOWN";}
+}
+static void log_usb_snapshot(void){
+    static bool was_connected;
+    static uint32_t last_ms;
+    bool connected=stdio_usb_connected();
+    if(!connected){was_connected=false;return;}
+    uint32_t now=now_ms();
+    if(was_connected && now-last_ms<15000)return;
+    was_connected=true;last_ms=now;
+    int wifi=wifi_enabled?cyw43_wifi_link_status(&cyw43_state,CYW43_ITF_STA):CYW43_LINK_DOWN;
+    int tcpip=wifi_enabled?cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA):CYW43_LINK_DOWN;
+    printf("net status profile=%s app=%s transport=%s wifi=%s tcpip=%s ip_assigned=%u\n",
+        profile_name(),app_name(),transport_name(),link_name(wifi),link_name(tcpip),
+        tcpip==CYW43_LINK_UP?1u:0u);
+}
 static void log_wifi_progress(void){
     int wifi=cyw43_wifi_link_status(&cyw43_state,CYW43_ITF_STA);
     int tcpip=cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA);
@@ -145,12 +170,20 @@ static void start_wifi(void){
     }
     state=WIFI;started_ms=now_ms();
 }
+static void start_server(void){
+    incarnation=0;session_epoch=0;display_epoch=0;
+    await_selection=false;sub_mode=false;pending_standby=false;pending_sub_cancel=false;
+    local("SERVER","CONNECTING");pm_net_begin(&profiles[active_profile]);
+    state=SERVER;started_ms=now_ms();
+}
 static void retry(void){
     bool wifi_was_up=wifi_enabled &&
         cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)==CYW43_LINK_UP;
     log_wifi_progress();
-    printf("net profile=%s retry delay_ms=%lu\n",profile_name(),(unsigned long)retry_ms);
-    wifi_off();
+    printf("net profile=%s retry app=%s transport=%s delay_ms=%lu\n",
+        profile_name(),app_name(),transport_name(),(unsigned long)retry_ms);
+    // A failed server/proxy session does not invalidate a healthy Wi-Fi/IP link.
+    if(wifi_was_up)pm_net_close();else wifi_off();
     local(wifi_was_up?"SERVER":"WIFI",wifi_was_up?"CONNECTING":"RETRY");
     state=RETRY;started_ms=now_ms();
 }
@@ -294,7 +327,17 @@ static void process(uint8_t kind,const char *j){
         sub_mode=!pending_sub_cancel;pending_sub_cancel=false;
         await_selection=false;pm_reset(&assembly);return;
     }
-    if(kind==11){retry();return;}
+    if(kind==11){
+        // Only fixed protocol error names are printable; never echo received JSON.
+        static const char *const codes[]={"stale_frame","invalid_ack","invalid_ack_token","invalid_input",
+            "invalid_frame","invalid_hello","stale_session","stale_settings",
+            "unavailable","hello_required","duplicate_hello","unexpected_message"};
+        const char *code="unknown";
+        for(size_t i=0;i<sizeof codes/sizeof codes[0];i++)
+            if(string_equals(j,"code",codes[i])){code=codes[i];break;}
+        printf("net profile=%s server_error=%s\n",profile_name(),code);
+        retry();return;
+    }
     if(kind!=12 && kind!=13)return;
     pm_token t;if(!token_from(j,&t))return;
     if(await_selection || t.incarnation!=incarnation || t.session_epoch!=session_epoch ||
@@ -428,6 +471,7 @@ int main(void){
     while(true){
         uint32_t now=now_ms();
         for(unsigned i=0;i<PM_BUTTON_COUNT;i++)if(pm_button_step(&buttons[i],!gpio_get(button_pins[i]),now))button(i);
+        log_usb_snapshot();
         if(state==STANDBY){sleep_ms(5);continue;}
         cyw43_arch_poll();
         // Button handling may save settings/draw and start a newer attempt.
@@ -441,8 +485,7 @@ int main(void){
                 puts("diag stage=wifi_up_pattern duration_ms=6000");
                 diagnostic_hold(6000,true);
 #endif
-                local("SERVER","CONNECTING");pm_net_begin(&profiles[active_profile]);
-                state=SERVER;started_ms=now_ms();
+                start_server();
             }else if(now-started_ms>settings.wifi_s*1000u)retry();
         }else if(state==SERVER||state==SESSION||state==ACTIVE){
             if(cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)!=CYW43_LINK_UP){
@@ -467,9 +510,14 @@ int main(void){
             if(state==ACTIVE && now-last_heartbeat_ms>=settings.heartbeat_s*1000u){
                 heartbeat();last_heartbeat_ms=now;
             }
-        }else if(state==RETRY && now-started_ms>=retry_ms){
-            retry_ms*=2;if(retry_ms>settings.retry_max_s*1000u)retry_ms=settings.retry_max_s*1000u;
-            start_wifi();
+        }else if(state==RETRY){
+            if(wifi_enabled && cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)!=CYW43_LINK_UP){
+                wifi_off();local("WIFI","RETRY");
+            }
+            if(now-started_ms>=retry_ms){
+                retry_ms*=2;if(retry_ms>settings.retry_max_s*1000u)retry_ms=settings.retry_max_s*1000u;
+                if(wifi_enabled)start_server();else start_wifi();
+            }
         }
         sleep_ms(5);
     }

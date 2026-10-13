@@ -1,6 +1,7 @@
 #include "net.h"
 #include "ws_accept.h"
 #include "rx_flow.h"
+#include "socks5_wire.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +21,7 @@ _Static_assert(RX_CAP > TCP_WND, "receive buffer must exceed TCP window");
 static struct tcp_pcb *pcb;
 static const pm_profile *profile;
 static pm_net_stage stage;
+static enum { SOCKS_METHOD,SOCKS_AUTH,SOCKS_CONNECT } socks_step;
 static uint8_t rx[RX_CAP];
 static pm_rx_flow rx_flow;
 #define rx_used rx_flow.used
@@ -42,15 +44,23 @@ static void consume(size_t n) {
     if(pcb && credit)tcp_recved(pcb,(u16_t)credit);
 }
 static bool send_raw(const void *p, size_t n) {
-    if (!pcb || n>tcp_sndbuf(pcb) || tcp_write(pcb,p,n,TCP_WRITE_FLAG_COPY)!=ERR_OK) {
+    if(!pcb){puts("net send_failed=no_socket");stage=PM_NET_FAILED;return false;}
+    if(n>tcp_sndbuf(pcb)){
+        puts("net send_failed=send_buffer_full");stage=PM_NET_FAILED;return false;
+    }
+    err_t result=tcp_write(pcb,p,n,TCP_WRITE_FLAG_COPY);
+    if(result!=ERR_OK){
+        printf("net tcp_write_failed sdk_result=%d\n",(int)result);
         stage=PM_NET_FAILED; return false;
     }
     tcp_output(pcb); return true;
 }
-static void error_cb(void *arg, err_t e) { (void)arg; (void)e; pcb=NULL; socket_dead=true; }
+static void error_cb(void *arg, err_t e) {
+    (void)arg;printf("net tcp_error sdk_result=%d\n",(int)e);pcb=NULL;socket_dead=true;
+}
 static err_t recv_cb(void *arg, struct tcp_pcb *p, struct pbuf *buf, err_t e) {
     (void)arg;(void)p;
-    if (!buf) { socket_dead=true; return ERR_OK; }
+    if (!buf) { puts("net tcp_peer_closed");socket_dead=true;return ERR_OK; }
     if (e!=ERR_OK || buf->tot_len>RX_CAP-rx_used) {
         pbuf_free(buf); socket_dead=true; return ERR_OK;
     }
@@ -92,9 +102,10 @@ static bool upgrade(void) {
 }
 static err_t connected_cb(void *arg, struct tcp_pcb *p, err_t e) {
     (void)arg;(void)p;
-    if(e!=ERR_OK){socket_dead=true;return e;}
+    if(e!=ERR_OK){printf("net tcp_connect_failed sdk_result=%d\n",(int)e);socket_dead=true;return e;}
     if(!profile->socks) { if(!upgrade())socket_dead=true; return ERR_OK; }
     const uint8_t greeting[]={5,1,2};
+    socks_step=SOCKS_METHOD;
     stage=PM_NET_SOCKS;
     if(!send_raw(greeting,sizeof greeting))socket_dead=true;
     return ERR_OK;
@@ -108,7 +119,8 @@ void pm_net_close(void) {
         tcp_arg(old,NULL); tcp_recv(old,NULL); tcp_err(old,NULL);
         if(tcp_close(old)!=ERR_OK)tcp_abort(old);
     }
-    stage=PM_NET_DOWN; pm_rx_flow_reset(&rx_flow); app_used=0; ws_continuation=false; socket_dead=false;
+    stage=PM_NET_DOWN;socks_step=SOCKS_METHOD;
+    pm_rx_flow_reset(&rx_flow); app_used=0; ws_continuation=false; socket_dead=false;
 }
 void pm_net_begin(const pm_profile *p) {
     pm_net_close(); profile=p;
@@ -130,39 +142,40 @@ void pm_net_begin(const pm_profile *p) {
 }
 
 static void process_socks(void) {
-    if(rx_used<2)return;
-    if(rx[0]!=5){stage=PM_NET_FAILED;return;}
-    if(rx[1]==2) {
+    if(socks_step==SOCKS_METHOD){
+        int result=socks5_method_result(rx,rx_used);
+        if(result==SOCKS5_INCOMPLETE)return;
+        printf("net socks_method result=%d\n",result);
+        if(result!=SOCKS5_OK){stage=PM_NET_FAILED;return;}
         consume(2);
-        size_t u=strlen(profile->proxy_user),p=strlen(profile->proxy_password);
         size_t n=0;
-        socks_auth_request[n++]=1;socks_auth_request[n++]=(uint8_t)u;
-        memcpy(socks_auth_request+n,profile->proxy_user,u);n+=u;
-        socks_auth_request[n++]=(uint8_t)p;
-        memcpy(socks_auth_request+n,profile->proxy_password,p);n+=p;
-        // State is encoded by the response version: method=5, auth=1.
+        if(!socks5_make_auth(profile->proxy_user,profile->proxy_password,
+            socks_auth_request,sizeof socks_auth_request,&n)){stage=PM_NET_FAILED;return;}
+        socks_step=SOCKS_AUTH;
         bool sent=send_raw(socks_auth_request,n);
         memset(socks_auth_request,0,n); // tcp_write used COPY; clear credential copy.
         if(!sent)stage=PM_NET_FAILED;
         return;
     }
-    if(rx[0]==1 && rx[1]==0) {
+    if(socks_step==SOCKS_AUTH){
+        int result=socks5_auth_result(rx,rx_used);
+        if(result==SOCKS5_INCOMPLETE)return;
+        printf("net socks_auth result=%d\n",result);
+        if(result!=SOCKS5_OK){stage=PM_NET_FAILED;return;}
         consume(2);
-        uint8_t req[10]={5,1,0,1};
+        uint8_t req[10];
         const ip4_addr_t *v=ip_2_ip4(&server_addr);
-        memcpy(req+4,&v->addr,4); req[8]=16153>>8;req[9]=16153&255;
+        socks5_make_connect_ipv4((const uint8_t *)&v->addr,16153,req);
+        socks_step=SOCKS_CONNECT;
         if(!send_raw(req,sizeof req))stage=PM_NET_FAILED;
         return;
     }
-    if(rx[1]==0 && rx_used>=4 && rx[0]==5 && rx[2]==0) {
-        size_t n=0;
-        if(rx[3]==1)n=10;else if(rx[3]==4)n=22;
-        else if(rx[3]==3 && rx_used>=5)n=7+rx[4];
-        if(!n || rx_used<n)return;
-        consume(n);if(!upgrade())stage=PM_NET_FAILED;
-        return;
-    }
-    stage=PM_NET_FAILED;
+    size_t n=0;
+    int result=socks5_connect_result(rx,rx_used,&n);
+    if(result==SOCKS5_INCOMPLETE)return;
+    printf("net socks_connect result=%d\n",result);
+    if(result!=SOCKS5_OK){stage=PM_NET_FAILED;return;}
+    consume(n);if(!upgrade())stage=PM_NET_FAILED;
 }
 void pm_net_poll(void) {
     cyw43_arch_poll();

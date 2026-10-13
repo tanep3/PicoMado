@@ -4,7 +4,7 @@
 
 通常 `picomado_lcd` は `PM_NORMAL_BUILD=1` で診断画像/段階待ち/バッファ回収を無効にします。個体configを編集せず、制御速度を `PM_LCD_SPI_BAUD` と同じ20MHz要求へ結線し、窓指定から全25,600B画素完了までCSを保持します。同速度の描画中再設定はしません。既存125MHz周辺クロックでは実速度は15.625MHzになる見込みで、起動USBの `lcd ready` がSDK読戻し値を記録します。40MHz要求は今回採用しません。通常USBログは診断画像ではありません。
 
-2026-10-13、ユーザーははんだ不良修理後、診断の最高速度で表示の乱れがないことを確認しました。診断UPの最高値は20MHz要求です。通常版はこの同速度/CS保持条件を引き継ぎ、プラグイン画像の実表示とサーバ側で拡大した日本語文字の読みやすさもユーザー確認済みです。HOME操作中のWebSocket不安定とAWAY未接続は未解決で、通信安定性の受入完了とは扱いません。[現時点の検証・残件](verification-2026-10-12.md)を参照してください。home/away秘密設定、GPIO、offset24、180度、色補正、ガンマを維持します。
+2026-10-13、ユーザーははんだ不良修理後、診断の最高速度で表示の乱れがないことを確認しました。診断UPの最高値は20MHz要求です。通常版はこの同速度/CS保持条件を引き継ぎ、プラグイン画像の実表示とサーバ側で拡大した日本語文字の読みやすさもユーザー確認済みです。2026-10-13の後続試験では、AWAYからTailSocksと既存subnet routing経由で `192.168.0.120:16153` に接続し、Hello・画像受信／描画ACKまで確認しました。追加listenerは不要でした。HOME全操作の再接続・長期安定性の受入は継続し、ACK修正の実機証拠と区別します。[今回の接続記録](../experiments/tether-tailnet/results-2026-10-13-picomado-away-lan.md)。[現時点の検証・残件](verification-2026-10-12.md)を参照してください。今回変更した個体設定はAWAYのサーバ宛先だけです。Wi-Fi/SOCKS資格情報、GPIO、offset24、180度、色補正、ガンマは維持しました。
 
 ## 配線
 
@@ -46,5 +46,7 @@ Pico 起点で direct TCP または TailSocks SOCKS5 CONNECT を行い、TCP 161
 - 個体configの診断フラグにかかわらず、通常ビルドでは診断BOOT/STAGEを0として扱います。診断/回収用ファームは別ターゲットです。色補正、Yオフセット24、180度回転は保持します。過去の受信/描画ACKと、修理後の診断目視合格は検証記録にあり、通常版の転送後の表示/通信確認はまだ必要です。
 
 ## 書込みと復旧
+
+USBログはGPIO UARTではなくUSB CDC（個体serialで識別したttyACM）へ出します。サーバ/プロキシの失敗時は正常Wi-Fi/IPを保持し、再試行中にリンクを失った場合はWi-Fi再接続へ戻ります。CDCを後から開いた直後と15秒毎にprofile/app/transport/Wi-Fi/TCPIP/IP取得有無を出し、SSID/password/tokenや受信JSONは出しません。SOCKSはMETHOD(version5)→AUTH(version1)→CONNECT(version5)を別々に検証します。実main/netのhost回帰試験は `tests/app_timing_test.c` と `tests/net_socks_test.c` です。2026-10-13にこの修正とAWAYのLAN宛先設定を含む版を転送し、METHOD/AUTH/CONNECT、Hello、画像ACKまで実機で確認しました。
 
 書込みには `firmware/tools/flash.sh --device PicoMado-lcd1` を使います。端末名を必須とし、同名のビルド出力と manifest の端末名・ボード ID・UF2 SHA256 を照合し、BOOTSEL が 1 台かつ `board-id.txt` の ID と一致したときだけ `picotool load -v -x` を実行します。`--check-only` を付けると書込みなしで一致だけを確認できます。接続ファームは当該 Pico に書込み・Flash verify 済みです。既存 YouTube の復旧用 UF2 は `PicoW_Youtube_Player/diagnostics/artifacts/buttons-rotation-20261010/video-rotate180.uf2` です。書込み前の現 Flash に対する復旧 UF2 の verify は確認済み。戻すときは同一機を手動 BOOTSEL にして復旧用 UF2 を `picotool load -v -x` で書きます。

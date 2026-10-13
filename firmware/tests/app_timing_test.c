@@ -19,6 +19,9 @@ static int pressed=-1,wifi_link=CYW43_LINK_DOWN,ip_link=CYW43_LINK_DOWN;
 static int sdk_result;
 static unsigned joins,erases,server_begins,hello_count,heartbeat_count,loops;
 static bool sta_on,server_ready,welcome_available;
+static bool usb_connected;
+static bool drop_during_retry;
+static const char *last_lcd_one,*last_lcd_two;
 static pm_net_stage network_stage=PM_NET_DOWN;
 static enum {
     INITIAL,OPEN_AWAY_MENU,SELECT_AWAY,CONFIRM_AWAY,WIFI_BOUNDARY,WIFI_TIMEOUT,
@@ -30,6 +33,7 @@ static enum {
 absolute_time_t get_absolute_time(void){return clock_ms;}
 uint32_t to_ms_since_boot(absolute_time_t t){return (uint32_t)t;}
 void stdio_init_all(void){}
+bool stdio_usb_connected(void){return usb_connected;}
 void gpio_init(uint pin){assert(pin>=12 && pin<=15);}
 void gpio_set_dir(uint pin,int dir){assert(pin>=12 && pin<=15 && dir==GPIO_IN);}
 void gpio_pull_up(uint pin){assert(pin>=12 && pin<=15);}
@@ -52,7 +56,9 @@ void flash_range_program(uint32_t offset,const uint8_t *p,size_t n){
 }
 const char *pm_display_capability(void){return PM_DISPLAY_CAPABILITY;}
 void pm_display_init(void){}
-void pm_display_status(const char *a,const char *b){assert(a && b);clock_ms+=20;}
+void pm_display_status(const char *a,const char *b){
+    assert(a && b);last_lcd_one=a;last_lcd_two=b;clock_ms+=20;
+}
 bool pm_display_frame(uint8_t *p,size_t n){assert(p && n==PM_IMAGE_BYTES);return true;}
 void pm_display_standby(void){}
 void pm_display_wake(void){}
@@ -161,11 +167,23 @@ void sleep_ms(unsigned ms){
     case SERVER_BOUNDARY:
         assert(state==SERVER);clock_ms++;phase=SERVER_TIMEOUT;return;
     case SERVER_TIMEOUT:
-        assert(state==RETRY && !sta_on);
-        puts("server timeout boundary: OK");clock_ms=started_ms+retry_ms;phase=HOME_RETRY;return;
+        assert(state==RETRY && sta_on && wifi_enabled && joins==5 && network_stage==PM_NET_DOWN);
+        assert(!strcmp(last_lcd_one,"SERVER"));
+        puts("server timeout: session closed; healthy Wi-Fi/IP retained");
+        if(drop_during_retry){
+            ip_link=CYW43_LINK_DOWN;clock_ms=started_ms+retry_ms-30;
+        }else clock_ms=started_ms+retry_ms;
+        phase=HOME_RETRY;return;
     case HOME_RETRY:
-        assert(state==WIFI && joins==6 && active_profile==0);
-        ip_link=CYW43_LINK_UP;server_ready=true;phase=HOME_CONNECT;break;
+        if(drop_during_retry && state==RETRY){
+            assert(!sta_on && !wifi_enabled && !strcmp(last_lcd_one,"WIFI") && !strcmp(last_lcd_two,"RETRY"));
+            puts("link lost during server retry: Wi-Fi retry label; remaining backoff retained");
+            clock_ms=started_ms+retry_ms;return;
+        }
+        assert(active_profile==0);
+        if(drop_during_retry){assert(state==WIFI && joins==6);ip_link=CYW43_LINK_UP;}
+        else {assert(state==SERVER && joins==5 && server_begins==2);puts("server retry: no new Wi-Fi join");}
+        server_ready=true;phase=HOME_CONNECT;break;
     case HOME_CONNECT:
         if(state==ACTIVE){
             assert(hello_count==1 && heartbeat_count==0 && server_begins==2);
@@ -174,7 +192,7 @@ void sleep_ms(unsigned ms){
         }break;
     case HOME_ACTIVE:
         press_after_release(0);
-        if(joins==7){
+        if(joins==(drop_during_retry?7u:6u)){
             assert(state==WIFI && active_profile==0);
             puts("standby wake: no immediate timeout");phase=WAKE;longjmp(finished,1);
         }break;
@@ -183,9 +201,28 @@ void sleep_ms(unsigned ms){
     clock_ms+=ms;
 }
 int main(int argc,char **argv){
-    assert(argc==1 || (argc==2 && !strcmp(argv[1],"sdk-error")));
-    if(argc==2)sdk_result=-7;
+    assert(argc==1 || (argc==2 && (!strcmp(argv[1],"sdk-error") ||
+        !strcmp(argv[1],"usb-snapshot") || !strcmp(argv[1],"error-log") ||
+        !strcmp(argv[1],"drop-during-retry"))));
+    if(argc==2 && !strcmp(argv[1],"sdk-error"))sdk_result=-7;
+    if(argc==2 && !strcmp(argv[1],"usb-snapshot"))usb_connected=true;
+    if(argc==2 && !strcmp(argv[1],"drop-during-retry"))drop_during_retry=true;
     memset(test_flash_sector,0xff,sizeof test_flash_sector);
     if(!setjmp(finished))pm_firmware_entry();
+    if(argc==2 && !strcmp(argv[1],"usb-snapshot")){
+        puts("late USB snapshot begin");
+        usb_connected=false;log_usb_snapshot();usb_connected=true;log_usb_snapshot();
+        clock_ms+=14999;log_usb_snapshot();clock_ms++;log_usb_snapshot();
+        puts("late USB snapshot end");
+    }
+    if(argc==2 && !strcmp(argv[1],"error-log")){
+        state=ACTIVE;sta_on=wifi_enabled=true;ip_link=CYW43_LINK_UP;
+        process(11,"{\"type\":\"error\",\"data\":{\"code\":\"dummy-private-token\"}}");
+        assert(state==RETRY && sta_on && wifi_enabled && !strcmp(last_lcd_one,"SERVER"));
+        state=ACTIVE;
+        process(11,"{\"type\":\"error\",\"data\":{\"code\":\"stale_frame\"}}");
+        state=ACTIVE;
+        process(11,"{\"type\":\"error\",\"data\":{\"code\":\"invalid_ack_token\"}}");
+    }
     puts("app timing: production main loop PASS");return 0;
 }

@@ -18,6 +18,60 @@ use crate::{Effect, Event, SessionToken};
 /// Provisional per-session dispatch quantum pending multi-device measurement.
 const MAX_CONTROL_PER_TICK: usize = 8;
 
+fn session_identity(current: &Option<SessionToken>) -> (&str, u64, u64) {
+    current.as_ref().map_or(("unbound", 0, 0), |token| {
+        (
+            token.device_id.as_str(),
+            token.incarnation,
+            token.session_epoch,
+        )
+    })
+}
+
+fn wire_label(message: &WireMessage) -> &'static str {
+    match message {
+        WireMessage::Hello { .. } => "hello",
+        WireMessage::Welcome { .. } => "welcome",
+        WireMessage::Heartbeat { .. } => "heartbeat",
+        WireMessage::Next { .. } => "next",
+        WireMessage::Power { .. } => "power",
+        WireMessage::EnterSub { .. } => "sub",
+        WireMessage::Up { .. } => "up",
+        WireMessage::Down { .. } => "down",
+        WireMessage::ReceiptAck { .. } => "receipt_ack",
+        WireMessage::RenderedAck { .. } => "rendered_ack",
+        WireMessage::InputAccepted { .. } => "input_accepted",
+        WireMessage::PluginPosition { .. } => "plugin_position",
+        WireMessage::SettingsStored { .. } => "settings_stored",
+        WireMessage::Settings { .. } => "settings",
+        WireMessage::Error { .. } => "error",
+        _ => "unexpected",
+    }
+}
+
+#[derive(Default)]
+struct AckDiagnostics {
+    ignored: u64,
+}
+impl AckDiagnostics {
+    fn count_ignored(&mut self) -> bool {
+        self.ignored = self.ignored.saturating_add(1);
+        self.ignored <= 4 || self.ignored.is_power_of_two()
+    }
+    fn log_ignored(
+        &mut self,
+        token: &SessionToken,
+        frame: &crate::FrameToken,
+        kind: &str,
+        current_epoch: u64,
+    ) {
+        if self.count_ignored() {
+            eprintln!("picomado ack_ignored id={} incarnation={} session_epoch={} kind={} frame_id={} ack_display_epoch={} current_display_epoch={} reason=stale_or_duplicate ignored_count={}",
+                token.device_id,token.incarnation,token.session_epoch,kind,frame.frame_id,frame.display_epoch,current_epoch,self.ignored);
+        }
+    }
+}
+
 pub async fn upgrade(State(app): State<SharedApp>, ws: WebSocketUpgrade) -> Response {
     ws.max_message_size(MAX_CHUNK_BYTES)
         .max_frame_size(MAX_CHUNK_BYTES)
@@ -28,6 +82,7 @@ fn process(
     app: &SharedApp,
     current: &mut Option<SessionToken>,
     message: WireMessage,
+    diagnostics: &mut AckDiagnostics,
 ) -> Result<Option<WireMessage>, &'static str> {
     if let WireMessage::Hello {
         device_id,
@@ -79,6 +134,7 @@ fn process(
             guard
                 .heartbeat(token, applied_revision)
                 .map_err(|_| "stale_settings")?;
+            eprintln!("picomado heartbeat_received id={} incarnation={} session_epoch={} applied_revision={}", token.device_id, token.incarnation, token.session_epoch, applied_revision);
             Ok(None)
         }
         WireMessage::Next {
@@ -112,7 +168,14 @@ fn process(
                 WireMessage::Down { .. } => ButtonAction::Down,
                 _ => unreachable!(),
             };
+            let before = guard.selection_for(token);
+            let started = std::time::Instant::now();
             let result = guard.button(token, action).map_err(|_| "invalid_input")?;
+            let after = guard.selection_for(token);
+            eprintln!("picomado input_processed id={} incarnation={} session_epoch={} action={:?} before_selected={} before_display_epoch={} selected={} display_epoch={} elapsed_ms={}",
+                token.device_id, token.incarnation, token.session_epoch, action,
+                before.as_ref().and_then(|v|v.0.as_deref()).unwrap_or("none"), before.as_ref().map_or(0,|v|v.1),
+                after.as_ref().and_then(|v|v.0.as_deref()).unwrap_or("none"), after.as_ref().map_or(0,|v|v.1), started.elapsed().as_millis());
             Ok(Some(match result {
                 InputResult::Selection {
                     selected,
@@ -136,11 +199,23 @@ fn process(
             {
                 return Err("stale_frame");
             }
+            if !guard.frame_ack_within_known_generations(&frame) {
+                return Err("invalid_ack_token");
+            }
             if !guard
-                .terminal_event(Event::ReceiptAck { token: frame })
+                .terminal_event(Event::ReceiptAck {
+                    token: frame.clone(),
+                })
                 .map_err(|_| "invalid_ack")?
             {
-                return Err("stale_frame");
+                // Input may invalidate this image before its queued ACK
+                // reaches the server. Reject its state change, keep the session.
+                diagnostics.log_ignored(
+                    token,
+                    &frame,
+                    "receipt",
+                    guard.selection_for(token).map_or(0, |v| v.1),
+                );
             }
             Ok(None)
         }
@@ -151,11 +226,21 @@ fn process(
             {
                 return Err("stale_frame");
             }
+            if !guard.frame_ack_within_known_generations(&frame) {
+                return Err("invalid_ack_token");
+            }
             if !guard
-                .terminal_event(Event::RenderedAck { token: frame })
+                .terminal_event(Event::RenderedAck {
+                    token: frame.clone(),
+                })
                 .map_err(|_| "invalid_ack")?
             {
-                return Err("stale_frame");
+                diagnostics.log_ignored(
+                    token,
+                    &frame,
+                    "rendered",
+                    guard.selection_for(token).map_or(0, |v| v.1),
+                );
             }
             Ok(None)
         }
@@ -363,7 +448,8 @@ async fn writer_loop<S>(
     mut sink: S,
     mut rx: tokio::sync::mpsc::Receiver<WriterCommand>,
     app: SharedApp,
-) where
+) -> &'static str
+where
     S: Sink<Message> + Unpin,
 {
     let mut current: Option<SessionToken> = None;
@@ -372,26 +458,28 @@ async fn writer_loop<S>(
     let mut plans = std::collections::BTreeMap::<u64, FramePlan>::new();
     let mut progress = std::collections::BTreeMap::<u64, FrameProgress>::new();
     let mut tick = tokio::time::interval(Duration::from_millis(200));
-    loop {
+    let end_reason = loop {
         tokio::select! {
             biased;
             command=rx.recv()=>match command {
                 Some(WriterCommand::Bind(token))=>current=Some(token),
-                Some(WriterCommand::Reply(message))=>if write_wire(&mut sink,message).await.is_err() {
-                    eprintln!("picomado writer_exit reason=control_write_failed");
-                    break;
+                Some(WriterCommand::Reply(message))=>{
+                    let kind=wire_label(&message);
+                    if write_wire(&mut sink,message).await.is_err() {
+                        let (id,incarnation,session_epoch)=session_identity(&current);
+                        eprintln!("picomado control_write_failed id={} incarnation={} session_epoch={} kind={}",id,incarnation,session_epoch,kind);
+                        break "control_write_failed";
+                    }
                 },
-                Some(WriterCommand::Stop)|None=>break,
+                Some(WriterCommand::Stop)=>break "requested_stop",
+                None=>break "command_channel_closed",
             },
             _=tick.tick(),if current.is_some()=>{
                 let token=current.as_ref().expect("bound");
-                if !app.lock().is_ok_and(|guard|guard.session_is_current(token)) {break;}
+                if !app.lock().is_ok_and(|guard|guard.session_is_current(token)) {break "session_not_current";}
                 match enqueue_outbox(&app,token,&mut queue,&mut next_packet_id,&mut plans) {
-                    Ok(true)=>break,
-                    Err(())=>{
-                        eprintln!("picomado writer_exit id={} reason=enqueue_failed",token.device_id);
-                        break;
-                    },
+                    Ok(true)=>break "close_session_effect",
+                    Err(())=>break "enqueue_failed",
                     Ok(false)=>{},
                 }
                 let stale: Vec<_> = progress.keys().copied().filter(|id|
@@ -405,7 +493,7 @@ async fn writer_loop<S>(
             _=tokio::task::yield_now(),if current.as_ref().is_some_and(|t|queue.bytes(&t.device_id)>0)=>{
                 let token=current.as_ref().expect("bound");
                 let Some(packet)=queue.pop_for(&token.device_id) else {continue;};
-                let valid={let Ok(guard)=app.lock() else {break;};
+                let valid={let Ok(guard)=app.lock() else {break "application_unavailable";};
                     if !guard.session_is_current(token) {false} else {
                         guard.pending_effects().into_iter().find(|(id,_)|*id==packet.outbox_id)
                             .is_some_and(|(_,effect)|match effect {
@@ -451,7 +539,7 @@ async fn writer_loop<S>(
                         } else {
                             eprintln!("picomado writer_exit id={} reason={}",token.device_id,reason);
                         }
-                        break;
+                        break reason;
                     }
                 }
                 if let Some(frame)=progress.get_mut(&packet.outbox_id) {
@@ -461,19 +549,27 @@ async fn writer_loop<S>(
                     let completed=app.lock().ok().and_then(|mut guard|guard.complete_effect(packet.outbox_id).ok());
                     if let Some(frame)=progress.remove(&packet.outbox_id) {
                         log_frame_end(&token.device_id,packet.outbox_id,frame,
-                            if completed==Some(true){"sent"}else{"effect_completion_failed"});
+                            match completed {Some(true)=>"sent",Some(false)=>"effect_already_resolved",None=>"effect_completion_failed"});
                     }
-                    if completed!=Some(true) {break;}
+                    // Input cancellation or a fast ACK can prune the effect
+                    // during the final write. That is not a transport failure.
+                    if completed.is_none() {break "effect_completion_failed";}
                 }
             }
         }
-    }
+    };
     if let Some(token) = &current {
         for (id, frame) in progress {
             log_frame_end(&token.device_id, id, frame, "session_ended");
         }
     }
+    let (id, incarnation, session_epoch) = session_identity(&current);
+    eprintln!(
+        "picomado writer_exit id={} incarnation={} session_epoch={} reason={}",
+        id, incarnation, session_epoch, end_reason
+    );
     let _ = tokio::time::timeout(SEND_TIMEOUT, sink.send(Message::Close(None))).await;
+    end_reason
 }
 
 pub async fn serve_socket(socket: WebSocket, app: SharedApp) {
@@ -481,7 +577,7 @@ pub async fn serve_socket(socket: WebSocket, app: SharedApp) {
     serve_split(sink, stream, app).await;
 }
 
-async fn serve_split<S, St, E>(sink: S, mut stream: St, app: SharedApp)
+async fn serve_split<S, St, E>(sink: S, mut stream: St, app: SharedApp) -> &'static str
 where
     S: Sink<Message> + Unpin + Send + 'static,
     St: Stream<Item = Result<Message, E>> + Unpin,
@@ -491,26 +587,64 @@ where
     let mut decoder = Decoder::default();
     let mut current: Option<SessionToken> = None;
     let mut writer_finished = false;
+    static NEXT_CONNECTION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let connection_id = NEXT_CONNECTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let started = std::time::Instant::now();
+    let mut last_rx = started;
+    let (mut rx_frames, mut rx_messages, mut rx_bytes) = (0u64, 0u64, 0u64);
+    let mut end_reason = "read_eof";
+    let mut end_detail = "none";
+    let mut diagnostics = AckDiagnostics::default();
+    eprintln!("picomado websocket_open connection_id={}", connection_id);
     loop {
         let incoming = tokio::select! {
             result = &mut writer => {
-                if let Err(error) = result {
-                    eprintln!("picomado writer_exit reason=task_failed error={error}");
-                }
+                end_reason="writer_ended";
+                end_detail=match result {Ok(reason)=>reason,Err(error)=>if error.is_panic(){"writer_panic"}else{"writer_task_failed"}};
                 writer_finished = true;
                 break;
             }
             incoming = stream.next() => incoming,
         };
-        let Some(Ok(message)) = incoming else {
-            break;
+        let message = match incoming {
+            Some(Ok(message)) => message,
+            Some(Err(_)) => {
+                end_reason = "read_error";
+                break;
+            }
+            None => break,
         };
-        let Message::Binary(bytes) = message else {
-            break;
+        last_rx = std::time::Instant::now();
+        rx_frames += 1;
+        let bytes = match message {
+            Message::Binary(bytes) => bytes,
+            Message::Close(frame) => {
+                eprintln!(
+                    "picomado peer_close connection_id={} code={}",
+                    connection_id,
+                    frame.map_or(0, |f| f.code)
+                );
+                end_reason = "peer_close";
+                break;
+            }
+            Message::Text(_) => {
+                end_reason = "unsupported_text";
+                break;
+            }
+            Message::Ping(_) => {
+                end_reason = "unsupported_ping";
+                break;
+            }
+            Message::Pong(_) => {
+                end_reason = "unsupported_pong";
+                break;
+            }
         };
+        rx_bytes += bytes.len() as u64;
         let messages = match decoder.push(&bytes) {
             Ok(messages) => messages,
             Err(_) => {
+                end_reason = "decode_invalid_frame";
                 let _ = tx
                     .send(WriterCommand::Reply(WireMessage::Error {
                         code: "invalid_frame".into(),
@@ -521,25 +655,38 @@ where
         };
         let mut failed = false;
         for message in messages {
+            rx_messages += 1;
+            let kind = wire_label(&message);
             let was_unbound = current.is_none();
-            match process(&app, &mut current, message) {
+            match process(&app, &mut current, message, &mut diagnostics) {
                 Ok(reply) => {
                     if was_unbound {
                         if let Some(token) = &current {
                             if tx.send(WriterCommand::Bind(token.clone())).await.is_err() {
+                                end_reason = "writer_command_closed";
                                 failed = true;
                                 break;
                             }
+                            eprintln!("picomado websocket_bound connection_id={} id={} incarnation={} session_epoch={}",connection_id,token.device_id,token.incarnation,token.session_epoch);
                         }
                     }
                     if let Some(reply) = reply {
+                        let queued = std::time::Instant::now();
                         if tx.send(WriterCommand::Reply(reply)).await.is_err() {
+                            end_reason = "writer_command_closed";
                             failed = true;
                             break;
+                        }
+                        if queued.elapsed() > Duration::from_millis(100) {
+                            eprintln!("picomado reply_queue_wait connection_id={} request={} elapsed_ms={}",connection_id,kind,queued.elapsed().as_millis());
                         }
                     }
                 }
                 Err(code) => {
+                    end_reason = "protocol_rejected";
+                    end_detail = code;
+                    let (id, incarnation, session_epoch) = session_identity(&current);
+                    eprintln!("picomado protocol_rejected connection_id={} id={} incarnation={} session_epoch={} kind={} code={}",connection_id,id,incarnation,session_epoch,kind,code);
                     let _ = tx
                         .send(WriterCommand::Reply(WireMessage::Error {
                             code: code.into(),
@@ -558,11 +705,14 @@ where
         let _ = tx.send(WriterCommand::Stop).await;
         let _ = writer.await;
     }
+    let (id, incarnation, session_epoch) = session_identity(&current);
+    eprintln!("picomado session_end connection_id={} id={} incarnation={} session_epoch={} trigger={} detail={} elapsed_ms={} idle_ms={} rx_frames={} rx_messages={} rx_bytes={} ignored_acks={}",connection_id,id,incarnation,session_epoch,end_reason,end_detail,started.elapsed().as_millis(),last_rx.elapsed().as_millis(),rx_frames,rx_messages,rx_bytes,diagnostics.ignored);
     if let Some(token) = current {
         if let Ok(mut guard) = app.lock() {
             let _ = guard.disconnect(token);
         }
     }
+    end_reason
 }
 
 #[cfg(test)]
@@ -577,7 +727,7 @@ mod tests {
     use crate::{PicoScreen, ScreenKind};
     use futures_util::{SinkExt, StreamExt};
     use std::pin::Pin;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::task::{Context, Poll};
     use tokio_tungstenite::tungstenite::Message as ClientMessage;
@@ -1269,6 +1419,511 @@ mod tests {
             panic!("expected binary")
         };
         Decoder::default().push(&bytes).unwrap().remove(0)
+    }
+
+    #[tokio::test]
+    async fn receiver_exit_reasons_distinguish_peer_close_decode_error_and_eof() {
+        let cases: Vec<(Vec<Result<Message, ()>>, &str)> = vec![
+            (vec![Ok(Message::Close(None))], "peer_close"),
+            (
+                vec![Ok(Message::Binary(vec![0, 0, 0, 2, 99, 1].into()))],
+                "decode_invalid_frame",
+            ),
+            (vec![], "read_eof"),
+            (vec![Err(())], "read_error"),
+        ];
+        for (messages, expected) in cases {
+            let temp = tempfile::tempdir().unwrap();
+            let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+                &temp.path().join("state.db"),
+            )));
+            let reason = serve_split(
+                MockSink {
+                    count: Arc::new(AtomicUsize::new(0)),
+                    limit: usize::MAX,
+                    recorded: None,
+                },
+                futures_util::stream::iter(messages),
+                app,
+            )
+            .await;
+            assert_eq!(reason, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn future_ack_is_a_protocol_error_not_a_delayed_ack() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+            &temp.path().join("state.db"),
+        )));
+        let mut bound = None;
+        let mut diagnostics = AckDiagnostics::default();
+        process(
+            &app,
+            &mut bound,
+            WireMessage::Hello {
+                device_id: "desk".into(),
+                capabilities: vec!["lcd".into()],
+                screen_owner_epoch: 1,
+            },
+            &mut diagnostics,
+        )
+        .unwrap();
+        let session = bound.clone().unwrap();
+        let issued = app
+            .lock()
+            .unwrap()
+            .queue_lcd_frame(
+                &session,
+                "youtube",
+                vec![1; crate::protocol::LCD_FRAME_BYTES],
+            )
+            .unwrap();
+        for field in ["id", "display", "owner", "zero"] {
+            let mut future = issued.clone();
+            match field {
+                "id" => future.frame_id += 1,
+                "display" => future.display_epoch += 1,
+                "owner" => future.screen_owner_epoch += 1,
+                "zero" => future.frame_id = 0,
+                _ => unreachable!(),
+            }
+            assert!(matches!(
+                process(
+                    &app,
+                    &mut bound,
+                    WireMessage::RenderedAck { token: future },
+                    &mut diagnostics
+                ),
+                Err("invalid_ack_token")
+            ));
+        }
+        assert_eq!(
+            app.lock().unwrap().view().devices[0].last_rendered_frame,
+            None
+        );
+        assert!(app.lock().unwrap().frame_is_current(&issued));
+
+        // Use a fresh real reader/writer pair to verify the fatal response and
+        // session shutdown, rather than merely checking the classifier.
+        let temp = tempfile::tempdir().unwrap();
+        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+            &temp.path().join("state.db"),
+        )));
+        let (input, mut incoming) = tokio::sync::mpsc::channel(4);
+        let count = Arc::new(AtomicUsize::new(0));
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let task = tokio::spawn(serve_split(
+            MockSink {
+                count: count.clone(),
+                limit: usize::MAX,
+                recorded: Some(recorded.clone()),
+            },
+            futures_util::stream::poll_fn(move |cx| incoming.poll_recv(cx)),
+            app.clone(),
+        ));
+        input
+            .send(Ok::<_, ()>(Message::Binary(
+                encode(&WireMessage::Hello {
+                    device_id: "desk".into(),
+                    capabilities: vec!["lcd".into()],
+                    screen_owner_epoch: 1,
+                })
+                .unwrap()
+                .into(),
+            )))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while count.load(Ordering::SeqCst) < 2 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let session = SessionToken {
+            device_id: "desk".into(),
+            incarnation: 1,
+            session_epoch: 1,
+        };
+        let mut future = app
+            .lock()
+            .unwrap()
+            .queue_lcd_frame(
+                &session,
+                "youtube",
+                vec![1; crate::protocol::LCD_FRAME_BYTES],
+            )
+            .unwrap();
+        future.frame_id += 1;
+        input
+            .send(Ok(Message::Binary(
+                encode(&WireMessage::RenderedAck { token: future })
+                    .unwrap()
+                    .into(),
+            )))
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), task)
+                .await
+                .unwrap()
+                .unwrap(),
+            "protocol_rejected"
+        );
+        assert!(!app.lock().unwrap().view().devices[0].online);
+        assert_eq!(
+            app.lock().unwrap().view().devices[0].selected.as_deref(),
+            Some("youtube")
+        );
+        assert!(recorded.lock().unwrap().iter().any(|message| {
+            let Message::Binary(bytes)=message else{return false;};
+            matches!(Decoder::default().push(bytes).unwrap().remove(0),WireMessage::Error{code} if code=="invalid_ack_token")
+        }));
+    }
+
+    #[test]
+    fn ignored_ack_logging_is_bounded_per_connection() {
+        let mut diagnostics = AckDiagnostics::default();
+        let logged = (0..10_000).filter(|_| diagnostics.count_ignored()).count();
+        assert_eq!(diagnostics.ignored, 10_000);
+        assert!(logged <= 20);
+        assert!(AckDiagnostics::default().count_ignored());
+    }
+
+    struct GateSink {
+        inner: MockSink,
+        at: usize,
+        open: Arc<AtomicBool>,
+        wake: Arc<futures_util::task::AtomicWaker>,
+    }
+    impl Sink<Message> for GateSink {
+        type Error = ();
+        fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), ()>> {
+            if self.inner.count.load(Ordering::SeqCst) >= self.at
+                && !self.open.load(Ordering::SeqCst)
+            {
+                self.wake.register(cx.waker());
+                if !self.open.load(Ordering::SeqCst) {
+                    return Poll::Pending;
+                }
+            }
+            Poll::Ready(Ok(()))
+        }
+        fn start_send(self: Pin<&mut Self>, message: Message) -> Result<(), ()> {
+            Pin::new(&mut self.get_mut().inner).start_send(message)
+        }
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), ()>> {
+            Poll::Ready(Ok(()))
+        }
+        fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), ()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_last_fragment_does_not_close_writer() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = app_at_fixture_date(&temp.path().join("state.db"));
+        let session = state.hello("desk", ["lcd".into()].into(), 1).unwrap();
+        let app = Arc::new(std::sync::Mutex::new(state));
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let count = Arc::new(AtomicUsize::new(0));
+        let open = Arc::new(AtomicBool::new(false));
+        let wake = Arc::new(futures_util::task::AtomicWaker::new());
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
+        let task = tokio::spawn(writer_loop(
+            GateSink {
+                inner: MockSink {
+                    count: count.clone(),
+                    limit: usize::MAX,
+                    recorded: Some(recorded.clone()),
+                },
+                at: 9,
+                open: open.clone(),
+                wake: wake.clone(),
+            },
+            rx,
+            app.clone(),
+        ));
+        tx.send(WriterCommand::Bind(session.clone())).await.unwrap();
+        tx.send(WriterCommand::Reply(WireMessage::Welcome {
+            incarnation: 1,
+            session_epoch: 1,
+        }))
+        .await
+        .unwrap();
+        let old = app
+            .lock()
+            .unwrap()
+            .queue_lcd_frame(
+                &session,
+                "youtube",
+                vec![1; crate::protocol::LCD_FRAME_BYTES],
+            )
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while count.load(Ordering::SeqCst) < 9 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let InputResult::Selection {
+            selected,
+            display_epoch,
+        } = app
+            .lock()
+            .unwrap()
+            .button(&session, ButtonAction::Next)
+            .unwrap()
+        else {
+            panic!("selection expected");
+        };
+        assert!(!app.lock().unwrap().frame_is_current(&old));
+        tx.send(WriterCommand::Reply(WireMessage::InputAccepted {
+            selected,
+            display_epoch,
+        }))
+        .await
+        .unwrap();
+        open.store(true, Ordering::SeqCst);
+        wake.wake();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let has_reply = recorded.lock().unwrap().iter().any(|m| {
+                    let Message::Binary(b) = m else {
+                        return false;
+                    };
+                    matches!(
+                        Decoder::default().push(b).unwrap().remove(0),
+                        WireMessage::InputAccepted { .. }
+                    )
+                });
+                if has_reply {
+                    break;
+                }
+                assert!(
+                    !task.is_finished(),
+                    "writer closed after cancelled final fragment"
+                );
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let new = app
+            .lock()
+            .unwrap()
+            .queue_lcd_frame(
+                &session,
+                "caricature",
+                vec![2; crate::protocol::LCD_FRAME_BYTES],
+            )
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while count.load(Ordering::SeqCst) < 19 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!task.is_finished());
+        let mut assembler = FrameAssembler::default();
+        let complete: Vec<_> = recorded
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|m| {
+                let Message::Binary(b) = m else {
+                    return None;
+                };
+                match Decoder::default().push(b).unwrap().remove(0) {
+                    message @ (WireMessage::FrameStart { .. } | WireMessage::FrameChunk { .. }) => {
+                        assembler.accept(message).unwrap()
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+        assert_eq!(complete.len(), 2);
+        assert_eq!(complete[1].0, new);
+        tx.send(WriterCommand::Stop).await.unwrap();
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn delayed_and_duplicate_acks_keep_the_current_session_alive() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+            &temp.path().join("state.db"),
+        )));
+        let (input, mut incoming) = tokio::sync::mpsc::channel(16);
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let count = Arc::new(AtomicUsize::new(0));
+        let task = tokio::spawn(serve_split(
+            MockSink {
+                count: count.clone(),
+                limit: usize::MAX,
+                recorded: Some(recorded.clone()),
+            },
+            futures_util::stream::poll_fn(move |cx| incoming.poll_recv(cx)),
+            app.clone(),
+        ));
+        input
+            .send(Ok::<_, ()>(Message::Binary(
+                encode(&WireMessage::Hello {
+                    device_id: "desk".into(),
+                    capabilities: vec!["lcd".into()],
+                    screen_owner_epoch: 1,
+                })
+                .unwrap()
+                .into(),
+            )))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while count.load(Ordering::SeqCst) < 2 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let session = SessionToken {
+            device_id: "desk".into(),
+            incarnation: 1,
+            session_epoch: 1,
+        };
+        let old = app
+            .lock()
+            .unwrap()
+            .queue_lcd_frame(
+                &session,
+                "youtube",
+                vec![1; crate::protocol::LCD_FRAME_BYTES],
+            )
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while count.load(Ordering::SeqCst) < 10 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        // The terminal can have already drawn/queued the old ACK when its
+        // input invalidates the server generation. These arrive in one read.
+        let mut batch = Vec::new();
+        for message in [
+            WireMessage::Next {
+                incarnation: 1,
+                session_epoch: 1,
+            },
+            WireMessage::ReceiptAck { token: old.clone() },
+            WireMessage::RenderedAck { token: old },
+            WireMessage::Next {
+                incarnation: 1,
+                session_epoch: 1,
+            },
+        ] {
+            batch.extend(encode(&message).unwrap());
+        }
+        input.send(Ok(Message::Binary(batch.into()))).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let view = app.lock().unwrap().view();
+                if view.devices[0].online && view.devices[0].selected.as_deref() == Some("weather")
+                {
+                    break;
+                }
+                assert!(!task.is_finished(), "session ended after delayed ACK");
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let new = app
+            .lock()
+            .unwrap()
+            .queue_lcd_frame(
+                &session,
+                "weather",
+                vec![2; crate::protocol::LCD_FRAME_BYTES],
+            )
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while count.load(Ordering::SeqCst) < 20 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let mut assembler = FrameAssembler::default();
+        let complete: Vec<_> = recorded
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|message| {
+                let Message::Binary(bytes) = message else {
+                    return None;
+                };
+                match Decoder::default().push(bytes).unwrap().remove(0) {
+                    message @ (WireMessage::FrameStart { .. } | WireMessage::FrameChunk { .. }) => {
+                        assembler.accept(message).unwrap()
+                    }
+                    WireMessage::Error { code } => panic!("unexpected protocol error {code}"),
+                    _ => None,
+                }
+            })
+            .collect();
+        assert_eq!(complete.len(), 2);
+        assert_eq!(complete[1].0, new);
+        assert_eq!(complete[1].1, vec![2; crate::protocol::LCD_FRAME_BYTES]);
+        for message in [
+            WireMessage::ReceiptAck { token: new.clone() },
+            WireMessage::RenderedAck { token: new.clone() },
+        ] {
+            input
+                .send(Ok(Message::Binary(encode(&message).unwrap().into())))
+                .await
+                .unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while app.lock().unwrap().view().devices[0].last_rendered_frame != Some(new.frame_id) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let mut batch = Vec::new();
+        for message in [
+            WireMessage::ReceiptAck { token: new.clone() },
+            WireMessage::RenderedAck { token: new },
+            WireMessage::Next {
+                incarnation: 1,
+                session_epoch: 1,
+            },
+        ] {
+            batch.extend(encode(&message).unwrap());
+        }
+        input.send(Ok(Message::Binary(batch.into()))).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let view = app.lock().unwrap().view();
+                if view.devices[0].online
+                    && view.devices[0].selected.as_deref() == Some("rain-radar")
+                {
+                    break;
+                }
+                assert!(!task.is_finished(), "session ended after duplicate ACK");
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        drop(input);
+        task.await.unwrap();
     }
 
     #[tokio::test]
