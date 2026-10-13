@@ -34,5 +34,11 @@ bool pm_token_equal(pm_token a, pm_token b);
 bool pm_token_current(pm_token token, uint64_t incarnation, uint64_t session,
                       uint64_t display, uint64_t owner);
 
-typedef struct { bool raw, stable; uint32_t changed_ms; } pm_button;
+typedef struct { bool raw, stable; uint32_t changed_ms; uint32_t held_ms; bool wake_reported, wake_armed; } pm_button;
 bool pm_button_step(pm_button *button, bool pressed, uint32_t now_ms);
+
+// Four-button POWER index2 wakes on the existing debounced press.
+// Two-button DOWN index1 wakes once after the configured long hold.
+bool pm_button_wakes(unsigned count,unsigned index,bool long_press);
+bool pm_button_wake_step(pm_button *button,unsigned count,unsigned index,
+                         bool pressed,uint32_t now_ms,uint32_t long_ms);

@@ -14,7 +14,14 @@ static tcp_recv_fn receive_callback;
 static uint8_t sent[4096];
 static size_t sent_length;
 static unsigned sends;
-static int write_result;
+static int write_result,output_result;
+#if PM_TRACE_ENABLE
+static uint64_t clock_us;static char trace_text[32768];static size_t trace_used;
+uint64_t time_us_64(void){return clock_us;}
+size_t pm_trace_usb_write(const char *p,size_t n){
+    assert(trace_used+n<sizeof trace_text);memcpy(trace_text+trace_used,p,n);trace_used+=n;trace_text[trace_used]=0;return n;
+}
+#endif
 static unsigned send_room=sizeof sent;
 static const pm_profile test_profile={"dummy-ssid","dummy-password","198.51.100.1",true,
     "192.0.2.1","dummy-user","dummy-proxy-password",1080};
@@ -35,7 +42,12 @@ err_t tcp_write(struct tcp_pcb *p,const void *bytes,size_t n,int flags){
     if(write_result)return write_result;
     memcpy(sent,bytes,n);sent_length=n;sends++;return ERR_OK;
 }
-err_t tcp_output(struct tcp_pcb *p){assert(p==&socket_instance);return ERR_OK;}
+err_t tcp_output(struct tcp_pcb *p){assert(p==&socket_instance);
+#if PM_TRACE_ENABLE
+    clock_us+=60000;
+#endif
+    return output_result;
+}
 err_t tcp_close(struct tcp_pcb *p){assert(p==&socket_instance);return ERR_OK;}
 void tcp_abort(struct tcp_pcb *p){assert(p==&socket_instance);}
 void tcp_recved(struct tcp_pcb *p,u16_t n){assert(p==&socket_instance);(void)n;}
@@ -76,6 +88,16 @@ int main(void){
     assert(n>0 && (size_t)n<sizeof response);
     feed((const uint8_t *)response,11);assert(stage==PM_NET_WS);
     feed((const uint8_t *)response+11,(size_t)n-11);assert(stage==PM_NET_READY);
+#if PM_TRACE_ENABLE
+    for(unsigned i=0;i<100;i++)pm_trace_flush();
+    trace_used=0;trace_text[0]=0;
+    pm_trace_frame_context(255);output_result=-5;
+    assert(pm_net_send(8,"{}") && stage==PM_NET_READY);output_result=0;
+    pm_trace_frame_context(0);for(unsigned i=0;i<100;i++)pm_trace_flush();
+    assert(strstr(trace_text,"event=tcp_output frame=255 a=-5 b=60000"));
+    assert(strstr(trace_text,"event=tcp_write frame=255 a=0"));
+    puts("TCP output trace: actual error and duration retained; queue acceptance != wire arrival PASS");
+#endif
     puts("production SOCKS5: split METHOD v5 / AUTH v1 / CONNECT v5 / WebSocket accepted");
     write_result=-1;assert(!pm_net_send(5,"{}") && stage==PM_NET_FAILED);write_result=0;
     stage=PM_NET_READY;send_room=0;assert(!pm_net_send(5,"{}") && stage==PM_NET_FAILED);send_room=sizeof sent;

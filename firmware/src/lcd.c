@@ -1,3 +1,4 @@
+#include "trace.h"
 #include "lcd.h"
 #include "lcd_transform.h"
 #include <string.h>
@@ -25,6 +26,9 @@ static uint32_t frame_baud = PM_LCD_SPI_BAUD;
 static uint32_t last_frame_baud;
 static int last_transfer_bytes;
 static bool initialized;
+#if PM_LCD_BLK_CONNECTED
+static bool backlight_initialized;
+#endif
 
 void pm_lcd_configure_bus(uint32_t control_hz, uint32_t frame_hz) {
     // Reject a zero request rather than passing it to SDK divisor arithmetic.
@@ -82,7 +86,7 @@ void pm_lcd_init(void) {
     initialized = true;
     pm_lcd_backlight(true);
 #if defined(PM_NORMAL_BUILD) && PM_NORMAL_BUILD
-    printf("lcd ready: control_request=%lu frame_request=%lu actual=%lu frame_cs_hold=1\n",
+    pm_logf("lcd ready: control_request=%lu frame_request=%lu actual=%lu frame_cs_hold=1\n",
            (unsigned long)control_baud,(unsigned long)frame_baud,
            (unsigned long)spi_get_baudrate(spi0));
 #endif
@@ -90,14 +94,24 @@ void pm_lcd_init(void) {
 
 void pm_lcd_backlight(bool on) {
 #if PM_LCD_BLK_CONNECTED
-    gpio_init(PM_LCD_BLK_PIN); gpio_set_dir(PM_LCD_BLK_PIN, GPIO_OUT);
-    gpio_put(PM_LCD_BLK_PIN, on == !!PM_LCD_BLK_ACTIVE_HIGH);
+    bool level=on == !!PM_LCD_BLK_ACTIVE_HIGH;
+    if(!backlight_initialized){
+        gpio_init(PM_LCD_BLK_PIN); // SDK selects SIO while the output is disabled.
+        gpio_put(PM_LCD_BLK_PIN,level); // Preload the level before enabling drive.
+        gpio_set_dir(PM_LCD_BLK_PIN,GPIO_OUT);
+        backlight_initialized=true;
+    }else gpio_put(PM_LCD_BLK_PIN,level);
+#if defined(PM_NORMAL_BUILD) && PM_NORMAL_BUILD
+    pm_logf("lcd backlight: pin=%u on=%u output=%u gpio_read=%u\n",PM_LCD_BLK_PIN,
+        on?1u:0u,level?1u:0u,gpio_get(PM_LCD_BLK_PIN)?1u:0u);
+#endif
 #else
     (void)on;
 #endif
 }
 
 static void transfer_pixels(uint8_t *pixels) {
+    pm_trace_event(PM_TRACE_SPI_BEGIN,pm_trace_current_frame(),0,0);
 #if defined(PM_LCD_CAPTURE_ENABLE) && PM_LCD_CAPTURE_ENABLE
     pm_lcd_capture_before_transfer(pixels, PM_IMAGE_BYTES);
 #endif
@@ -119,6 +133,7 @@ static void transfer_pixels(uint8_t *pixels) {
         // at the transaction boundary as well; never cut off the last pixel.
         while (spi_is_busy(spi0)) tight_loop_contents();
         gpio_put(CS, 1);
+        pm_trace_event(PM_TRACE_SPI_END,pm_trace_current_frame(),last_transfer_bytes,last_frame_baud);
         return;
     }
 #endif
@@ -130,6 +145,7 @@ static void transfer_pixels(uint8_t *pixels) {
                                   : spi_get_baudrate(spi0);
     last_transfer_bytes = data(pixels, PM_IMAGE_BYTES);
     if (switch_baud) spi_set_baudrate(spi0, control_baud);
+    pm_trace_event(PM_TRACE_SPI_END,pm_trace_current_frame(),last_transfer_bytes,last_frame_baud);
 }
 void pm_lcd_draw(uint8_t *pixels) {
     pm_lcd_transform(pixels,PM_W*PM_H,

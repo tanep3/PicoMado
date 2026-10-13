@@ -2,7 +2,7 @@
 //! This module does not open a listener or execute effects.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -58,6 +58,8 @@ struct Runtime {
     outbox: BTreeMap<u64, Effect>,
     next_effect_id: u64,
     plugin_states: BTreeMap<String, serde_json::Value>,
+    jobs: crate::plugin_jobs::JobState,
+    managed_revisions: BTreeMap<String, u64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -69,6 +71,10 @@ struct StoredState {
     next_effect_id: u64,
     #[serde(default)]
     plugin_states: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    jobs: crate::plugin_jobs::JobState,
+    #[serde(default)]
+    managed_revisions: BTreeMap<String, u64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -136,6 +142,8 @@ impl From<&Runtime> for StoredState {
             outbox: state.outbox.clone(),
             next_effect_id: state.next_effect_id,
             plugin_states: state.plugin_states.clone(),
+            jobs: state.jobs.clone(),
+            managed_revisions: state.managed_revisions.clone(),
         }
     }
 }
@@ -166,6 +174,7 @@ impl TryFrom<StoredState> for Runtime {
                         requests: device.requests.into_iter().collect(),
                         datasets: device.datasets.into_iter().collect(),
                         pending_frame_id: None,
+                        last_sent_frame: None,
                         last_received_frame: None,
                         last_rendered_frame: None,
                     },
@@ -185,6 +194,8 @@ impl TryFrom<StoredState> for Runtime {
             outbox: stored.outbox,
             next_effect_id: stored.next_effect_id,
             plugin_states: stored.plugin_states,
+            jobs: stored.jobs,
+            managed_revisions: stored.managed_revisions,
         };
         for record in state.settings.devices.values_mut() {
             record.online = false;
@@ -213,6 +224,10 @@ impl TryFrom<StoredState> for Runtime {
         {
             return Err(AppError::Conflict("inconsistent stored state"));
         }
+        state
+            .jobs
+            .recover()
+            .map_err(|_| AppError::Conflict("invalid stored plugin jobs"))?;
         state.prune_stale_effects();
         Ok(state)
     }
@@ -308,6 +323,12 @@ pub struct App {
     /// Completed LCD pixels are transient; only validated handles enter the sender.
     frame_assets: BTreeMap<String, Arc<Vec<u8>>>,
     contents: BTreeMap<String, Box<dyn ContentPlugin>>,
+    dispatch: tokio::sync::watch::Sender<()>,
+    work_signal: tokio::sync::watch::Sender<()>,
+    plugin_root: PathBuf,
+    mono_origin: std::time::Instant,
+    persistence_us: u128,
+    image_preparation_us: u128,
 }
 
 #[derive(Debug)]
@@ -326,6 +347,22 @@ impl App {
 
     pub(crate) fn open_with_clock(
         path: &Path,
+        clock: Arc<dyn crate::fetch::Clock + Send + Sync>,
+    ) -> Result<Self, AppError> {
+        let root = path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("plugins");
+        Self::open_with_plugin_root_and_clock(path, &root, clock)
+    }
+
+    pub fn open_with_plugin_root(path: &Path, root: &Path) -> Result<Self, AppError> {
+        Self::open_with_plugin_root_and_clock(path, root, Arc::new(crate::fetch::SystemClock))
+    }
+
+    fn open_with_plugin_root_and_clock(
+        path: &Path,
+        root: &Path,
         clock: Arc<dyn crate::fetch::Clock + Send + Sync>,
     ) -> Result<Self, AppError> {
         let mut connection = Connection::open(path)?;
@@ -357,6 +394,8 @@ impl App {
                 outbox: BTreeMap::new(),
                 next_effect_id: 1,
                 plugin_states: BTreeMap::new(),
+                jobs: crate::plugin_jobs::JobState::default(),
+                managed_revisions: BTreeMap::new(),
             };
             Self::persist(&mut connection, &runtime)?;
             runtime
@@ -376,11 +415,20 @@ impl App {
             clock,
             frame_assets: BTreeMap::new(),
             contents,
+            dispatch: tokio::sync::watch::channel(()).0,
+            work_signal: tokio::sync::watch::channel(()).0,
+            plugin_root: root.to_owned(),
+            mono_origin: std::time::Instant::now(),
+            persistence_us: 0,
+            image_preparation_us: 0,
         })
     }
 
     fn persist(connection: &mut Connection, runtime: &Runtime) -> Result<(), AppError> {
+        let started = std::time::Instant::now();
         let body = serde_json::to_string(&StoredState::from(runtime))?;
+        let serialized = started.elapsed();
+        let body_bytes = body.len();
         let transaction = connection.transaction()?;
         transaction.execute(
             "INSERT INTO app_state (id, schema_version, body) VALUES (1, 2, ?1)
@@ -388,6 +436,11 @@ impl App {
             params![body],
         )?;
         transaction.commit()?;
+        let elapsed = started.elapsed();
+        if elapsed >= std::time::Duration::from_millis(50) {
+            eprintln!("picomado state_persist_slow body_bytes={} serialize_us={} sqlite_us={} elapsed_us={}",
+                body_bytes, serialized.as_micros(), elapsed.saturating_sub(serialized).as_micros(), elapsed.as_micros());
+        }
         Ok(())
     }
 
@@ -398,13 +451,33 @@ impl App {
         let mut next = self.runtime.clone();
         let result = action(&self.engine, &mut next)?;
         next.prune_stale_effects();
+        let saving = std::time::Instant::now();
         Self::persist(&mut self.connection, &next)?;
+        self.persistence_us = self
+            .persistence_us
+            .saturating_add(saving.elapsed().as_micros());
         self.runtime = next;
         self.frame_assets.retain(|handle, _| {
             self.runtime.outbox.values().any(|effect|
             matches!(effect, Effect::SendFrame { asset_handle, .. } if asset_handle == handle))
         });
+        self.dispatch.send_replace(());
         Ok(result)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn replace_test_content(&mut self, id: &str, content: Box<dyn ContentPlugin>) {
+        self.contents.insert(id.into(), content);
+    }
+
+    /// Diagnostic counters are transient and never enter plugin/kernel state.
+    pub(crate) fn operation_totals(&self) -> (u128, u128) {
+        (self.persistence_us, self.image_preparation_us)
+    }
+
+    /// Subscribe before inspecting the outbox so changes cannot be missed.
+    pub fn dispatch_notifications(&self) -> tokio::sync::watch::Receiver<()> {
+        self.dispatch.subscribe()
     }
 
     /// Pending effects survive restart. The caller must complete an effect only
@@ -439,7 +512,19 @@ impl App {
             Some(Effect::SendFrame { asset_handle, .. }) => Some(asset_handle.clone()),
             _ => None,
         };
-        let completed = self.change(|_, state| Ok(state.outbox.remove(&id).is_some()))?;
+        let sent_frame = match self.runtime.outbox.get(&id) {
+            Some(Effect::SendFrame { token, .. }) => Some(token.clone()),
+            _ => None,
+        };
+        let completed = self.change(|engine, state| {
+            if let Some(token) = sent_frame {
+                let decision = engine
+                    .handle(&state.world, &Event::FrameSent { token })
+                    .map_err(|_| AppError::Conflict("frame send result rejected"))?;
+                state.accept(decision)?;
+            }
+            Ok(state.outbox.remove(&id).is_some())
+        })?;
         if let Some(handle) = handle {
             self.frame_assets.remove(&handle);
         }
@@ -717,7 +802,12 @@ impl App {
             settings_revision: device.settings_revision,
             mode: device.mode.clone(),
         };
-        if let Some(pixels) = self.contents.get(id).and_then(|p| p.current_frame(&ctx)) {
+        let preparing = std::time::Instant::now();
+        let pixels = self.contents.get(id).and_then(|p| p.current_frame(&ctx));
+        self.image_preparation_us = self
+            .image_preparation_us
+            .saturating_add(preparing.elapsed().as_micros());
+        if let Some(pixels) = pixels {
             let id = id.clone();
             self.queue_lcd_frame(token, &id, pixels)?;
         }
@@ -823,7 +913,12 @@ impl App {
             .get(&id)
             .ok_or(AppError::Conflict("plugin input unavailable"))?
             .clone();
-        let plan = match plugin.plan(&ctx, action) {
+        let preparing = std::time::Instant::now();
+        let plan = plugin.plan(&ctx, action);
+        self.image_preparation_us = self
+            .image_preparation_us
+            .saturating_add(preparing.elapsed().as_micros());
+        let plan = match plan {
             Ok(plan) => plan,
             Err(ContentError::Unavailable | ContentError::Unsupported | ContentError::Stale) => {
                 let (selected, display_epoch) =
@@ -1425,9 +1520,70 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fresh_plugins_deliver_distinct_idle_images_and_cancel_old_generation() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("fresh-status.db");
+        let mut legacy = App::open(&path).unwrap();
+        legacy
+            .change(|_, state| {
+                state
+                    .plugin_states
+                    .insert("youtube".into(), serde_json::Value::Null);
+                state
+                    .plugin_states
+                    .insert("caricature".into(), serde_json::Value::Null);
+                Ok(())
+            })
+            .unwrap();
+        drop(legacy);
+        let mut app = App::open(&path).unwrap();
+        let token = app.hello("desk", ["lcd".into()].into(), 1).unwrap();
+        let frame = |app: &App| {
+            app.pending_effects()
+                .into_iter()
+                .find_map(|(_, effect)| {
+                    if let Effect::SendFrame {
+                        token,
+                        asset_handle,
+                    } = effect
+                    {
+                        Some((token, app.frame_asset(&asset_handle).unwrap()))
+                    } else {
+                        None
+                    }
+                })
+                .expect("selected idle plugin must provide pixels")
+        };
+        let (youtube, youtube_pixels) = frame(&app);
+        assert_eq!(youtube_pixels.len(), crate::protocol::LCD_FRAME_BYTES);
+        app.button(&token, ButtonAction::Next).unwrap();
+        let (caricature, caricature_pixels) = frame(&app);
+        assert_eq!(
+            app.selection_for(&token).unwrap().0.as_deref(),
+            Some("caricature")
+        );
+        assert_eq!(caricature_pixels.len(), crate::protocol::LCD_FRAME_BYTES);
+        assert_ne!(youtube_pixels, caricature_pixels);
+        assert!(!app.frame_is_current(&youtube));
+        assert!(!app
+            .terminal_event(Event::RenderedAck { token: youtube })
+            .unwrap());
+        assert!(app
+            .terminal_event(Event::RenderedAck {
+                token: caricature.clone()
+            })
+            .unwrap());
+        assert_eq!(
+            app.view().devices[0].last_rendered_frame,
+            Some(caricature.frame_id)
+        );
+    }
+
+    #[test]
     fn ignored_frame_acks_do_not_write_sqlite() {
         let temp = tempfile::tempdir().unwrap();
-        let mut app = App::open(&temp.path().join("state.db")).unwrap();
+        let mut app =
+            crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap();
         let session = app.hello("desk", caps(), 1).unwrap();
         let frame = app
             .queue_lcd_frame(
@@ -1488,7 +1644,11 @@ mod tests {
     fn reconnect_after_jst_day_change_queues_one_current_or_error_frame() {
         let temp = tempfile::tempdir().unwrap();
         let clock = Arc::new(SwitchDayClock(std::sync::atomic::AtomicU8::new(0)));
-        let mut app = App::open_with_clock(&temp.path().join("state.db"), clock.clone()).unwrap();
+        let mut app = crate::test_support::manual_frames_app_with_clock(
+            &temp.path().join("state.db"),
+            clock.clone(),
+        )
+        .unwrap();
         app.set_order(
             1,
             ["weather", "rain-radar", "youtube", "caricature"]
@@ -1571,7 +1731,9 @@ mod tests {
             for mode in &modes {
                 for action in actions {
                     let temp = tempfile::tempdir().unwrap();
-                    let mut app = App::open(&temp.path().join("state.db")).unwrap();
+                    let mut app =
+                        crate::test_support::manual_frames_app(&temp.path().join("state.db"))
+                            .unwrap();
                     let token = app.hello("desk", caps(), 1).unwrap();
                     for _ in 0..plugin_index {
                         app.button(&token, ButtonAction::Next).unwrap();
@@ -1622,7 +1784,7 @@ mod tests {
         let path = temp.path().join("state.db");
         let old_incarnation;
         {
-            let mut app = App::open(&path).unwrap();
+            let mut app = crate::test_support::manual_frames_app(&path).unwrap();
             let token = app.hello("desk", caps(), 1).unwrap();
             old_incarnation = token.incarnation;
             let desired = DeviceSettings {
@@ -1643,7 +1805,7 @@ mod tests {
             .unwrap();
         }
         {
-            let mut app = App::open(&path).unwrap();
+            let mut app = crate::test_support::manual_frames_app(&path).unwrap();
             let view = app.view();
             assert!(!view.devices[0].online);
             assert_eq!(view.devices[0].desired.wifi_timeout_seconds, 25);
@@ -1652,7 +1814,7 @@ mod tests {
             app.delete_device("desk", old_incarnation).unwrap();
         }
         {
-            let mut app = App::open(&path).unwrap();
+            let mut app = crate::test_support::manual_frames_app(&path).unwrap();
             assert!(app.view().devices.is_empty());
             let new = app.hello("desk", caps(), 1).unwrap();
             assert!(new.incarnation > old_incarnation);
@@ -1670,7 +1832,7 @@ mod tests {
     fn invalid_or_stale_changes_leave_persisted_state_unchanged() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("state.db");
-        let mut app = App::open(&path).unwrap();
+        let mut app = crate::test_support::manual_frames_app(&path).unwrap();
         let token = app.hello("desk", caps(), 1).unwrap();
         let before = serde_json::to_value(app.view()).unwrap();
         let bad = DeviceSettings {
@@ -1690,7 +1852,7 @@ mod tests {
             Err(AppError::Conflict(_))
         ));
         drop(app);
-        let reopened = App::open(&path).unwrap();
+        let reopened = crate::test_support::manual_frames_app(&path).unwrap();
         let mut after = serde_json::to_value(reopened.view()).unwrap();
         // A process restart intentionally clears the transient online bit.
         after["devices"][0]["online"] = before["devices"][0]["online"].clone();
@@ -1701,7 +1863,7 @@ mod tests {
     fn stale_session_heartbeat_does_not_confirm_new_settings() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("state.db");
-        let mut app = App::open(&path).unwrap();
+        let mut app = crate::test_support::manual_frames_app(&path).unwrap();
         let old = app.hello("desk", caps(), 1).unwrap();
         let new = app.hello("desk", caps(), 2).unwrap();
         assert!(new.session_epoch > old.session_epoch);
@@ -1716,13 +1878,20 @@ mod tests {
         app.heartbeat(&new, 2).unwrap();
         assert!(!app.view().devices[0].pending);
         drop(app);
-        assert!(!App::open(&path).unwrap().view().devices[0].pending);
+        assert!(
+            !crate::test_support::manual_frames_app(&path)
+                .unwrap()
+                .view()
+                .devices[0]
+                .pending
+        );
     }
 
     #[test]
     fn nvm_ack_send_completion_receipt_and_draw_are_distinct() {
         let temp = tempfile::tempdir().unwrap();
-        let mut app = App::open(&temp.path().join("state.db")).unwrap();
+        let mut app =
+            crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap();
         let token = app.hello("desk", caps(), 1).unwrap();
         let desired = DeviceSettings {
             wifi_timeout_seconds: 25,
@@ -1776,7 +1945,7 @@ mod tests {
         let effect_id;
         let incarnation;
         {
-            let mut app = App::open(&path).unwrap();
+            let mut app = crate::test_support::manual_frames_app(&path).unwrap();
             incarnation = app.hello("desk", caps(), 1).unwrap().incarnation;
             effect_id = app
                 .begin_fetch(
@@ -1794,7 +1963,7 @@ mod tests {
                 .any(|(id, effect)| *id == effect_id && matches!(effect, Effect::Fetch(_))));
         }
         {
-            let mut app = App::open(&path).unwrap();
+            let mut app = crate::test_support::manual_frames_app(&path).unwrap();
             assert!(app
                 .pending_effects()
                 .iter()
@@ -1833,14 +2002,14 @@ mod tests {
         let old_frame;
         let old_incarnation;
         {
-            let mut app = App::open(&path).unwrap();
+            let mut app = crate::test_support::manual_frames_app(&path).unwrap();
             let token = app.hello("desk", caps(), 1).unwrap();
             old_incarnation = token.incarnation;
             old_frame = app.request_frame(&token, "youtube", "asset-1").unwrap();
             app.delete_device("desk", token.incarnation).unwrap();
         }
         {
-            let mut app = App::open(&path).unwrap();
+            let mut app = crate::test_support::manual_frames_app(&path).unwrap();
             assert!(app
                 .pending_effects()
                 .iter()
@@ -1863,7 +2032,8 @@ mod tests {
     #[test]
     fn weather_frame_is_discarded_on_display_change_and_reconnect() {
         let temp = tempfile::tempdir().unwrap();
-        let mut app = App::open(&temp.path().join("state.db")).unwrap();
+        let mut app =
+            crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap();
         let token = app.hello("desk", caps(), 1).unwrap();
         for _ in 0..2 {
             assert!(app
@@ -1942,7 +2112,8 @@ mod tests {
     #[test]
     fn cached_weather_publish_rejects_old_incarnation_and_revision() {
         let temp = tempfile::tempdir().unwrap();
-        let mut app = App::open(&temp.path().join("state.db")).unwrap();
+        let mut app =
+            crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap();
         let token = app.hello("desk", caps(), 1).unwrap();
         assert!(app
             .publish_plugin_source(
@@ -1987,3 +2158,7 @@ mod tests {
         assert!(app.plugin_position(&fresh).is_none());
     }
 }
+
+#[path = "application_jobs.rs"]
+mod managed;
+pub use managed::{PlaybackOffer, PlaybackTarget, PluginWebView};

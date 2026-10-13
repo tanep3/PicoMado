@@ -84,6 +84,58 @@ fn process(
     message: WireMessage,
     diagnostics: &mut AckDiagnostics,
 ) -> Result<Option<WireMessage>, &'static str> {
+    let received = std::time::Instant::now();
+    let received_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let kind = wire_label(&message);
+    let frame_id = match &message {
+        WireMessage::ReceiptAck { token } | WireMessage::RenderedAck { token } => token.frame_id,
+        _ => 0,
+    };
+    let mut lock_wait = Duration::ZERO;
+    let mut persistence_us = 0;
+    let mut image_preparation_us = 0;
+    let ignored_before = diagnostics.ignored;
+    let result = process_inner(
+        app,
+        current,
+        message,
+        diagnostics,
+        &mut lock_wait,
+        &mut persistence_us,
+        &mut image_preparation_us,
+    );
+    let elapsed = received.elapsed();
+    let sampled = diagnostics.ignored == ignored_before
+        || diagnostics.ignored <= 4
+        || diagnostics.ignored.is_power_of_two();
+    if sampled
+        && matches!(
+            kind,
+            "next" | "power" | "sub" | "up" | "down" | "receipt_ack" | "rendered_ack"
+        )
+        || elapsed >= Duration::from_millis(50)
+    {
+        let (id, incarnation, session_epoch) = session_identity(current);
+        eprintln!("picomado message_processed id={} incarnation={} session_epoch={} kind={} frame_id={} received_unix_ms={} lock_wait_us={} processing_us={} persistence_us={} image_preparation_us={} elapsed_us={} outcome={}",
+            id, incarnation, session_epoch, kind, frame_id, received_unix_ms,
+            lock_wait.as_micros(), elapsed.saturating_sub(lock_wait).as_micros(), persistence_us, image_preparation_us, elapsed.as_micros(),
+            if result.is_ok() { "ok" } else { "rejected" });
+    }
+    result
+}
+
+fn process_inner(
+    app: &SharedApp,
+    current: &mut Option<SessionToken>,
+    message: WireMessage,
+    diagnostics: &mut AckDiagnostics,
+    lock_wait: &mut Duration,
+    persistence_us: &mut u128,
+    image_preparation_us: &mut u128,
+) -> Result<Option<WireMessage>, &'static str> {
     if let WireMessage::Hello {
         device_id,
         capabilities,
@@ -94,11 +146,16 @@ fn process(
             return Err("duplicate_hello");
         }
         let caps: BTreeSet<_> = capabilities.into_iter().collect();
-        let token = app
-            .lock()
-            .map_err(|_| "unavailable")?
+        let waiting = std::time::Instant::now();
+        let mut guard = app.lock().map_err(|_| "unavailable")?;
+        *lock_wait = waiting.elapsed();
+        let totals = guard.operation_totals();
+        let token = guard
             .hello(&device_id, caps, screen_owner_epoch)
             .map_err(|_| "invalid_hello")?;
+        let after = guard.operation_totals();
+        *persistence_us = after.0.saturating_sub(totals.0);
+        *image_preparation_us = after.1.saturating_sub(totals.1);
         *current = Some(token.clone());
         return Ok(Some(WireMessage::Welcome {
             incarnation: token.incarnation,
@@ -106,11 +163,14 @@ fn process(
         }));
     }
     let token = current.as_ref().ok_or("hello_required")?;
+    let waiting = std::time::Instant::now();
     let mut guard = app.lock().map_err(|_| "unavailable")?;
+    *lock_wait = waiting.elapsed();
     if !guard.session_is_current(token) {
         return Err("stale_session");
     }
-    match message {
+    let totals = guard.operation_totals();
+    let result = match message {
         WireMessage::SettingsStored {
             incarnation,
             revision,
@@ -245,7 +305,11 @@ fn process(
             Ok(None)
         }
         _ => Err("unexpected_message"),
-    }
+    };
+    let after = guard.operation_totals();
+    *persistence_us = after.0.saturating_sub(totals.0);
+    *image_preparation_us = after.1.saturating_sub(totals.1);
+    result
 }
 
 enum WriterCommand {
@@ -457,12 +521,17 @@ where
     let mut next_packet_id = 1;
     let mut plans = std::collections::BTreeMap::<u64, FramePlan>::new();
     let mut progress = std::collections::BTreeMap::<u64, FrameProgress>::new();
-    let mut tick = tokio::time::interval(Duration::from_millis(200));
+    let mut changes = match app.lock() {
+        Ok(guard) => guard.dispatch_notifications(),
+        Err(_) => return "application_unavailable",
+    };
+    let mut refresh = false;
+    let mut tick = tokio::time::interval(Duration::from_secs(1));
     let end_reason = loop {
         tokio::select! {
             biased;
             command=rx.recv()=>match command {
-                Some(WriterCommand::Bind(token))=>current=Some(token),
+                Some(WriterCommand::Bind(token))=>{current=Some(token);refresh=true;},
                 Some(WriterCommand::Reply(message))=>{
                     let kind=wire_label(&message);
                     if write_wire(&mut sink,message).await.is_err() {
@@ -474,7 +543,13 @@ where
                 Some(WriterCommand::Stop)=>break "requested_stop",
                 None=>break "command_channel_closed",
             },
-            _=tick.tick(),if current.is_some()=>{
+            result=changes.changed()=>{
+                if result.is_err(){break "application_unavailable";}
+                refresh=true;
+            },
+            _=tick.tick()=>refresh=true,
+            _=std::future::ready(()),if refresh && current.is_some()=>{
+                refresh=false;
                 let token=current.as_ref().expect("bound");
                 if !app.lock().is_ok_and(|guard|guard.session_is_current(token)) {break "session_not_current";}
                 match enqueue_outbox(&app,token,&mut queue,&mut next_packet_id,&mut plans) {
@@ -546,7 +621,22 @@ where
                     frame.sent_bytes+=packet_len;
                 }
                 if packet.finish_effect {
-                    let completed=app.lock().ok().and_then(|mut guard|guard.complete_effect(packet.outbox_id).ok());
+                    let io_complete = std::time::Instant::now();
+                    let waiting = std::time::Instant::now();
+                    let mut lock_wait = Duration::ZERO;
+                    let mut completion_time = Duration::ZERO;
+                    let completed=app.lock().ok().and_then(|mut guard| {
+                        lock_wait = waiting.elapsed();
+                        let started = std::time::Instant::now();
+                        let result = guard.complete_effect(packet.outbox_id).ok();
+                        completion_time = started.elapsed();
+                        result
+                    });
+                    if let Some(frame) = progress.get(&packet.outbox_id) {
+                        eprintln!("picomado frame_socket_sent id={} effect_id={} frame_id={} socket_elapsed_us={} completion_lock_wait_us={} completion_us={}",
+                            token.device_id, packet.outbox_id, frame.plan.frame_id,
+                            io_complete.duration_since(frame.started).as_micros(), lock_wait.as_micros(), completion_time.as_micros());
+                    }
                     if let Some(frame)=progress.remove(&packet.outbox_id) {
                         log_frame_end(&token.device_id,packet.outbox_id,frame,
                             match completed {Some(true)=>"sent",Some(false)=>"effect_already_resolved",None=>"effect_completion_failed"});
@@ -743,7 +833,7 @@ mod tests {
     }
 
     fn app_at_fixture_date(path: &std::path::Path) -> App {
-        App::open_with_clock(path, Arc::new(FixtureClock)).unwrap()
+        crate::test_support::manual_frames_app_with_clock(path, Arc::new(FixtureClock)).unwrap()
     }
 
     /// After `limit` writes this sink never becomes ready, like a terminal
@@ -790,7 +880,7 @@ mod tests {
     async fn non_reading_writer_times_out_without_delaying_fast_peer_input() {
         let temp = tempfile::tempdir().unwrap();
         let app = Arc::new(std::sync::Mutex::new(
-            App::open(&temp.path().join("state.db")).unwrap(),
+            crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap(),
         ));
         let (slow, fast) = {
             let mut a = app.lock().unwrap();
@@ -915,7 +1005,7 @@ mod tests {
         for scenario in ["switch", "cancel", "standby", "reconnect"] {
             let temp = tempfile::tempdir().unwrap();
             let app = Arc::new(std::sync::Mutex::new(
-                App::open(&temp.path().join("state.db")).unwrap(),
+                crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap(),
             ));
             let token = app
                 .lock()
@@ -1065,7 +1155,7 @@ mod tests {
     async fn blocked_terminal_still_processes_input_while_other_terminal_gets_two_frames() {
         let temp = tempfile::tempdir().unwrap();
         let app = Arc::new(std::sync::Mutex::new(
-            App::open(&temp.path().join("state.db")).unwrap(),
+            crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap(),
         ));
         let (slow_tx, mut slow_rx) = tokio::sync::mpsc::channel(16);
         let (fast_tx, mut fast_rx) = tokio::sync::mpsc::channel(16);
@@ -1623,6 +1713,176 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn burst_switch_inputs_keep_ordered_responses_while_old_image_is_blocked() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+            &temp.path().join("state.db"),
+        )));
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let count = Arc::new(AtomicUsize::new(0));
+        let open = Arc::new(AtomicBool::new(false));
+        let wake = Arc::new(futures_util::task::AtomicWaker::new());
+        let (input, mut receiver) = tokio::sync::mpsc::channel(16);
+        let task = tokio::spawn(serve_split(
+            GateSink {
+                inner: MockSink {
+                    count: count.clone(),
+                    limit: usize::MAX,
+                    recorded: Some(recorded.clone()),
+                },
+                at: 3,
+                open: open.clone(),
+                wake: wake.clone(),
+            },
+            futures_util::stream::poll_fn(move |cx| receiver.poll_recv(cx)),
+            app.clone(),
+        ));
+        input
+            .send(Ok::<_, ()>(Message::Binary(
+                encode(&WireMessage::Hello {
+                    device_id: "desk".into(),
+                    capabilities: vec!["lcd".into()],
+                    screen_owner_epoch: 1,
+                })
+                .unwrap()
+                .into(),
+            )))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while count.load(Ordering::SeqCst) < 2 {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let session = SessionToken {
+            device_id: "desk".into(),
+            incarnation: 1,
+            session_epoch: 1,
+        };
+        let old = app
+            .lock()
+            .unwrap()
+            .queue_lcd_frame(
+                &session,
+                "youtube",
+                vec![1; crate::protocol::LCD_FRAME_BYTES],
+            )
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while count.load(Ordering::SeqCst) < 3 {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let epoch = app.lock().unwrap().selection_for(&session).unwrap().1;
+        let mut bytes = Vec::new();
+        for _ in 0..12 {
+            bytes.extend(
+                encode(&WireMessage::Next {
+                    incarnation: 1,
+                    session_epoch: 1,
+                })
+                .unwrap(),
+            );
+        }
+        input.send(Ok(Message::Binary(bytes.into()))).await.unwrap();
+        tokio::time::timeout(Duration::from_millis(500), async {
+            while app.lock().unwrap().selection_for(&session).unwrap().1 != epoch + 12 {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!app.lock().unwrap().frame_is_current(&old));
+        // Input transitions finish before the blocked writer can send replies.
+        assert_eq!(count.load(Ordering::SeqCst), 3);
+        open.store(true, Ordering::SeqCst);
+        wake.wake();
+        let responses = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let responses: Vec<_> = recorded
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|message| {
+                        let Message::Binary(bytes) = message else {
+                            return None;
+                        };
+                        match Decoder::default().push(bytes).unwrap().remove(0) {
+                            WireMessage::InputAccepted {
+                                selected,
+                                display_epoch,
+                            } => Some((selected, display_epoch)),
+                            WireMessage::Error { code } => panic!("unexpected error: {code}"),
+                            _ => None,
+                        }
+                    })
+                    .collect();
+                if responses.len() == 12 {
+                    break responses;
+                }
+                assert!(!task.is_finished());
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap();
+        for (index, (selected, display_epoch)) in responses.iter().enumerate() {
+            assert_eq!(
+                selected.as_deref(),
+                Some(["caricature", "weather", "rain-radar", "youtube"][index % 4])
+            );
+            assert_eq!(*display_epoch, epoch + index as u64 + 1);
+        }
+        let mut assembler = FrameAssembler::default();
+        for message in recorded.lock().unwrap().iter() {
+            let Message::Binary(bytes) = message else {
+                continue;
+            };
+            let message = Decoder::default().push(bytes).unwrap().remove(0);
+            if matches!(
+                message,
+                WireMessage::FrameStart { .. } | WireMessage::FrameChunk { .. }
+            ) {
+                assert!(
+                    assembler.accept(message).unwrap().is_none(),
+                    "old image completed after switch"
+                );
+            }
+        }
+        let mut bytes = encode(&WireMessage::ReceiptAck { token: old.clone() }).unwrap();
+        bytes.extend(encode(&WireMessage::RenderedAck { token: old }).unwrap());
+        bytes.extend(
+            encode(&WireMessage::Next {
+                incarnation: 1,
+                session_epoch: 1,
+            })
+            .unwrap(),
+        );
+        input.send(Ok(Message::Binary(bytes.into()))).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while app.lock().unwrap().selection_for(&session).unwrap().1 != epoch + 13 {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(app.lock().unwrap().session_is_current(&session));
+        assert_eq!(
+            app.lock().unwrap().view().devices[0].last_rendered_frame,
+            None
+        );
+        drop(input);
+        tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn cancelled_last_fragment_does_not_close_writer() {
         let temp = tempfile::tempdir().unwrap();
         let mut state = app_at_fixture_date(&temp.path().join("state.db"));
@@ -1930,7 +2190,7 @@ mod tests {
     async fn mock_terminal_hello_settings_input_reconnect_and_old_session_guard() {
         let temp = tempfile::tempdir().unwrap();
         let app = Arc::new(std::sync::Mutex::new(
-            App::open(&temp.path().join("state.db")).unwrap(),
+            crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap(),
         ));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -2552,7 +2812,7 @@ mod tests {
     async fn radar_mock_terminal_browses_real_hourly_frames_and_cancels_to_latest_observation() {
         let temp = tempfile::tempdir().unwrap();
         let app = Arc::new(std::sync::Mutex::new(
-            App::open(&temp.path().join("state.db")).unwrap(),
+            crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap(),
         ));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();

@@ -58,3 +58,18 @@ bool pm_button_step(pm_button *b, bool pressed, uint32_t now_ms) {
     }
     return false;
 }
+
+bool pm_button_wakes(unsigned count,unsigned index,bool long_press){
+    return (count==4 && index==2) || (count==2 && index==1 && long_press);
+}
+bool pm_button_wake_step(pm_button *b,unsigned count,unsigned index,
+                         bool pressed,uint32_t now,uint32_t long_ms){
+    bool edge=pm_button_step(b,pressed,now);
+    if(edge){b->held_ms=now;b->wake_reported=false;b->wake_armed=true;}
+    if(!b->stable){b->wake_reported=false;b->wake_armed=false;return false;}
+    if(count==4)return edge && pm_button_wakes(count,index,false);
+    if(count!=2 || !long_ms || !b->wake_armed || b->wake_reported || !pressed ||
+       (uint32_t)(now-b->held_ms)<long_ms)return false;
+    if(!pm_button_wakes(count,index,true))return false;
+    b->wake_reported=true;return true;
+}

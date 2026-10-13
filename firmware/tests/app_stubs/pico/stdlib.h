@@ -14,3 +14,5 @@ void gpio_set_dir(uint pin, int direction);
 void gpio_pull_up(uint pin);
 bool gpio_get(uint pin);
 void sleep_ms(unsigned milliseconds);
+
+uint64_t time_us_64(void);

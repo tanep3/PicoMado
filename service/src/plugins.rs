@@ -1,38 +1,20 @@
 //! Built-in plugin composition. Add implementations here without changing the
 //! application, transport, or transition engine.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::content::ContentPlugin;
-use crate::{Capability, Engine, Event, Plugin, Registry, WorldQuery};
+use crate::{Engine, Registry};
 
 pub const DEFAULT_ORDER: [&str; 4] = ["youtube", "caricature", "weather", "rain-radar"];
-
-struct SkeletonPlugin(&'static str);
-
-impl Plugin for SkeletonPlugin {
-    fn id(&self) -> &str {
-        self.0
-    }
-    fn supports(&self, capabilities: &BTreeSet<Capability>) -> bool {
-        capabilities.contains("lcd") || capabilities.contains("eink")
-    }
-    fn candidates<'a>(
-        &'a self,
-        _query: &'a dyn WorldQuery,
-        _event: &'a Event,
-    ) -> Box<dyn Iterator<Item = crate::Candidate> + 'a> {
-        Box::new(std::iter::empty())
-    }
-}
 
 pub fn engine() -> Engine {
     let mut registry = Registry::default();
     registry
-        .register(Box::new(SkeletonPlugin("youtube")))
+        .register(Box::new(crate::youtube::YoutubePlugin))
         .expect("unique plugin");
     registry
-        .register(Box::new(SkeletonPlugin("caricature")))
+        .register(Box::new(crate::caricature::CaricaturePlugin))
         .expect("unique plugin");
     registry
         .register(Box::new(crate::weather::WeatherPlugin))
@@ -45,6 +27,14 @@ pub fn engine() -> Engine {
 
 pub fn contents() -> BTreeMap<String, Box<dyn ContentPlugin>> {
     BTreeMap::from([
+        (
+            "youtube".into(),
+            Box::new(crate::plugin_adapters::YoutubeManaged::default()) as Box<dyn ContentPlugin>,
+        ),
+        (
+            "caricature".into(),
+            Box::new(caricature_content()) as Box<dyn ContentPlugin>,
+        ),
         (
             "weather".into(),
             Box::new(crate::weather::WeatherContent::default()) as Box<dyn ContentPlugin>,
@@ -64,4 +54,40 @@ pub async fn fetch(job: &crate::content::FetchJob) -> Result<Vec<u8>, String> {
         "rain-radar" => crate::radar::JmaRadarFetcher::fetch_async(job).await,
         _ => Err("unsupported plugin source".into()),
     }
+}
+
+/// External adapters are wired only at this composition boundary.
+pub fn executors() -> crate::workers::Executors {
+    // Reuse the existing interpreter read-only, including pepedpid/Pillow.
+    let caricature = crate::caricature::executor::CaricatureExecutor {
+        python: "/home/tane/dev/PicoW/PicoW_E-ink_Display/.venv/bin/python".into(),
+        ..Default::default()
+    };
+    BTreeMap::from([
+        (
+            "youtube".into(),
+            std::sync::Arc::new(crate::plugin_adapters::YoutubeExecutor)
+                as std::sync::Arc<dyn crate::plugin_jobs::PluginJobExecutor>,
+        ),
+        (
+            "caricature".into(),
+            std::sync::Arc::new(caricature)
+                as std::sync::Arc<dyn crate::plugin_jobs::PluginJobExecutor>,
+        ),
+    ])
+}
+
+fn caricature_content() -> crate::caricature::CaricatureContent {
+    #[derive(serde::Deserialize)]
+    struct Catalog {
+        topics: Vec<crate::caricature::Selection>,
+        styles: Vec<crate::caricature::Selection>,
+    }
+    let catalog: Catalog = serde_json::from_str(include_str!("../assets/caricature-catalog.json"))
+        .expect("validated bundled catalog");
+    let mut content = crate::caricature::CaricatureContent::default();
+    content
+        .set_catalog(catalog.topics, catalog.styles)
+        .expect("validated bundled catalog");
+    content
 }

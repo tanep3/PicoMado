@@ -1,3 +1,4 @@
+#include "trace.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -10,6 +11,13 @@
 uint64_t time_us_64(void) { static uint64_t tick; return ++tick; }
 #endif
 
+#if PM_TRACE_ENABLE
+static char trace_output[32768];static size_t trace_used;
+uint64_t time_us_64(void){static uint64_t us;return ++us;}
+size_t pm_trace_usb_write(const char *p,size_t n){
+    assert(trace_used+n<sizeof trace_output);memcpy(trace_output+trace_used,p,n);trace_used+=n;trace_output[trace_used]=0;return n;
+}
+#endif
 static spi_inst_t instance;
 spi_inst_t *spi0 = &instance;
 static int levels[30], output[30];
@@ -71,6 +79,9 @@ int spi_write_blocking(spi_inst_t *spi, const uint8_t *bytes, size_t length) {
     return (int)length;
 }
 int main(void) {
+#if PM_TRACE_ENABLE
+    pm_trace_frame_context(900);
+#endif
 #ifdef PM_TEST_NORMAL_SPI_BAUD
     expected_control=expected_frame=PM_TEST_NORMAL_SPI_BAUD;
     pm_lcd_init();
@@ -149,6 +160,12 @@ int main(void) {
     assert(memcmp(fixture,captured,sizeof fixture));
     pm_capture_dump();
     puts("capture host: frames 1/2/7 retained after original LCD buffer overwrite");
+#endif
+#if PM_TRACE_ENABLE
+    for(unsigned i=0;i<100;i++)pm_trace_flush();
+    assert(strstr(trace_output,"event=spi_begin frame=900"));
+    assert(strstr(trace_output,"event=spi_end frame=900 a=25600"));
+    puts("production LCD trace: actual transfer boundaries/returned byte count and baud PASS");
 #endif
     return 0;
 }

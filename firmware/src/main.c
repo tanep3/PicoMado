@@ -1,3 +1,4 @@
+#include "trace.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -81,7 +82,7 @@ static void log_usb_snapshot(void){
     was_connected=true;last_ms=now;
     int wifi=wifi_enabled?cyw43_wifi_link_status(&cyw43_state,CYW43_ITF_STA):CYW43_LINK_DOWN;
     int tcpip=wifi_enabled?cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA):CYW43_LINK_DOWN;
-    printf("net status profile=%s app=%s transport=%s wifi=%s tcpip=%s ip_assigned=%u\n",
+    pm_logf("net status profile=%s app=%s transport=%s wifi=%s tcpip=%s ip_assigned=%u\n",
         profile_name(),app_name(),transport_name(),link_name(wifi),link_name(tcpip),
         tcpip==CYW43_LINK_UP?1u:0u);
 }
@@ -90,7 +91,7 @@ static void log_wifi_progress(void){
     int tcpip=cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA);
     if(wifi==logged_wifi_link && tcpip==logged_tcpip_link)return;
     logged_wifi_link=wifi;logged_tcpip_link=tcpip;
-    printf("net profile=%s wifi=%s tcpip=%s ip_assigned=%u\n",
+    pm_logf("net profile=%s wifi=%s tcpip=%s ip_assigned=%u\n",
         profile_name(),link_name(wifi),link_name(tcpip),tcpip==CYW43_LINK_UP?1u:0u);
 }
 static bool profile_ready(unsigned index){
@@ -135,7 +136,7 @@ static void local(const char *one,const char *two) {
     owner_epoch++;pm_reset(&assembly);have_display=false;pending_render_ack=false;
     pm_display_wake();pm_display_status(one,two);
 #if PM_DIAGNOSTIC_BOOT || PM_DIAGNOSTIC_STAGE
-    printf("lcd local: %s / %s\n",one,two);
+    pm_logf("lcd local: %s / %s\n",one,two);
 #endif
 }
 static void wifi_off(void){
@@ -145,7 +146,7 @@ static void wifi_off(void){
 static void standby(void){
     pm_display_standby();
 #if PM_DIAGNOSTIC_BOOT
-    puts("lcd black: standby");
+    pm_logf("%s\n","lcd black: standby");
 #endif
     owner_epoch++;pm_reset(&assembly);have_display=false;pending_render_ack=false;
     wifi_off();pending_standby=false;state=STANDBY;
@@ -159,11 +160,11 @@ static void start_wifi(void){
     const pm_profile *p=&profiles[active_profile];
     logged_wifi_link=logged_tcpip_link=99;
     if(!profile_ready(active_profile)){
-        printf("net profile=%s wifi_start config_ready=0\n",profile_name());
+        pm_logf("net profile=%s wifi_start config_ready=0\n",profile_name());
         state=RETRY;started_ms=now_ms();return;
     }
     int result=cyw43_arch_wifi_connect_async(p->ssid,p->password,CYW43_AUTH_WPA2_AES_PSK);
-    printf("net profile=%s wifi_start sdk_result=%d\n",profile_name(),result);
+    pm_logf("net profile=%s wifi_start sdk_result=%d\n",profile_name(),result);
     log_wifi_progress();
     if(result){
         state=RETRY;started_ms=now_ms();return;
@@ -180,7 +181,7 @@ static void retry(void){
     bool wifi_was_up=wifi_enabled &&
         cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)==CYW43_LINK_UP;
     log_wifi_progress();
-    printf("net profile=%s retry app=%s transport=%s delay_ms=%lu\n",
+    pm_logf("net profile=%s retry app=%s transport=%s delay_ms=%lu\n",
         profile_name(),app_name(),transport_name(),(unsigned long)retry_ms);
     // A failed server/proxy session does not invalidate a healthy Wi-Fi/IP link.
     if(wifi_was_up)pm_net_close();else wifi_off();
@@ -189,7 +190,7 @@ static void retry(void){
 }
 static void menu(void){
     wifi_off();menu_profile=active_profile;state=MENU;
-    printf("net profile=%s menu_open\n",profile_name());
+    pm_logf("net profile=%s menu_open\n",profile_name());
     local("NETWORK",menu_profile?"AWAY":"HOME");
 }
 static bool number(const char *object,const char *key,uint64_t *out) {
@@ -234,7 +235,19 @@ static bool send_ack(uint8_t kind,const char *type,pm_token t){
         (unsigned long long)t.incarnation,(unsigned long long)t.session_epoch,
         (unsigned long long)t.display_epoch,(unsigned long long)t.screen_owner_epoch,
         (unsigned long long)t.frame_id);
-    return n>0 && (size_t)n<sizeof outbound_json && pm_net_send(kind,outbound_json);
+    pm_trace_kind before=kind==8?PM_TRACE_RECEIPT_BEGIN:PM_TRACE_RENDER_BEGIN;
+    pm_trace_kind after=kind==8?PM_TRACE_RECEIPT_END:PM_TRACE_RENDER_END;
+    pm_trace_frame_context(t.frame_id);
+    pm_trace_event(before,t.frame_id,kind,0);
+    bool ok=n>0 && (size_t)n<sizeof outbound_json && pm_net_send(kind,outbound_json);
+    pm_trace_event(after,t.frame_id,ok?1:0,0);
+    pm_trace_frame_context(0);return ok;
+}
+static bool send_pending_render_ack(void){
+    if(state!=ACTIVE || !pending_render_ack)return true;
+    pm_token t=pending_render_token;pending_render_ack=false;
+    if(!pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch))return true;
+    return send_ack(9,"rendered_ack",t);
 }
 static bool send_hello(void){
     int n=snprintf(outbound_json,sizeof outbound_json,
@@ -251,13 +264,14 @@ static void heartbeat(void){
         (unsigned long long)settings.revision);
     if(n>0&&(size_t)n<sizeof outbound_json)pm_net_send(5,outbound_json);
 #if PM_DIAGNOSTIC_STAGE
-    puts("diag heartbeat_sent");
+    pm_logf("%s\n","diag heartbeat_sent");
 #endif
 }
 static bool parse_bytes(const char *j,size_t *count){
     const char *p=strstr(j,"\"bytes\"");if(!p)return false;
     p=strchr(p,':');if(!p)return false;p++;
-    while(*p==' ')p++;if(*p++!='[')return false;
+    while(*p==' ')p++;
+    if(*p++!='[')return false;
     *count=0;
     while(true) {
         while(*p==' ')p++;
@@ -309,7 +323,7 @@ static void process(uint8_t kind,const char *j){
         retry_ms=settings.retry_s*1000u;
         display_epoch=0;state=ACTIVE;last_heartbeat_ms=now_ms();
 #if PM_DIAGNOSTIC_STAGE
-        printf("diag stage=welcome session=%llu\n",(unsigned long long)session_epoch);
+        pm_logf("diag stage=welcome session=%llu\n",(unsigned long long)session_epoch);
 #endif
         pm_display_status("PICO MADO","WAIT IMAGE");return;
     }
@@ -335,7 +349,7 @@ static void process(uint8_t kind,const char *j){
         const char *code="unknown";
         for(size_t i=0;i<sizeof codes/sizeof codes[0];i++)
             if(string_equals(j,"code",codes[i])){code=codes[i];break;}
-        printf("net profile=%s server_error=%s\n",profile_name(),code);
+        pm_logf("net profile=%s server_error=%s\n",profile_name(),code);
         retry();return;
     }
     if(kind!=12 && kind!=13)return;
@@ -348,39 +362,43 @@ static void process(uint8_t kind,const char *j){
            !number(j,"byte_len",&len)||!number(j,"crc32",&crc)||
            !string_equals(j,"format","rgb565be") ||
            !pm_start(&assembly,t,w,h,"rgb565be",len,crc))pm_reset(&assembly);
-        else display_epoch=t.display_epoch;
+        else {display_epoch=t.display_epoch;pm_trace_event(PM_TRACE_FRAME_START,t.frame_id,0,0);}
         return;
     }
     uint64_t offset;size_t count;bool complete;
     if(!number(j,"offset",&offset)||!parse_bytes(j,&count)||
        !pm_chunk(&assembly,t,offset,fragment,count,&complete))return;
     if(!complete)return;
+    pm_trace_event(PM_TRACE_CRC_OK,t.frame_id,0,PM_IMAGE_BYTES);
     if(!pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch))return;
     if(!send_ack(8,"receipt_ack",t)){retry();return;}
     if(!have_display || !pm_token_equal(last_rendered,t)) {
 #if PM_DIAGNOSTIC_BOOT
         size_t nonzero=0;
         for(size_t i=0;i<PM_IMAGE_BYTES;i++)if(assembly.pixels[i])nonzero++;
-        printf("frame %llu: nonzero bytes %u/%u\n",
+        pm_logf("frame %llu: nonzero bytes %u/%u\n",
                (unsigned long long)t.frame_id,(unsigned)nonzero,(unsigned)PM_IMAGE_BYTES);
         pm_display_reference_pattern();sleep_ms(500);
 #endif
-        if(!pm_display_frame(assembly.pixels,PM_IMAGE_BYTES)){retry();return;}
+        pm_trace_frame_context(t.frame_id);
+        bool drawn=pm_display_frame(assembly.pixels,PM_IMAGE_BYTES);
+        pm_trace_frame_context(0);
+        if(!drawn){retry();return;}
         have_display=true;last_rendered=t;
 #if PM_DIAGNOSTIC_STAGE
-        printf("diag frame_spi_complete=%llu\n",(unsigned long long)t.frame_id);
+        pm_logf("diag frame_spi_complete=%llu\n",(unsigned long long)t.frame_id);
 #endif
 #if PM_DIAGNOSTIC_BOOT
-        printf("lcd SPI complete: frame %llu\n",(unsigned long long)t.frame_id);
+        pm_logf("lcd SPI complete: frame %llu\n",(unsigned long long)t.frame_id);
 #endif
     }
     pending_render_token=t;pending_render_ack=true;
 }
-static void button(unsigned i){
+static void button(unsigned i,bool long_press){
 #if PM_DIAGNOSTIC_STAGE
-    printf("diag button=%u state=%u\n",i,(unsigned)state);
+    pm_logf("diag button=%u state=%u\n",i,(unsigned)state);
 #endif
-    if(state==STANDBY){start_wifi();return;}
+    if(state==STANDBY){if(pm_button_wakes(PM_BUTTON_COUNT,i,long_press))start_wifi();return;}
     if(state==MENU){
         if(i==1||i==3){
             if(profile_ready(menu_profile^1)){
@@ -389,7 +407,7 @@ static void button(unsigned i){
         }
         else if(i==0){
             active_profile=menu_profile;settings.profile=active_profile;store_settings();
-            printf("net profile=%s selected\n",profile_name());start_wifi();
+            pm_logf("net profile=%s selected\n",profile_name());start_wifi();
         }
         else if(i==2)start_wifi();
         return;
@@ -415,7 +433,7 @@ static void diagnostic_hold(uint32_t duration_ms,bool watch_buttons){
         cyw43_arch_poll();
         if(watch_buttons)for(unsigned i=0;i<PM_BUTTON_COUNT;i++)
             if(pm_button_step(&buttons[i],!gpio_get(button_pins[i]),now_ms())){
-                printf("diag local_button=%u\n",i);
+                pm_logf("diag local_button=%u\n",i);
                 pm_display_status("BUTTON",names[i]);
             }
         sleep_ms(5);
@@ -460,20 +478,31 @@ int main(void){
     if(!net_ok){pm_display_status("WIFI","INIT ERROR");while(true)sleep_ms(1000);}
 #if PM_DIAGNOSTIC_STAGE
     pm_display_reference_pattern();
-    puts("diag stage=boot_pattern duration_ms=6000");
+    pm_logf("%s\n","diag stage=boot_pattern duration_ms=6000");
     diagnostic_hold(6000,false);
     pm_display_status("BUTTON","PRESS BUTTON");
-    puts("diag stage=local_buttons duration_ms=25000");
+    pm_logf("%s\n","diag stage=local_buttons duration_ms=25000");
     diagnostic_hold(25000,true);
-    puts("diag stage=wifi_connect");
+    pm_logf("%s\n","diag stage=wifi_connect");
 #endif
     start_wifi();
     while(true){
+        uint64_t loop_started=pm_trace_clock();
         uint32_t now=now_ms();
-        for(unsigned i=0;i<PM_BUTTON_COUNT;i++)if(pm_button_step(&buttons[i],!gpio_get(button_pins[i]),now))button(i);
+        for(unsigned i=0;i<PM_BUTTON_COUNT;i++){
+            bool pressed=!gpio_get(button_pins[i]);
+            bool was_pressed=buttons[i].stable;
+            bool event=state==STANDBY
+                ?pm_button_wake_step(&buttons[i],PM_BUTTON_COUNT,i,pressed,now,settings.long_ms)
+                :pm_button_step(&buttons[i],pressed,now);
+            if(!was_pressed && buttons[i].stable)pm_trace_event(PM_TRACE_BUTTON,0,(int32_t)i,(uint32_t)state);
+            if(event)button(i,state==STANDBY && PM_BUTTON_COUNT==2);
+        }
         log_usb_snapshot();
-        if(state==STANDBY){sleep_ms(5);continue;}
+        if(state==STANDBY){pm_trace_flush();sleep_ms(5);continue;}
+        uint64_t poll_started=pm_trace_clock();
         cyw43_arch_poll();
+        pm_trace_slow(PM_TRACE_SLOW_POLL,poll_started,1);
         // Button handling may save settings/draw and start a newer attempt.
         // Refresh before subtracting started_ms; the pre-button clock can wrap.
         now=now_ms();
@@ -482,7 +511,7 @@ int main(void){
             if(cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)==CYW43_LINK_UP){
 #if PM_DIAGNOSTIC_STAGE
                 pm_display_reference_pattern();
-                puts("diag stage=wifi_up_pattern duration_ms=6000");
+                pm_logf("%s\n","diag stage=wifi_up_pattern duration_ms=6000");
                 diagnostic_hold(6000,true);
 #endif
                 start_server();
@@ -501,11 +530,7 @@ int main(void){
             while(pm_net_take(&kind,json,sizeof json))process(kind,json);
             // Welcome/settings handling may also advance timers and draw.
             now=now_ms();
-            if(state==ACTIVE && pending_render_ack){
-                pm_token t=pending_render_token;pending_render_ack=false;
-                if(pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch))
-                    if(!send_ack(9,"rendered_ack",t)){retry();continue;}
-            }
+            if(!send_pending_render_ack()){retry();continue;}
             if(state==ACTIVE && pending_standby && now-started_ms>2000)standby();
             if(state==ACTIVE && now-last_heartbeat_ms>=settings.heartbeat_s*1000u){
                 heartbeat();last_heartbeat_ms=now;
@@ -519,6 +544,7 @@ int main(void){
                 if(wifi_enabled)start_server();else start_wifi();
             }
         }
-        sleep_ms(5);
+        pm_trace_slow(PM_TRACE_SLOW_LOOP,loop_started,(uint32_t)state);
+        pm_trace_flush();sleep_ms(5);
     }
 }

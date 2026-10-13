@@ -37,6 +37,7 @@
 #define PM_LCD_INVERT 1
 #define PM_LCD_COMPENSATE_INVERT_BGR 1
 #define PM_LCD_ROTATE_180 1
+// Leave disabled for unwired sample hardware; set 1 when BLK is wired to GP22.
 #define PM_LCD_BLK_CONNECTED 0
 #define PM_LCD_BLK_PIN 22
 #define PM_LCD_BLK_ACTIVE_HIGH 1

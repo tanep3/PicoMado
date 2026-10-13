@@ -1,3 +1,4 @@
+#include "trace.h"
 #include "net.h"
 #include "ws_accept.h"
 #include "rx_flow.h"
@@ -44,23 +45,31 @@ static void consume(size_t n) {
     if(pcb && credit)tcp_recved(pcb,(u16_t)credit);
 }
 static bool send_raw(const void *p, size_t n) {
-    if(!pcb){puts("net send_failed=no_socket");stage=PM_NET_FAILED;return false;}
+    if(!pcb){pm_logf("%s\n","net send_failed=no_socket");stage=PM_NET_FAILED;return false;}
     if(n>tcp_sndbuf(pcb)){
-        puts("net send_failed=send_buffer_full");stage=PM_NET_FAILED;return false;
+        pm_logf("%s\n","net send_failed=send_buffer_full");stage=PM_NET_FAILED;return false;
     }
+    uint64_t write_started=pm_trace_clock();
     err_t result=tcp_write(pcb,p,n,TCP_WRITE_FLAG_COPY);
+    pm_trace_event(PM_TRACE_TCP_WRITE,pm_trace_current_frame(),result,
+        (uint32_t)(pm_trace_clock()-write_started));
     if(result!=ERR_OK){
-        printf("net tcp_write_failed sdk_result=%d\n",(int)result);
+        pm_logf("net tcp_write_failed sdk_result=%d\n",(int)result);
         stage=PM_NET_FAILED; return false;
     }
-    tcp_output(pcb); return true;
+    uint64_t output_started=pm_trace_clock();
+    err_t output_result=tcp_output(pcb);
+    pm_trace_event(PM_TRACE_TCP_OUTPUT,pm_trace_current_frame(),output_result,
+        (uint32_t)(pm_trace_clock()-output_started));
+    // Preserve existing queueing semantics; output result is diagnostic, not arrival ACK.
+    return true;
 }
 static void error_cb(void *arg, err_t e) {
-    (void)arg;printf("net tcp_error sdk_result=%d\n",(int)e);pcb=NULL;socket_dead=true;
+    (void)arg;pm_logf("net tcp_error sdk_result=%d\n",(int)e);pcb=NULL;socket_dead=true;
 }
 static err_t recv_cb(void *arg, struct tcp_pcb *p, struct pbuf *buf, err_t e) {
     (void)arg;(void)p;
-    if (!buf) { puts("net tcp_peer_closed");socket_dead=true;return ERR_OK; }
+    if (!buf) { pm_logf("%s\n","net tcp_peer_closed");socket_dead=true;return ERR_OK; }
     if (e!=ERR_OK || buf->tot_len>RX_CAP-rx_used) {
         pbuf_free(buf); socket_dead=true; return ERR_OK;
     }
@@ -102,7 +111,7 @@ static bool upgrade(void) {
 }
 static err_t connected_cb(void *arg, struct tcp_pcb *p, err_t e) {
     (void)arg;(void)p;
-    if(e!=ERR_OK){printf("net tcp_connect_failed sdk_result=%d\n",(int)e);socket_dead=true;return e;}
+    if(e!=ERR_OK){pm_logf("net tcp_connect_failed sdk_result=%d\n",(int)e);socket_dead=true;return e;}
     if(!profile->socks) { if(!upgrade())socket_dead=true; return ERR_OK; }
     const uint8_t greeting[]={5,1,2};
     socks_step=SOCKS_METHOD;
@@ -145,7 +154,7 @@ static void process_socks(void) {
     if(socks_step==SOCKS_METHOD){
         int result=socks5_method_result(rx,rx_used);
         if(result==SOCKS5_INCOMPLETE)return;
-        printf("net socks_method result=%d\n",result);
+        pm_logf("net socks_method result=%d\n",result);
         if(result!=SOCKS5_OK){stage=PM_NET_FAILED;return;}
         consume(2);
         size_t n=0;
@@ -160,7 +169,7 @@ static void process_socks(void) {
     if(socks_step==SOCKS_AUTH){
         int result=socks5_auth_result(rx,rx_used);
         if(result==SOCKS5_INCOMPLETE)return;
-        printf("net socks_auth result=%d\n",result);
+        pm_logf("net socks_auth result=%d\n",result);
         if(result!=SOCKS5_OK){stage=PM_NET_FAILED;return;}
         consume(2);
         uint8_t req[10];
@@ -173,12 +182,14 @@ static void process_socks(void) {
     size_t n=0;
     int result=socks5_connect_result(rx,rx_used,&n);
     if(result==SOCKS5_INCOMPLETE)return;
-    printf("net socks_connect result=%d\n",result);
+    pm_logf("net socks_connect result=%d\n",result);
     if(result!=SOCKS5_OK){stage=PM_NET_FAILED;return;}
     consume(n);if(!upgrade())stage=PM_NET_FAILED;
 }
 void pm_net_poll(void) {
+    uint64_t started=pm_trace_clock();
     cyw43_arch_poll();
+    pm_trace_slow(PM_TRACE_SLOW_POLL,started,2);
     if(socket_dead){pm_net_close();stage=PM_NET_FAILED;return;}
     if(stage==PM_NET_SOCKS && rx_used)process_socks();
     if(stage==PM_NET_WS) {

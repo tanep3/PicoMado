@@ -3,6 +3,7 @@
 #include <stdint.h>
 typedef struct { unsigned unused; } cyw43_t;
 extern cyw43_t cyw43_state;
+int cyw43_arch_init(void);
 #define CYW43_ITF_STA 0
 #define CYW43_AUTH_WPA2_AES_PSK 0x00400004u
 #define CYW43_LINK_DOWN 0

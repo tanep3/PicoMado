@@ -50,6 +50,10 @@
     dialog{width:min(100% - 32px,480px);padding:0;border:1px solid #70535a;border-radius:16px;background:#1a222d;color:#edf2f6;box-shadow:0 28px 100px #000b} dialog::backdrop{background:#03070bc9;backdrop-filter:blur(4px)}.dialog-body{padding:26px}.dialog-body h2{color:#ffe2e4}.dialog-body p{color:#b9c8d3;font-size:.9rem}.dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}.dialog-actions .secondary{margin-right:auto}
     @media(max-width:700px){.topbar{display:block;padding:16px 0 9px}.brand{margin-bottom:13px}nav{margin:0 -7px}nav a{padding:9px 10px}.hero{padding:33px 0 23px}.panel{border-radius:15px}.device-card{padding:18px}.location-row{grid-template-columns:1fr}.location-name{padding:0}.location-row .button{width:100%}}
     @media(max-width:440px){.summary-grid{grid-template-columns:1fr}.device-head{flex-wrap:wrap}.dialog-actions{flex-wrap:wrap}.dialog-actions .button{flex:1}.field-grid{grid-template-columns:1fr}}
+    .content-preview{display:block;max-width:100%;max-height:220px;object-fit:contain;background:#fff;border-radius:8px;margin:12px 0}
+    textarea{min-height:140px;resize:vertical;font:inherit;color:inherit;background:#111c26;border:1px solid #344654;border-radius:8px;padding:10px}
+    progress{width:100%;accent-color:#68c7bc}
+    .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}
   </style>
 </head>
 <body>
@@ -181,7 +185,7 @@
       document.getElementById('page-lead').textContent='このプラグインの共通設定を管理します。';
       const s=section('プラグイン設定','設定の変更は次のジョブから反映します。','plugin-card');
       const breadcrumb=el('div',undefined,'plugin-breadcrumb'),home=el('a','← ホームへ戻る');home.href='/';breadcrumb.append(home);s.prepend(breadcrumb);
-      if(id==='caricature'){s.append(el('p','現在、変更できる共通設定はありません。','plugin-note'));return}
+      if(id==='caricature'){s.append(el('p','題材・画風・モデル・生成を下の共有設定で管理します。','plugin-note'));renderManaged(id);return}
       const form=el('form'),fields=el('div',undefined,'field-grid');let inputs=[];
       if(id==='youtube'){
         const wrap=el('label',undefined,'field');wrap.append(el('span','既定 FPS'));
@@ -199,6 +203,7 @@
         const ok=await run(()=>api('/api/plugin-settings','PUT',{expected_revision:current.plugins_revision,settings:value}),'共通設定を保存しました');if(!ok)save.disabled=false;
       };
       s.append(form);
+      if(id==='youtube')renderManaged(id);
       if(id==='weather'){
         const perDevice=section('端末別の地域と気温代表地点','地域は端末ごとに保存されます。共通設定には影響しません。','plugin-card');
         const list=el('div',undefined,'location-list');perDevice.append(list);let count=0;
@@ -218,12 +223,139 @@
         if(!count)list.append(el('p','地域設定に対応する端末はありません。','empty'));
       }
     }
+    const managedViews={},drafts={youtube:{whole:true},caricature:{}};
+    function bytesText(n){return `${((Number(n)||0)/1048576).toFixed(1)} MiB`}
+    async function loadManaged(){
+      const id=location.pathname.split('/').pop();
+      if(['youtube','caricature'].includes(id))managedViews[id]=await api(`/api/plugins/${id}`);
+    }
+    async function managedCommand(id,command,message='要求を受け付けました'){
+      if(busy)return false;busy=true;
+      try{
+        managedViews[id]=await api(`/api/plugins/${id}/commands`,'POST',{expected_revision:managedViews[id].revision,command});
+        current=await api('/api/state');say(message);render();return true;
+      }catch(error){say(error.message||'操作に失敗しました',true);return false}
+      finally{busy=false}
+    }
+    function textField(parent,label,type,value,required=false){
+      const wrap=el('label',undefined,'field');wrap.append(el('span',label));
+      const input=el(type==='textarea'?'textarea':'input');if(type!=='textarea')input.type=type;
+      input.value=value??'';input.required=required;wrap.append(input);parent.append(wrap);return input;
+    }
+    function jobsPanel(id,parent){
+      const jobs=managedViews[id]?.jobs||[],list=el('div',undefined,'subsection');list.append(el('p','処理状況','section-label'));
+      const names={queued:'実行待ち',running:'処理中',cancelling:'取消中',succeeded:'完了',failed:'失敗',cancelled:'取消完了'};
+      if(!jobs.length)list.append(el('p','処理中のジョブはありません。','plugin-note'));
+      for(const job of jobs){const row=el('div',undefined,'summary-item');row.append(el('strong',names[job.status]||job.status));
+        if(job.progress?.message)row.append(el('span',job.progress.message));
+        if(job.progress?.percent!=null){const progress=el('progress');progress.max=100;progress.value=job.progress.percent;row.append(progress)}
+        if(job.failure?.message)row.append(el('p',job.failure.message,'error'));list.append(row)}
+      parent.append(list);
+    }
+    async function deleteVideo(video){
+      const id=video.metadata.id,dialog=el('dialog');dialog.append(el('h2','動画の履歴とキャッシュを削除'));
+      dialog.append(el('p',`「${video.metadata.title}」を削除します。再生中なら停止し、この動画の処理中ジョブは取消完了を待ちます。`));
+      const label=el('label',undefined,'field');label.append(el('span',`確認のため動画 ID「${id}」を入力`));
+      const input=el('input');label.append(input);dialog.append(label);
+      const actions=el('div',undefined,'actions'),cancel=button('キャンセル'),confirm=button('削除する','danger');confirm.disabled=true;
+      actions.append(cancel,confirm);dialog.append(actions);document.body.append(dialog);
+      cancel.onclick=()=>dialog.close();input.oninput=()=>confirm.disabled=input.value!==id;
+      dialog.onclose=()=>dialog.remove();confirm.onclick=async()=>{
+        if(input.value!==id)return;confirm.disabled=true;
+        try{
+          let state=await api('/api/plugins/youtube');managedViews.youtube=state;
+          if(state.data.job?.video_id===id&&['Working','Cancelling'].includes(state.data.job.status)){
+            if(state.data.job.status==='Working'&&!await managedCommand('youtube',{kind:'cancel'},'処理を取り消しています')){confirm.disabled=false;return}
+            for(;;){state=await api('/api/plugins/youtube');managedViews.youtube=state;
+              if(!['Working','Cancelling'].includes(state.data.job?.status))break;
+              await new Promise(resolve=>setTimeout(resolve,300));}
+          }
+          state=await api('/api/plugins/youtube');managedViews.youtube=state;
+          if(state.data.active?.conversion.video_id===id&&!await managedCommand('youtube',{kind:'stop'},'再生を停止しました')){confirm.disabled=false;return}
+          managedViews.youtube=await api('/api/plugins/youtube');
+          if(await managedCommand('youtube',{kind:'delete',video_id:id,confirmation:id},'削除処理を受け付けました'))dialog.close();else confirm.disabled=false;
+        }catch(error){say(error.message,true);confirm.disabled=false}
+      };dialog.showModal();cancel.focus();
+    }
+    function renderManaged(id){
+      const view=managedViews[id];if(!view)return;const data=view.data||{};
+      const panel=section(id==='youtube'?'共有動画と再生':'作画と共有設定','この内容はプラグインを表示中の端末で共有します。端末別設定はホームで管理します。','plugin-card');
+      jobsPanel(id,panel);
+      if(id==='youtube'){
+        const status=el('div',undefined,'summary-grid');
+        const active=data.active?.conversion;status.append(el('strong',active?`再生中 · ${active.fps} fps · ${((data.position_ms||0)/1000).toFixed(1)} 秒`:'再生動画は未選択'));
+        const usage=data.cache_usage||data.known_bytes;status.append(el('span',`保存容量 ${bytesText(usage?.total)}${data.cache_usage?'':'（記録済みデータの集計）'}`));panel.append(status);
+        const form=el('form',undefined,'subsection'),fields=el('div',undefined,'field-grid');
+        const url=textField(fields,'YouTube URL','url',drafts.youtube.url,true);url.oninput=()=>drafts.youtube.url=url.value;
+        const fpsWrap=el('label',undefined,'field');fpsWrap.append(el('span','この動画の FPS'));const fps=el('select');
+        const def=el('option',`既定値 (${current.plugins.youtube_default_fps} fps)`);def.value='';fps.append(def);
+        for(const value of [6,12,18,24,30]){const opt=el('option',`${value} fps`);opt.value=value;fps.append(opt)}fps.value=drafts.youtube.fps||'';fps.onchange=()=>drafts.youtube.fps=fps.value;fpsWrap.append(fps);fields.append(fpsWrap);
+        const wholeWrap=el('label',undefined,'toggle'),whole=el('input');whole.type='checkbox';whole.checked=drafts.youtube.whole;wholeWrap.append(whole,el('span','全体を取得'));fields.append(wholeWrap);
+        const start=textField(fields,'開始（秒 / 分:秒）','text',drafts.youtube.start),end=textField(fields,'終了（空欄なら最後まで）','text',drafts.youtube.end);
+        start.oninput=()=>drafts.youtube.start=start.value;end.oninput=()=>drafts.youtube.end=end.value;
+        function range(){start.disabled=end.disabled=whole.checked;drafts.youtube.whole=whole.checked}whole.onchange=range;range();
+        const prepare=button('取得・変換して再生','primary');prepare.type='submit';form.append(fields,prepare);
+        form.onsubmit=event=>{event.preventDefault();if(form.reportValidity())managedCommand(id,{kind:'prepare',url:url.value,fps:fps.value?Number(fps.value):null,start:whole.checked?null:start.value,end:whole.checked?null:end.value})};panel.append(form);
+        const controls=el('div',undefined,'actions');for(const [label,kind]of[['処理を取消す','cancel'],['再生を停止','stop'],['容量を再計測','scan_usage']]){const control=button(label);control.onclick=()=>managedCommand(id,{kind});controls.append(control)}panel.append(controls);
+        const history=section('動画履歴','取得・変換中や失敗時も、現在の動画の再生を維持します。','plugin-card');
+        if(!data.videos?.length)history.append(el('p','動画履歴はまだありません。','empty'));
+        for(const video of data.videos||[]){const row=el('article',undefined,'device-card');
+          if(video.metadata.thumbnail){const image=el('img');image.src=`/api/plugins/youtube/assets/${encodeURIComponent(video.metadata.thumbnail)}`;image.alt='';image.className='content-preview';row.append(image)}
+          row.append(el('h3',video.metadata.title),el('p',video.metadata.channel||video.metadata.uploader||''));
+          const source=el('a','YouTubeで開く');source.href=video.metadata.url;source.rel='noopener noreferrer';source.target='_blank';row.append(source);
+          for(const conversion of Object.values(video.conversions||{})){const item=el('div',undefined,'actions');item.append(el('span',`${conversion.fps} fps · ${(conversion.clip.start_ms/1000).toFixed(1)}–${(conversion.clip.end_ms/1000).toFixed(1)} 秒 · ${bytesText(conversion.bytes)}`));const play=button('再生');play.onclick=()=>managedCommand(id,{kind:'play',key:conversion.key});item.append(play);row.append(item)}
+          const remove=button('この動画を削除','danger');remove.onclick=()=>deleteVideo(video);row.append(remove);history.append(row);
+        }
+      }else{
+        const settings=data.settings||{},fields=el('div',undefined,'field-grid');
+        for(const [label,key,items,kind]of[['題材','topic',data.topics||[],'set_topic'],['画風','style',data.styles||[],'set_style']]){
+          const wrap=el('label',undefined,'field');wrap.append(el('span',label));const select=el('select');
+          for(const item of items){const option=el('option',item.label);option.value=item.id;select.append(option)}select.value=settings[key]?.id||'';select.onchange=()=>managedCommand(id,{kind,id:select.value});wrap.append(select);fields.append(wrap);
+        }
+        for(const [label,key,kind]of[['ニュースのモデル','news_model','set_news_model'],['画像のモデル','image_model','set_image_model']]){
+          const input=textField(fields,label,'text',settings[key]);const save=button('保存');save.onclick=()=>managedCommand(id,{kind,model:input.value});input.parentElement.append(save);
+        }
+        panel.append(fields);
+        const normal=el('form',undefined,'subsection'),normalFields=el('div',undefined,'field-grid');
+        const lambda=textField(normalFields,'DPID λ','number',settings.dpid_lambda);lambda.min=0;lambda.max=1;lambda.step=.05;
+        const threshold=textField(normalFields,'白黒しきい値','number',settings.threshold);threshold.min=1;threshold.max=254;threshold.step=1;
+        const save=button('画像処理設定を保存');save.type='submit';normal.append(normalFields,save);normal.onsubmit=e=>{e.preventDefault();if(normal.reportValidity())managedCommand(id,{kind:'set_normalizer',dpid_lambda:Number(lambda.value),threshold:Number(threshold.value)})};panel.append(normal);
+        for(const [label,key,kind]of[['ニュース取得','news_retry','set_news_retry'],['画像生成','image_retry','set_image_retry']]){
+          const form=el('form',undefined,'subsection');form.append(el('p',`${label}の再試行`,'section-label'));const fs=el('div',undefined,'field-grid'),policy=settings[key]||{};
+          const controls=[['retry_count','追加試行回数'],['interval_seconds','試行間隔（秒）'],['deadline_seconds','全体期限（秒・0は無効）'],['attempt_timeout_seconds','1試行の期限（秒）']].map(([k,l])=>{const input=textField(fs,l,'number',policy[k]);input.min=k==='attempt_timeout_seconds'?1:0;input.step=1;return[k,input]});
+          const save=button('再試行設定を保存');save.type='submit';form.append(fs,save);form.onsubmit=e=>{e.preventDefault();if(form.reportValidity())managedCommand(id,{kind,policy:Object.fromEntries(controls.map(([k,input])=>[k,Number(input.value)]))})};panel.append(form);
+        }
+        const automatic=document.createElement('label');automatic.className='row';
+        const automaticInput=document.createElement('input');automaticInput.type='checkbox';automaticInput.checked=settings.automatic_generation!==false;
+        automaticInput.onchange=()=>managedCommand(id,{kind:'set_automatic_generation',enabled:automaticInput.checked});
+        automatic.append(automaticInput,document.createTextNode('毎時の自動生成'));panel.append(automatic);
+        const generate=button('選択した題材から作画','primary');generate.onclick=()=>managedCommand(id,{kind:'generate_news'});panel.append(generate);
+        const custom=el('form',undefined,'subsection'),text=textField(custom,'任意文章から作画','textarea',drafts.caricature.text??data.last_custom_text,true);text.maxLength=4000;text.oninput=()=>drafts.caricature.text=text.value;
+        const submit=button('この文章で作画','primary');submit.type='submit';custom.append(submit);custom.onsubmit=e=>{e.preventDefault();if(custom.reportValidity())managedCommand(id,{kind:'generate_custom',text:text.value})};panel.append(custom);
+        if(data.generation_error)panel.append(el('p',data.generation_error,'error'));
+        const history=section('作品履歴','履歴からの一時表示は、共有の最新作品と履歴を変更しません。','plugin-card');
+        const filter=textField(history,'日付で絞り込み','date',drafts.caricature.day);filter.onchange=()=>{drafts.caricature.day=filter.value;render()};
+        const entries=[...(data.history||[])].reverse().filter(item=>!filter.value||new Date(item.metadata.created_at_unix*1000).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'})===filter.value);
+        if(!entries.length)history.append(el('p','該当する作品はありません。','empty'));
+        for(const item of entries){const card=el('article',undefined,'device-card'),image=el('img');image.src=`/api/plugins/caricature/assets/${encodeURIComponent(item.artwork_id)}`;image.alt='作品プレビュー';image.className='content-preview';card.append(image,el('h3',item.artwork_id));
+          card.append(el('p',item.metadata.summary||new Date(item.metadata.created_at_unix*1000).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'})));
+          for(const url of item.metadata.source_urls||[]){const link=el('a','ニュース出典');link.href=url;link.rel='noopener noreferrer';link.target='_blank';card.append(link)}
+          const devices=current.devices.filter(d=>d.online&&d.selected==='caricature');if(devices.length){const select=el('select');for(const d of devices){const option=el('option',d.id);option.value=d.id;select.append(option)}const show=button('この端末へ一時表示');show.onclick=()=>managedCommand(id,{kind:'show_history',artwork_id:item.artwork_id,device_id:select.value});card.append(select,show)}else card.append(el('p','風刺画を表示中のオンライン端末がありません。','plugin-note'));
+          history.append(card);
+        }
+      }
+    }
     function render(){
       main.replaceChildren();const id=location.pathname.startsWith('/plugins/')?location.pathname.split('/').pop():null;
       document.querySelectorAll('nav a').forEach(a=>{if(a.pathname===location.pathname)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
       if(id)renderPlugin(id);else renderHome();
     }
-    Promise.all([api('/api/state'),api('/api/plugins/weather/options')]).then(([state,options])=>{current=state;weatherOptions=options;render()}).catch(error=>say(error.message||'読み込みに失敗しました',true));
+    Promise.all([api('/api/state'),api('/api/plugins/weather/options')]).then(([state,options])=>{current=state;weatherOptions=options;loadManaged().then(render).catch(error=>say(error.message,true))}).catch(error=>say(error.message||'読み込みに失敗しました',true));
+    setInterval(async()=>{
+      if(busy||deleteDialog.open||document.querySelector('dialog[open]'))return;
+      const active=document.activeElement;if(['INPUT','TEXTAREA','SELECT'].includes(active?.tagName))return;
+      try{await loadManaged();current=await api('/api/state');render()}catch{}
+    },2000);
   </script>
 </body>
 </html>

@@ -21,6 +21,18 @@ static unsigned joins,erases,server_begins,hello_count,heartbeat_count,loops;
 static bool sta_on,server_ready,welcome_available;
 static bool usb_connected;
 static bool drop_during_retry;
+#if PM_TRACE_ENABLE
+static bool trace_output;static char trace_text[32768];static size_t trace_used;
+uint64_t time_us_64(void){return (uint64_t)clock_ms*1000;}
+size_t pm_trace_usb_write(const char *p,size_t n){
+    if(!trace_output)return 0;
+    assert(trace_used+n<sizeof trace_text);
+    memcpy(trace_text+trace_used,p,n);trace_used+=n;trace_text[trace_used]=0;return n;
+}
+#endif
+static unsigned wake_trial,wake_loops,frame_receipts,frame_renders;
+static bool checking_frame;
+static const unsigned ignored_wake_buttons[]={0,1,3};
 static const char *last_lcd_one,*last_lcd_two;
 static pm_net_stage network_stage=PM_NET_DOWN;
 static enum {
@@ -59,7 +71,15 @@ void pm_display_init(void){}
 void pm_display_status(const char *a,const char *b){
     assert(a && b);last_lcd_one=a;last_lcd_two=b;clock_ms+=20;
 }
-bool pm_display_frame(uint8_t *p,size_t n){assert(p && n==PM_IMAGE_BYTES);return true;}
+bool pm_display_frame(uint8_t *p,size_t n){
+    assert(p && n==PM_IMAGE_BYTES);
+    if(checking_frame){
+        assert(frame_receipts>frame_renders);
+        pm_trace_event(PM_TRACE_SPI_BEGIN,pm_trace_current_frame(),0,0);clock_ms+=14;
+        pm_trace_event(PM_TRACE_SPI_END,pm_trace_current_frame(),PM_IMAGE_BYTES,15625000);
+    }
+    return true;
+}
 void pm_display_standby(void){}
 void pm_display_wake(void){}
 void pm_display_reference_pattern(void){assert(!"normal build must not draw diagnostics");}
@@ -74,6 +94,8 @@ bool pm_net_send(uint8_t kind,const char *j){
     assert(j && network_stage==PM_NET_READY);
     if(kind==1){hello_count++;welcome_available=true;}
     if(kind==5)heartbeat_count++;
+    if(kind==8){frame_receipts++;clock_ms++;}
+    if(kind==9){frame_renders++;clock_ms++;}
     return true;
 }
 bool pm_net_take(uint8_t *kind,char *j,size_t n){
@@ -191,15 +213,56 @@ void sleep_ms(unsigned ms){
             standby();assert(state==STANDBY && !sta_on);phase=HOME_ACTIVE;
         }break;
     case HOME_ACTIVE:
-        press_after_release(0);
+        if(wake_trial<3){
+            if(wake_loops<15){press_after_release((int)ignored_wake_buttons[wake_trial]);wake_loops++;}
+            else {pressed=-1;if(released()){wake_trial++;wake_loops=0;}}
+            assert(state==STANDBY && !sta_on && joins==(drop_during_retry?6u:5u));break;
+        }
+        press_after_release(2);
         if(joins==(drop_during_retry?7u:6u)){
             assert(state==WIFI && active_profile==0);
-            puts("standby wake: no immediate timeout");phase=WAKE;longjmp(finished,1);
+            puts("standby wake: SUB/UP/DOWN ignored; POWER only; no immediate timeout");phase=WAKE;longjmp(finished,1);
         }break;
     case WAKE:assert(!"test already completed");
     }
     clock_ms+=ms;
 }
+#if PM_TRACE_ENABLE
+static void test_frame_pipeline(void){
+    checking_frame=true;trace_used=0;trace_text[0]=0;
+    state=ACTIVE;network_stage=PM_NET_READY;await_selection=false;
+    incarnation=session_epoch=1;display_epoch=0;owner_epoch=42;
+    have_display=pending_render_ack=false;frame_receipts=frame_renders=0;
+    uint8_t zeros[PM_IMAGE_BYTES]={0};uint32_t crc=pm_crc32(zeros,sizeof zeros);
+    const char *pattern="\"token\":{\"device_id\":\"%s\",\"incarnation\":1,\"session_epoch\":1,\"display_epoch\":1,\"screen_owner_epoch\":42,\"frame_id\":900}";
+    char token[320];snprintf(token,sizeof token,pattern,PM_DEVICE_ID);
+    snprintf(json,sizeof json,"{\"type\":\"frame_start\",\"data\":{%s,\"width\":160,\"height\":80,\"format\":\"rgb565be\",\"byte_len\":25600,\"crc32\":%lu}}",token,(unsigned long)crc);
+    process(12,json);
+    for(unsigned offset=0;offset<PM_IMAGE_BYTES;offset+=PM_FRAGMENT_BYTES){
+        unsigned n=PM_IMAGE_BYTES-offset;if(n>PM_FRAGMENT_BYTES)n=PM_FRAGMENT_BYTES;
+        int prefix=snprintf(json,sizeof json,"{\"type\":\"frame_chunk\",\"data\":{%s,\"offset\":%u,\"bytes\":[",token,offset);
+        assert(prefix>0);size_t k=(size_t)prefix;
+        for(unsigned i=0;i<n;i++){json[k++]='0';if(i+1<n)json[k++]=',';}
+        memcpy(json+k,"]}}",4);process(13,json);
+        if(offset+n<PM_IMAGE_BYTES)assert(!frame_receipts && !frame_renders && !have_display);
+    }
+    assert(frame_receipts==1 && !frame_renders && have_display && pending_render_ack);
+    assert(send_pending_render_ack() && frame_renders==1 && !pending_render_ack);
+    assert(send_pending_render_ack() && frame_renders==1);
+    for(unsigned i=0;i<100;i++)pm_trace_flush();
+    const char *events[]={"event=crc_ok","event=receipt_begin","event=receipt_end", "event=spi_begin","event=spi_end","event=render_begin","event=render_end"};
+    const char *last=trace_text;
+    for(unsigned i=0;i<sizeof events/sizeof events[0];i++){
+        const char *next=strstr(last,events[i]);assert(next);last=next+strlen(events[i]);
+    }
+    assert(strstr(trace_text,"frame=900"));
+    // Cancellation/owner change between completed draw and ACK drops stale ACK.
+    pending_render_token=last_rendered;pending_render_ack=true;owner_epoch++;
+    assert(send_pending_render_ack() && !pending_render_ack && frame_renders==1);
+    checking_frame=false;
+    puts("frame trace: production parse/CRC -> receipt -> SPI -> rendered; stale completion ACK rejected PASS");
+}
+#endif
 int main(int argc,char **argv){
     assert(argc==1 || (argc==2 && (!strcmp(argv[1],"sdk-error") ||
         !strcmp(argv[1],"usb-snapshot") || !strcmp(argv[1],"error-log") ||
@@ -208,6 +271,9 @@ int main(int argc,char **argv){
     if(argc==2 && !strcmp(argv[1],"usb-snapshot"))usb_connected=true;
     if(argc==2 && !strcmp(argv[1],"drop-during-retry"))drop_during_retry=true;
     memset(test_flash_sector,0xff,sizeof test_flash_sector);
+#if PM_TRACE_ENABLE
+    for(unsigned i=0;i<64;i++)pm_trace_event(PM_TRACE_SLOW_LOOP,0,0,50000);
+#endif
     if(!setjmp(finished))pm_firmware_entry();
     if(argc==2 && !strcmp(argv[1],"usb-snapshot")){
         puts("late USB snapshot begin");
@@ -224,5 +290,13 @@ int main(int argc,char **argv){
         state=ACTIVE;
         process(11,"{\"type\":\"error\",\"data\":{\"code\":\"invalid_ack_token\"}}");
     }
+#if PM_TRACE_ENABLE
+    if(!sdk_result)assert(pm_trace_dropped()>0);
+    trace_output=true;
+    for(unsigned i=0;i<100;i++)pm_trace_flush();
+    if(!sdk_result)assert(strstr(trace_text,"event=button"));
+    puts("app trace: full USB queue did not prevent button/network main-loop regression");
+    test_frame_pipeline();
+#endif
     puts("app timing: production main loop PASS");return 0;
 }

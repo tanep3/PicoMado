@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use picomado_core::{application::App, host::serve_jma_on_listener};
+use picomado_core::{application::App, host::serve_plugins_on_listener};
 use serde::Deserialize;
 
 const DEFAULT_CONFIG: &str = "/home/tane/.config/PicoMado/config.toml";
@@ -60,11 +60,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::create_dir_all(config.plugins_root.join(plugin).join("cache"))?;
     }
     let app = Arc::new(Mutex::new(
-        App::open(&config.database_path).map_err(|e| format!("database open failed: {e:?}"))?,
+        App::open_with_plugin_root(&config.database_path, &config.plugins_root)
+            .map_err(|e| format!("database open failed: {e:?}"))?,
     ));
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
-    let host = serve_jma_on_listener(listener, app, stop_rx);
+    let host = serve_plugins_on_listener(listener, app, stop_rx);
     tokio::pin!(host);
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     tokio::select! {

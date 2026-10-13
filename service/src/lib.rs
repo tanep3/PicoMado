@@ -1,10 +1,14 @@
 //! Pure PicoMado kernel contract. No IO is performed here.
 
 pub mod application;
+pub mod caricature;
 pub mod content;
 pub mod fetch;
 pub mod host;
 mod lcd_text;
+pub mod playback;
+mod plugin_adapters;
+pub mod plugin_jobs;
 pub mod plugins;
 pub mod protocol;
 pub mod queue;
@@ -14,6 +18,8 @@ pub mod settings;
 pub mod transport;
 pub mod weather;
 pub mod web;
+pub mod workers;
+pub mod youtube;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -65,6 +71,7 @@ pub struct Device {
     pub requests: BTreeMap<FetchKey, u64>,
     pub datasets: BTreeMap<FetchKey, Dataset>,
     pub pending_frame_id: Option<u64>,
+    pub last_sent_frame: Option<u64>,
     pub last_received_frame: Option<u64>,
     pub last_rendered_frame: Option<u64>,
 }
@@ -220,6 +227,14 @@ pub enum Event {
         plugin: PluginId,
         asset_handle: String,
     },
+    RequestStreamingFrame {
+        token: DisplayToken,
+        plugin: PluginId,
+        asset_handle: String,
+    },
+    FrameSent {
+        token: FrameToken,
+    },
     RenderedAck {
         token: FrameToken,
     },
@@ -253,11 +268,15 @@ impl Event {
             | Self::LocalOwner { token, .. }
             | Self::PluginInput { token, .. } => &token.device_id,
             Self::BeginFetch { token, .. } | Self::PluginTick { token, .. } => &token.device_id,
-            Self::RequestFrame { token, .. } => &token.device_id,
+            Self::RequestFrame { token, .. } | Self::RequestStreamingFrame { token, .. } => {
+                &token.device_id
+            }
             Self::FetchCompleted { token, .. } | Self::FetchFailed { token, .. } => {
                 &token.device_id
             }
-            Self::RenderedAck { token } | Self::ReceiptAck { token } => &token.device_id,
+            Self::RenderedAck { token }
+            | Self::ReceiptAck { token }
+            | Self::FrameSent { token } => &token.device_id,
         }
     }
 }
@@ -359,6 +378,12 @@ pub enum Transition {
         plugin: PluginId,
         asset_handle: String,
     },
+    RequestStreamingFrame {
+        token: DisplayToken,
+        plugin: PluginId,
+        asset_handle: String,
+    },
+    FrameSent(FrameToken),
     RenderedAck(FrameToken),
     ReceiptAck(FrameToken),
 }
@@ -379,9 +404,13 @@ impl Transition {
             | Self::RefreshView { token, .. }
             | Self::LocalOwner { token, .. } => &token.device_id,
             Self::BeginFetch { token, .. } => &token.device_id,
-            Self::RequestFrame { token, .. } => &token.device_id,
+            Self::RequestFrame { token, .. } | Self::RequestStreamingFrame { token, .. } => {
+                &token.device_id
+            }
             Self::FetchCompleted { token, .. } => &token.device_id,
-            Self::RenderedAck(token) | Self::ReceiptAck(token) => &token.device_id,
+            Self::RenderedAck(token) | Self::ReceiptAck(token) | Self::FrameSent(token) => {
+                &token.device_id
+            }
         }
     }
 }
@@ -713,6 +742,24 @@ fn core_candidates<'a>(
                 asset_handle: asset_handle.clone(),
             },
         ),
+        Event::RequestStreamingFrame {
+            token,
+            plugin,
+            asset_handle,
+        } => (
+            Priority::Periodic,
+            "stream-frame-request",
+            Transition::RequestStreamingFrame {
+                token: token.clone(),
+                plugin: plugin.clone(),
+                asset_handle: asset_handle.clone(),
+            },
+        ),
+        Event::FrameSent { token } => (
+            Priority::Periodic,
+            "frame-sent",
+            Transition::FrameSent(token.clone()),
+        ),
         Event::RenderedAck { token } => (
             Priority::Periodic,
             "rendered-ack",
@@ -808,6 +855,7 @@ fn frame_display_current(device: &Device, token: &DisplayToken) -> bool {
 fn invalidate_display(id: &str, device: &mut Device, out: &mut Vec<Effect>) {
     device.display_epoch += 1;
     device.pending_frame_id = None;
+    device.last_sent_frame = None;
     device.last_received_frame = None;
     device.last_rendered_frame = None;
     out.push(Effect::DropQueuedFrames {
@@ -882,6 +930,7 @@ fn apply(
                     requests: BTreeMap::new(),
                     datasets: BTreeMap::new(),
                     pending_frame_id: None,
+                    last_sent_frame: None,
                     last_received_frame: None,
                     last_rendered_frame: None,
                 };
@@ -1205,12 +1254,56 @@ fn apply(
                 frame_id,
             };
             d.pending_frame_id = Some(frame_id);
+            d.last_sent_frame = None;
             d.last_received_frame = None;
             state.next_frame_id += 1;
             out.push(Effect::SendFrame {
                 token: frame,
                 asset_handle,
             });
+            Ok(true)
+        }
+        Transition::RequestStreamingFrame {
+            token,
+            plugin,
+            asset_handle,
+        } => {
+            let Some(device) = state.devices.get_mut(&token.device_id) else {
+                return Ok(false);
+            };
+            if !frame_display_current(device, &token)
+                || device.selected.as_deref() != Some(&plugin)
+                || device
+                    .pending_frame_id
+                    .is_some_and(|id| device.last_sent_frame != Some(id))
+            {
+                return Ok(false);
+            }
+            // Replace only a completely sent frame. The sender cannot invalidate
+            // an image halfway through writing its fragments.
+            device.pending_frame_id = None;
+            apply(
+                state,
+                registry,
+                Transition::RequestFrame {
+                    token,
+                    plugin,
+                    asset_handle,
+                },
+                out,
+            )
+        }
+        Transition::FrameSent(token) => {
+            let Some(device) = state.devices.get_mut(&token.device_id) else {
+                return Ok(false);
+            };
+            if !frame_current(device, &token)
+                || device.pending_frame_id != Some(token.frame_id)
+                || device.last_sent_frame == Some(token.frame_id)
+            {
+                return Ok(false);
+            }
+            device.last_sent_frame = Some(token.frame_id);
             Ok(true)
         }
         Transition::ReceiptAck(token) => {
@@ -2077,3 +2170,6 @@ mod tests {
         assert!(device(&w, "one").datasets.is_empty());
     }
 }
+
+#[cfg(test)]
+mod test_support;

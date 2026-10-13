@@ -80,6 +80,29 @@ pub async fn serve_jma_on_listener(
     serve_with_runner(listener, app, crate::fetch::run_jma_periodic, shutdown).await
 }
 
+/// Three independent worker loops share only short state transitions.
+pub async fn serve_plugins_on_listener(
+    listener: TcpListener,
+    app: SharedApp,
+    shutdown: watch::Receiver<bool>,
+) -> Result<(), HostError> {
+    serve_with_runner(
+        listener,
+        app,
+        |app, stop| async move {
+            let executors = crate::plugins::executors();
+            tokio::try_join!(
+                crate::fetch::run_jma_periodic(app.clone(), stop.clone()),
+                crate::workers::run_work(app.clone(), executors.clone(), stop.clone()),
+                crate::playback::run_playback(app, executors, stop),
+            )?;
+            Ok(())
+        },
+        shutdown,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

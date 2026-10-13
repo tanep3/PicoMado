@@ -2,6 +2,10 @@
 //! read-only device context, applies the resulting kernel event, then commits
 //! the cloned plugin state and sends the plugin's completed pixel buffer.
 
+use crate::plugin_jobs::{
+    AssetDescriptor, CommandContext, JobOutcome, JobProgress, PlaybackSpec, PluginJob,
+    PluginWorkPlan,
+};
 use crate::settings::{FetchPolicy, PluginSettings};
 use crate::{Event, Mode, SessionToken};
 use serde_json::Value;
@@ -60,6 +64,49 @@ pub struct PluginPlan {
 }
 
 pub trait ContentPlugin: Send + Sync {
+    /// Public shared content/settings/history; never include credentials.
+    fn web_state(&self) -> Value {
+        Value::Null
+    }
+    fn web_state_at(&self, _now_mono_ms: u64) -> Value {
+        self.web_state()
+    }
+    /// Plan on a cloned state. No network, file IO, process or clock reads here.
+    fn plan_command(
+        &mut self,
+        _ctx: &CommandContext,
+        _command: &Value,
+    ) -> Result<PluginWorkPlan, ContentError> {
+        Err(ContentError::Unsupported)
+    }
+    fn plan_schedule(
+        &mut self,
+        _ctx: &CommandContext,
+    ) -> Result<Option<PluginWorkPlan>, ContentError> {
+        Ok(None)
+    }
+    fn work_completed(
+        &mut self,
+        _ctx: &CommandContext,
+        _job: &PluginJob,
+        _result: &JobOutcome,
+    ) -> Result<PluginWorkPlan, ContentError> {
+        Err(ContentError::Unsupported)
+    }
+    fn work_progress(
+        &mut self,
+        _ctx: &CommandContext,
+        _job: &PluginJob,
+        _progress: &JobProgress,
+    ) -> Result<Option<PluginWorkPlan>, ContentError> {
+        Ok(None)
+    }
+    fn playback(&self, _ctx: &PluginContext) -> Option<PlaybackSpec> {
+        None
+    }
+    fn asset(&self, _asset_id: &str) -> Option<AssetDescriptor> {
+        None
+    }
     fn clone_box(&self) -> Box<dyn ContentPlugin>;
     fn id(&self) -> &'static str;
     fn publish(

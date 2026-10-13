@@ -9,7 +9,7 @@ ROOT = Path(__file__).parent
 FONT = '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc'
 FACE_INDEX = 0
 SIZES = (12, 14, 16, 20, 22)
-base = '0123456789/ 月火水木金土日短期週間予報東京地方気温低高ー°:小笠原諸島父取得失敗-?…'
+base = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/ 月火水木金土日短期週間予報東京地方気温低高ー°:小笠原諸島父取得失敗-?…'
 locations = json.loads((ROOT / 'jma-locations.json').read_text())
 chars = ''.join(dict.fromkeys(base + ''.join(
     str(item[key]) for item in locations

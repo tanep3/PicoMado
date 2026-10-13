@@ -100,6 +100,16 @@ pub(crate) fn draw(
     }
 }
 
+/// Shared pixel/text primitive; the caller owns the plugin/status wording.
+pub(crate) fn status_frame(title: &str, status: &str) -> Vec<u8> {
+    let mut pixels = vec![0x0841; 160 * 80];
+    let title = fit(title, 16, 144);
+    let status = fit(status, 14, 144);
+    draw(&mut pixels, (160, 80), (8, 10), &title, 16, 0x07ff);
+    draw(&mut pixels, (160, 80), (8, 44), &status, 14, 0xffff);
+    pixels.into_iter().flat_map(u16::to_be_bytes).collect()
+}
+
 #[cfg(test)]
 pub(crate) fn assert_text_fits(
     text: &str,

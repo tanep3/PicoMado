@@ -163,3 +163,63 @@
 - HOME全操作中の再接続、長時間・回線切替・省電力後の復帰、動画帯域、複数実機、E-ink・BLKの受入は未完了。先の「AWAY未接続」は03:28チェックポイント時点の記録であり、後続成功で更新する。
 - ユーザーはBLK接続後も電源OFF時にバックライトらしき発光が残ると報告した。ファーム担当は接続済みフラグが0でバックライト関数が即returnすることを確認した。修正はこの疎通checkpoint後に行い、バックライトOFFの実機受入は未完了。
 - 時刻付き証拠と最新セッションの一回確認は[今回の接続検証](../experiments/tether-tailnet/results-2026-10-13-picomado-away-lan.md)に記録する。OS・ネットワーク・他サービス設定変更、追加listener、接続試験中のSSH、commit/pushは行っていない。
+
+
+## 2026-10-13 BLK配線の断線確認（07:24 UTC）
+
+- 接続済みフラグを有効にした通常版では、06:20:07 UTCのCDCログが `pin=22 on=0 output=0 gpio_read=0` を記録した。これはPico側GPIOのLOWを示すが、LCD側BLK電圧と可視消灯を証明しない。
+- ユーザーの07:05 UTCのBOOTSEL表明後、同じ単一個体 `E661640843239D21` へ極性診断版を一度だけ転送した。load/verifyとも100% OK、07:08:44 UTCにCDC起動を確認。生ログは `/tmp/picomado-polarity-flash.log` と `/tmp/picomado-polarity-usb.log`。診断版UF2のSHA256は `99fe1e6e6d559b660fabd9ab6dbe29d0a1047a1df47f5fa1f54c90f48879a81f`。
+- 診断版は固定画面を一度だけ描画し、UPはGP22 HIGH、DOWNはLOW、POWERは生の出力レベルを反転、SUBは状態報告のみ。ネットワークへの接続は行わない。07:13:02 UTCのUPで `requested=HIGH gpio_read=1`、07:13:03 UTCのDOWNで `requested=LOW gpio_read=0` を記録。方向1・SIO mux5・drive_code1・画面CRC `20ac31e9`・描画回数1は維持され、GPIOの駆動設定を強めていない。
+- ユーザーは修理前のHIGH/LOW比較で「どちらも光る。あかるさかわらん」と報告。続いて07:24 UTCに、現物のBLK配線が切れていたことを確認したと報告した。断線確認はユーザーによる現物確認であり、こちらの電圧測定や目視による確認ではない。修理前の比較だけでは実モジュールの極性を判定できない。
+- 親は電源を抜いて配線を修理し、同じ診断版のUP/DOWNで再確認するよう案内済み。修理後のHIGH/LOWによる発光差・極性・完全消灯は未確認。追加の原因探索、設定変更、駆動変更、書込みは行わず、修理後の結果を待つ。
+- 通常版 `build/PicoMado-lcd1/PicoMado-lcd1-backlight.uf2` は保全済み。SHA256 `f61c129f63950f987210c4c9ac42bf8b5983e66fd6ba5f8d6eb637c4642a2ad5` を再確認し、診断版ともにGit除外を確認した。通常版の `PM_LCD_BLK_ACTIVE_HIGH=1` は修理後の実測待ち。通常版へ戻す際は新たなBOOTSEL表明と同一個体の識別を確認し、load/verify後のログと待機時の可視消灯を別々に記録する。SSH・サービス変更は行っていない。
+
+
+## 2026-10-13 BLK修理後の極性確認と通常版復帰準備（07:38 UTC）
+
+- ユーザーは配線修理後、07:38 UTCに「右上を押すと光り３V、左下を押すと消え０Vになったぞ。」と報告した。診断版の右上UPはGP22 HIGH、左下POWERは出力レベルのトグルであり、点灯／消灯と電圧の報告はその仕様と整合する。計測・目視はユーザーによる現物確認。実個体のBLKはactive HIGHと確定した。07:24 UTC時点の極性未確認をこの結果で更新する。
+- 通常版の `PM_LCD_BLK_CONNECTED=1`、`PM_LCD_BLK_PIN=22`、`PM_LCD_BLK_ACTIVE_HIGH=1` を維持する。待機はLCD黒転送後にLOW、復帰はHIGH。新たな診断、極性変更、駆動強化、設定変更、再ビルドは不要。
+- 保全済み `build/PicoMado-lcd1/PicoMado-lcd1-backlight.uf2` と通常転送対象 `build/PicoMado-lcd1/PicoMado-lcd1.uf2` のSHA256は両方 `f61c129f63950f987210c4c9ac42bf8b5983e66fd6ba5f8d6eb637c4642a2ad5`。個体manifestも同じSHAと `PicoMado-lcd1`／`E661640843239D21` を示す。ファイル側の `picotool info -a` は `picomado_lcd`、SDK2.3.1、pico_w、Releaseを確認。UF2は権限600、Git除外。
+- この段階では新たなBOOTSEL応答前のため、実機照合／転送／再起動は行っていない。次のBOOTSEL表明後、既存 `tools/flash.sh --device PicoMado-lcd1 --check-only` で単一個体とmanifestを照合し、同じ通常版をload/verifyする準備ができている。復帰後のUSBログ、接続・ACK、通常待機時の消灯と再押下時の点灯は別々に確認する。SSH・サービス変更は行っていない。
+
+
+## 2026-10-13 通常版復帰の転送とUSB確認（07:44–07:45 UTC）
+
+- ユーザー07:41 UTCのBOOTSEL表明と07:42 UTCの「転送すすめて」を受領。既存 `tools/flash.sh --device PicoMado-lcd1 --check-only` で単一BOOTSEL個体 `E661640843239D21`、端末manifest、pico_wを照合した。保全版と転送対象UF2のSHA256は両方 `f61c129f63950f987210c4c9ac42bf8b5983e66fd6ba5f8d6eb637c4642a2ad5`。
+- 通常版を一度だけ転送し、07:44:33 UTCにload100%、verify100% OK、終了コード0、アプリ再起動の報告を確認。生ログは `/tmp/picomado-normal-restore-20261013.log`。再ビルド・追加改修・設定変更は行っていない。
+- USB CDC `/dev/ttyACM0` と同じUIDのby-idリンクを確認。単一readerが07:45:08および07:45:23 UTCに `profile=HOME app=ACTIVE transport=READY wifi=JOIN tcpip=UP ip_assigned=1` を取得した。通常アプリの起動と接続状態の確認であり、起動時の一度だけのLCD初期化行や実表示の目視確認を代用しない。
+- reader PID1131280／tool session23694は既存権限のまま非秘密診断行だけを最大15分読み取り、ログ `/tmp/picomado-normal-restore-usb.log` を権限600で保持する。新たなUSB読取りを重ねない。通常版のPOWER待機によるLOW・消灯、再押下によるHIGH・点灯の実機受入はユーザー操作と目視待ち。SSH・サービス変更・commit/pushは行っていない。
+
+
+## 2026-10-13 通常版バックライトの実機受入とUSB引継ぎ（07:47–07:49 UTC）
+
+- ユーザーは07:47 UTCに「バックライトはOK完璧だね」と報告し、通常版の待機・復帰によるバックライト動作を受入済みとした。07:45 UTC時点の目視待ちを更新する。親はハード作業を一旦完了として蓋を閉じてよいと回答し、ファームの最終確定はプラグイン実機結合後と区別した。
+- 同じ通常版のUSBログで、07:46:16.788 UTCに `pin=22 on=0 output=0 gpio_read=0`、07:46:19.392 UTCに `on=1 output=1 gpio_read=1`、07:46:30.610 UTCに再度OFF/LOW、07:46:37.422 UTCに再度ON/HIGHを確認した。復帰後07:46:53 UTC以降はHOME ACTIVE/READY、IP取得済み。GPIOログとユーザーの点灯／消灯確認が一致し、active HIGH・通常待機LOW／復帰HIGHの受入が完了した。長期安定性やプラグイン結合全体の受入をこの結果で完了扱いにはしない。
+- 既存reader PID1131280のコマンドラインを照合してSIGINTを送り、tool session23694の終了コード130（作業側による終了）とプロセス消失を確認した。readerのfinally節でポートを閉じ、`fuser /dev/ttyACM0` は占有PIDなしを確認。最大15分の予定範囲内で受入後に終了し、統合担当がUSBを開ける状態へ引き継いだ。保存ログは `/tmp/picomado-normal-restore-usb.log`、権限600。
+- 追加転送、設定変更、再ビルド、サービス変更、SSH使用、commit/pushは行っていない。実機は通常版UF2 SHA256 `f61c129f63950f987210c4c9ac42bf8b5983e66fd6ba5f8d6eb637c4642a2ad5` のまま。
+
+
+## 2026-10-13 待機復帰の要件適合と遅延診断版（未転送）
+
+- 要件 `docs/requirements/kernel.md` 115行は4ボタンの電源で復帰、111行は2ボタンの下長押しで復帰。現f61版の全ボタン復帰は実装上の不適合であり、正式要件として説明した点を訂正する。4ボタンはPOWERだけを既存35ms安定判定で受け付け、SUB/UP/DOWNは待機を維持する。押下のリリース待ちは追加しない。共通判定は2ボタンの下だけを設定された1.5/2秒長押しで受け付け、短押し、上ボタン、押し続け、待機前からの保持、時計折返しを試験した。E-ink表示バックエンド／2ボタン実機は従来どおり未対応・未受入であり、この共通判定のホスト試験を実機対応完了とは扱わない。
+- `src/trace.c` は32件の固定RAMキューへ単調マイクロ秒時刻、フレームID、イベントと数値だけを記録する。アプリの通常ログも同じキューへ入れる。満杯時は古い未出力レコードを落とし `dropped` を増やす。`trace_usb.c` は接続・空き容量を一度確認し、1回の有界書込みだけを行い、USB待ち／sleep／tud_task呼出しをしない。FIFO操作を同一コアIRQに対して保護する。残余のSDK標準出力のtimeout／stdio mutex待ちも0に設定した。診断による待ちは導入しないが、ログ欠落はあり得る。
+- イベントは debounced button（a=SUB0/UP1/POWER2/DOWN3、b=処理前状態）、frame_start、crc_ok、receipt_begin/end、実LCDのspi_begin/end、render_begin/end、tcp_write、tcp_output、50ms以上のpoll／loop。ACK endのa=1はTCPへの投入成功であり、線路到達／サーバ受付ではない。SPI endのaはSDK戻りバイト数、bはSDK読出しbaudであり、LCDの画素読戻しや可視表示の証明ではない。TCPイベントのaはSDK戻り値、bは所要us。
+- ホスト一括試験 `tests/run_host_tests.sh` はダミーconfigだけで成功。実mainでSUB/UP/DOWNの無視とPOWER復帰、USBキュー満杯のままネット／ボタン処理、CRC→受信ACK→SPI→描画ACKの順序、世代変更後の描画ACK抑止を確認。実net.cでtcp_output負値・60msとtcp_write結果をログへ保持し、従来の投入成功の意味を変更していない。実LCDソースの窓・25,600B・回転色変換・CS保持・転送境界ログ、BLK未接続／active HIGH／LOWのダミー回帰も成功。独立USB試験は未接続／満杯／部分書込み、10,000回のボタン・ネット処理継続、overflow計数、元イベント時刻の保持を確認した。旧mainを新しい復帰回帰へ入れるとSUBで待機を出て期待失敗、新mainでは成功。
+- 個体通常ビルドはpico_w／Release／SDK2.3.1で成功。`build/PicoMado-lcd1/PicoMado-lcd1-power-wake-trace.uf2` と通常転送対象 `.uf2` は SHA256 `7857108860e87179c4c49424dd50d0ecffe04f87e8795424550f78b4e5557820`。manifestも同じ値と個体 `E661640843239D21`。text365,100B／bss198,648B、stack4KiB。UF2権限600・Git除外、秘密configの前後バイト一致を確認。元通常版 `PicoMado-lcd1-backlight.uf2` のSHA256 `f61c129f63950f987210c4c9ac42bf8b5983e66fd6ba5f8d6eb637c4642a2ad5` を保全。
+- ビルド生ログ `/tmp/picomado-power-wake-trace-final-build.log`、ホスト全結果 `/tmp/picomado-power-wake-trace-host.log`、旧実装の期待失敗 `/tmp/picomado-old-wake-regression.log`。この修正版は未転送。現在の実機は07:44にload/verifyしたf61版のまま。08:20の「正しく動くようになった」「約1秒の遷移待ち」、08:22の「プラグイン画面では反応しないことがある、WiFi選択画面は快適」は親経由の実機証言であり、未転送修正版の効果と結び付けない。現USB保存ログには入力→受信→描画→ACKの時刻がないため、秒単位遅延の原因は未確定。新しいBOOTSEL表明後の転送・実測待ち。SSH・サービス変更・commit/pushなし。
+
+
+## 2026-10-13 診断入り修正版の転送と時刻採取開始（08:26 UTC）
+
+- ユーザー08:24 UTC「BOOTSELしたよ」と親の転送指示を受領。単一BOOTSEL `E661640843239D21` と個体manifestを照合し、SHA256 `7857108860e87179c4c49424dd50d0ecffe04f87e8795424550f78b4e5557820` を転送直前に再確認。一度だけload/verifyし、08:26:45.793 UTCに両100%、verify OK、終了コード0、アプリ再起動を確認した。生ログは `/tmp/picomado-power-wake-trace-flash.log`。
+- 単一readerを転送前から再列挙待機させ、同じUIDの `/dev/ttyACM0` を開いて非秘密 `timing` 行と既存診断を取得した。起動LCDログは要求20MHz／SDK actual15,625,000Hz／CS保持、GP22 ON/read1。Wi-Fi IP取得後、frame356でframe_start・CRC完了・受信ACK前後・実SPI開始終了・描画ACK前後を確認し、いずれも `dropped=0`。
+- frame356の端末単調時刻はCRC完了8,055,954us、receipt_begin8,056,115us、receipt_end8,056,393us、spi_begin8,059,951us、spi_end8,075,560us、render_begin8,075,702us、render_end8,075,823us。実SPI区間15,609us、CRC完了から描画ACK投入完了19,869us。この1フレームで秒単位の端末描画待ちは観測されていないが、ユーザー押下に対応する遅延の解決を意味しない。TCP戻り値は0、ACK投入成功でありサーバ到着の証明ではない。
+- tool session23132のreaderは最大15分で終了し、ログ `/tmp/picomado-power-wake-trace-usb.log` を権限600で保存する。他担当は新しいreaderを重ねずこのログを読む。現物はここから78571088版であり、直前のf61版での08:20／08:22証言と区別する。押下の実機受入・遅延原因はこのログの次の操作との照合待ち。元f61 UF2は引き続き保全。SSH・サービス変更・commit/pushなし。
+
+
+## 2026-10-13 統合後のLCDプラグイン受入
+
+- ユーザーが天気・雨雲・YouTube・風刺画の4プラグインすべてについて、LCD実機での動作を確認した。
+- 統合Rustサーバは配備済み。風刺画の実生成・履歴・frame408の描画ACKは担当報告で確認済み。動画取得はユーザーが操作する経路を使用した。
+- 最終編集後のRust回帰は137件成功・失敗0件。実HTTPS試験1件はopt-inのため未実行。fmt check・全target clippy（警告禁止）も成功。既存キャッシュ、低優先度、1並列で実行した。
+- この受入範囲は今回のLCDプラグイン動作。上の診断履歴で観測した転送時間の変動、未完成のE-ink物理配送まで受入済みとはしない。個体config、資格情報、実データ、画像キャッシュ、UF2/ELF、ログはコミット対象から除外する。

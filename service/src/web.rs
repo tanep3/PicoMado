@@ -22,6 +22,12 @@ pub fn router(app: SharedApp) -> Router {
         .route("/device", get(crate::transport::upgrade))
         .route("/plugins/{plugin}", get(plugin_page))
         .route("/api/plugins/{plugin}/options", get(plugin_options))
+        .route("/api/plugins/{plugin}", get(plugin_state))
+        .route(
+            "/api/plugins/{plugin}/commands",
+            axum::routing::post(plugin_command),
+        )
+        .route("/api/plugins/{plugin}/assets/{asset_id}", get(plugin_asset))
         .route("/api/state", get(state))
         .route("/api/order", axum::routing::put(update_order))
         .route(
@@ -90,6 +96,100 @@ async fn plugin_options(
             .map(Json)
             .ok_or(AppError::NotFound)
     })
+}
+
+async fn plugin_state(
+    State(app): State<SharedApp>,
+    Path(plugin): Path<String>,
+) -> Result<Json<crate::application::PluginWebView>, ApiError> {
+    with_app(&app, |app| {
+        app.plugin_web_view(&plugin)
+            .map(Json)
+            .ok_or(AppError::NotFound)
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PluginCommandBody {
+    expected_revision: u64,
+    command: serde_json::Value,
+}
+
+async fn plugin_command(
+    State(app): State<SharedApp>,
+    Path(plugin): Path<String>,
+    Json(body): Json<PluginCommandBody>,
+) -> Result<Json<crate::application::PluginWebView>, ApiError> {
+    with_app(&app, |app| {
+        app.plugin_command(&plugin, body.expected_revision, body.command)
+            .map(Json)
+    })
+}
+
+async fn plugin_asset(
+    State(app): State<SharedApp>,
+    Path((plugin, id)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    let (paths, descriptor) = with_app(&app, |app| {
+        app.plugin_asset(&plugin, &id).ok_or(AppError::NotFound)
+    })?;
+    let content_type = descriptor.content_type.clone();
+    let bytes = tokio::task::spawn_blocking(move || {
+        use std::path::Component;
+        if descriptor.relative_path.as_os_str().is_empty()
+            || descriptor
+                .relative_path
+                .components()
+                .any(|c| !matches!(c, Component::Normal(_)))
+        {
+            return Err(AppError::Invalid("invalid asset path"));
+        }
+        let root = match descriptor.area {
+            crate::plugin_jobs::AssetArea::Data => paths.data,
+            crate::plugin_jobs::AssetArea::Cache => paths.cache,
+        }
+        .canonicalize()
+        .map_err(|_| AppError::NotFound)?;
+        let path = root
+            .join(descriptor.relative_path)
+            .canonicalize()
+            .map_err(|_| AppError::NotFound)?;
+        if !path.starts_with(&root) {
+            return Err(AppError::Invalid("invalid asset path"));
+        }
+        let file = std::fs::File::open(path).map_err(|_| AppError::NotFound)?;
+        if file.metadata().map_err(|_| AppError::NotFound)?.len() > 20_000_000 {
+            return Err(AppError::Invalid("asset too large"));
+        }
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        file.take(20_000_001)
+            .read_to_end(&mut bytes)
+            .map_err(|_| AppError::NotFound)?;
+        if bytes.len() > 20_000_000 {
+            return Err(AppError::Invalid("asset too large"));
+        }
+        Ok(bytes)
+    })
+    .await
+    .map_err(|_| ApiError(AppError::Conflict("asset worker unavailable")))?
+    .map_err(ApiError)?;
+    if !matches!(
+        content_type.as_str(),
+        "image/png" | "image/jpeg" | "application/octet-stream"
+    ) {
+        return Err(ApiError(AppError::Invalid("invalid asset format")));
+    }
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, content_type),
+            (axum::http::header::CACHE_CONTROL, "no-store".into()),
+            (axum::http::header::X_CONTENT_TYPE_OPTIONS, "nosniff".into()),
+        ],
+        bytes,
+    )
+        .into_response())
 }
 
 #[derive(Deserialize)]

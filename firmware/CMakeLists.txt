@@ -72,13 +72,27 @@ if(NOT PM_USE_SAMPLE)
   add_custom_command(TARGET picomado_selftest POST_BUILD
     COMMAND picotool uf2 convert $<TARGET_FILE:picomado_selftest> -t elf
       ${CMAKE_CURRENT_BINARY_DIR}/${PM_DEVICE}-selftest.uf2 -t uf2)
+
+  add_executable(picomado_backlight_polarity diagnostics/backlight-polarity/main.c src/lcd.c)
+  target_include_directories(picomado_backlight_polarity PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/src)
+  target_compile_definitions(picomado_backlight_polarity PRIVATE
+    PM_LCD_FRAME_CS_HOLD=1 PM_LCD_CONTROL_SPI_BAUD=PM_LCD_SPI_BAUD PM_LCD_CAPTURE_ENABLE=0
+    PM_EXPECTED_BOARD_ID="${PM_BOARD_ID}" PICO_STACK_SIZE=0x1000)
+  target_link_libraries(picomado_backlight_polarity pico_stdlib pico_unique_id hardware_spi
+    pico_cyw43_arch_lwip_poll picomado_core)
+  pico_enable_stdio_usb(picomado_backlight_polarity 1)
+  pico_enable_stdio_uart(picomado_backlight_polarity 0)
+  pico_add_extra_outputs(picomado_backlight_polarity)
+  add_custom_command(TARGET picomado_backlight_polarity POST_BUILD
+    COMMAND picotool uf2 convert $<TARGET_FILE:picomado_backlight_polarity> -t elf
+      ${CMAKE_CURRENT_BINARY_DIR}/${PM_DEVICE}-backlight-polarity.uf2 -t uf2)
 endif()
 
-add_executable(picomado_lcd src/main.c src/display.c src/lcd.c src/net.c src/ws_accept.c)
+add_executable(picomado_lcd src/main.c src/display.c src/lcd.c src/net.c src/ws_accept.c src/trace.c src/trace_usb.c)
 target_include_directories(picomado_lcd PRIVATE ${PM_DEVICE_DIR} ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/src)
-target_compile_definitions(picomado_lcd PRIVATE PM_NETWORK_BUILD=1 PM_NORMAL_BUILD=1 ${PM_SAMPLE_DEFINE}
+target_compile_definitions(picomado_lcd PRIVATE PM_NETWORK_BUILD=1 PM_NORMAL_BUILD=1 PM_TRACE_ENABLE=1 ${PM_SAMPLE_DEFINE}
   PM_LCD_FRAME_CS_HOLD=1 PM_LCD_CONTROL_SPI_BAUD=PM_LCD_SPI_BAUD
-  PM_LCD_CAPTURE_ENABLE=0
+  PM_LCD_CAPTURE_ENABLE=0 PICO_STDIO_USB_STDOUT_TIMEOUT_US=0 PICO_STDIO_DEADLOCK_TIMEOUT_MS=0
   PM_EXPECTED_BOARD_ID="${PM_BOARD_ID}" PM_BUILD_DEVICE="${PM_DEVICE}"
   PICO_STACK_SIZE=0x1000)
 target_link_libraries(picomado_lcd pico_stdlib pico_unique_id pico_rand hardware_spi hardware_flash pico_cyw43_arch_lwip_poll picomado_core)
