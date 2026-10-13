@@ -21,6 +21,7 @@ yarn-error.log*
 
 # Rust
 /target/
+/service/target/
 /Cargo.lock
 pkg/
 
@@ -36,3 +37,26 @@ Thumbs.db
 
 # 環境変数（※.env は ignore、env.exampleをコピーして使う）
 .env
+
+# PicoMado device-local firmware settings
+/firmware/config.h
+/firmware/build*/
+
+# Per-device firmware secrets, board binding, and outputs
+/firmware/devices/*/config.h
+/firmware/devices/*/board-id.txt
+/firmware/build/
+
+# Private test/device settings and local runtime data
+/firmware/**/config.h
+/firmware/**/test_config.h
+/.config/
+.env.*
+!.env.example
+
+# Capture/build outputs and reproducible download caches
+*.pcap
+*.pcapng
+*.uf2
+*.elf
+/experiments/**/cache/

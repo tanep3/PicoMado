@@ -1,0 +1,29 @@
+[package]
+name = "picomado-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+axum = { version = "0.8.9", features = ["ws"] }
+crc32fast = "1.5.2"
+flate2 = "1.1"
+futures-util = "0.3.34"
+base64 = "0.22.1"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+rusqlite = { version = "0.37.0", features = ["bundled"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "rustls-tls"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tokio = { version = "1.53.1", features = ["time", "macros", "rt-multi-thread", "sync", "net", "signal"] }
+time = "0.3.55"
+toml = "0.9.12"
+
+[dev-dependencies]
+http-body-util = "0.1.5"
+tempfile = "3.27.0"
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "net", "time", "sync"] }
+tokio-tungstenite = "0.29.0"
+tower = "0.5.3"

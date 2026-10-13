@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>PicoMado</title>
+  <style>
+    :root{font-family:Inter,"Noto Sans JP",system-ui,-apple-system,sans-serif;color:#e9eef4;background:#0c1119;font-synthesis:none}
+    *{box-sizing:border-box} body{margin:0;min-width:280px;background:radial-gradient(circle at 82% -12%,#19364a 0,transparent 32rem),#0c1119;line-height:1.55}
+    button,input,select{font:inherit} button{cursor:pointer} button:disabled{cursor:not-allowed;opacity:.45}
+    a{color:inherit;text-decoration:none} :focus-visible{outline:2px solid #62d2c7;outline-offset:3px}
+    .shell{max-width:1180px;margin:auto;padding:0 clamp(16px,4vw,48px) 72px}
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:24px;min-height:76px;border-bottom:1px solid #273341}
+    .brand{display:flex;align-items:center;gap:11px;font-size:1.13rem;font-weight:800;letter-spacing:.02em;white-space:nowrap}
+    .brand-mark{display:grid;place-items:center;width:31px;height:31px;border-radius:9px;background:#66d8cb;color:#092322;font-size:1.13rem}
+    nav{display:flex;gap:3px;overflow-x:auto;scrollbar-width:thin} nav a{padding:9px 13px;border-radius:9px;color:#a9b8c8;font-size:.88rem;font-weight:650;white-space:nowrap}
+    nav a:hover{background:#1b2c39;color:#f1faf9} nav a[aria-current=page]{background:#173e43;color:#9be9df}
+    .hero{padding:46px 0 28px}.eyebrow{margin:0 0 9px;color:#71d8cb;font-size:.75rem;font-weight:800;letter-spacing:.16em;text-transform:uppercase}
+    h1{margin:0;font-size:clamp(2rem,4vw,3.1rem);line-height:1.18;letter-spacing:-.045em} h2{margin:0;font-size:1.28rem;letter-spacing:-.025em} h3{margin:0;font-size:1.06rem}
+    .lead{max-width:680px;margin:12px 0 0;color:#a8b8c9;font-size:.97rem}
+    #notice{min-height:0;margin:0;border-radius:11px;font-weight:650} #notice:not(:empty){padding:12px 16px;margin:0 0 20px;border:1px solid #315052;background:#123332;color:#a9ebe2} #notice.error{border-color:#815459;background:#352026;color:#ffd5d7}
+    main{display:grid;gap:24px}.panel{background:#151d28;border:1px solid #293644;border-radius:19px;padding:clamp(20px,3vw,30px);box-shadow:0 14px 40px #05090e40}
+    .panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px}.panel-head p{margin:7px 0 0;color:#a1b2c3;font-size:.88rem}
+    .count{padding:5px 11px;border-radius:99px;background:#243441;color:#bfcedb;font-size:.79rem;font-weight:750;white-space:nowrap;flex:none}
+    .stack{display:grid;gap:12px}.order-row{display:flex;align-items:center;gap:14px;padding:11px 13px;background:#1b2733;border:1px solid #2b3c4a;border-radius:11px}
+    .order-number{display:grid;place-items:center;flex:none;width:27px;height:27px;border-radius:8px;background:#2b4651;color:#a4eee4;font-size:.8rem;font-weight:800}
+    .order-name{flex:1;font-weight:700}.row-actions{display:flex;gap:6px}.icon-button{min-width:35px;min-height:35px;padding:4px;border:1px solid #3b4c5c;border-radius:8px;background:#253444;color:#e4eef6}
+    .icon-button:hover:not(:disabled){background:#345062}
+    .device-list{display:grid;gap:18px}.device-card{padding:23px;border:1px solid #324354;border-radius:15px;background:#1a2531}
+    .device-head{display:flex;justify-content:space-between;align-items:flex-start;gap:15px}.device-id{overflow-wrap:anywhere}.device-caption{color:#8fa5b9;font-size:.8rem;margin:4px 0 0}
+    .badge{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;padding:5px 10px;border-radius:99px;background:#283747;color:#b8c8d6;font-size:.77rem;font-weight:750}
+    .badge:before{content:"";width:7px;height:7px;border-radius:50%;background:#899cab}.badge.online{background:#143b35;color:#a1eadd}.badge.online:before{background:#65d7b9}
+    .summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;margin:20px 0 24px}
+    .summary-item{min-width:0;padding:13px 15px;background:#121d28;border:1px solid #27394a;border-radius:10px}
+    .summary-item span{display:block;color:#93a7b9;font-size:.76rem;font-weight:650}.summary-item strong{display:block;margin-top:4px;font-size:1.02rem;overflow-wrap:anywhere}
+    .subsection{padding-top:22px;border-top:1px solid #344250}.subsection+.subsection{margin-top:23px}.section-label{margin:0 0 12px;font-size:.88rem;font-weight:750;color:#c6d5e2}
+    .toggle-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:9px}.toggle{display:flex;align-items:center;gap:10px;min-height:44px;padding:8px 12px;background:#20303d;border:1px solid #354759;border-radius:9px;font-size:.87rem;font-weight:650;cursor:pointer}
+    input[type=checkbox]{width:17px;height:17px;margin:0;accent-color:#66d8cb;flex:none}
+    .field-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:15px;margin:16px 0 20px}
+    .field{display:grid;gap:7px;color:#b7c7d5;font-size:.81rem;font-weight:650} input[type=number],input[type=text],select{width:100%;min-height:43px;padding:8px 11px;border:1px solid #415363;border-radius:9px;background:#0e1923;color:#eef4f8;outline:none}
+    input:focus,select:focus{border-color:#71d8cb;box-shadow:0 0 0 3px #3fbbb22b}
+    .button{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:9px 16px;border:1px solid transparent;border-radius:9px;font-size:.86rem;font-weight:780;white-space:nowrap}
+    .button.primary{background:#68d6c9;color:#082322}.button.primary:hover:not(:disabled){background:#98e9df}.button.secondary{border-color:#4a5d6d;background:#263542;color:#e6f0f5}.button.secondary:hover:not(:disabled){background:#344858}
+    .button.danger{border-color:#ab5d64;background:#51292e;color:#ffe2e4}.button.danger:hover:not(:disabled){background:#70363d}
+    .danger-zone{margin-top:34px;padding:18px;border:1px solid #5a3d45;border-radius:11px;background:#241d27}.danger-zone summary{cursor:pointer;color:#ffd3d7;font-size:.85rem;font-weight:750}.danger-zone p{margin:12px 0;color:#c5adb2;font-size:.83rem}
+    .empty{padding:24px;border:1px dashed #435567;border-radius:10px;color:#9cabb9;text-align:center}
+    .plugin-card{max-width:820px}.plugin-breadcrumb{margin-bottom:15px;color:#8da6b8;font-size:.85rem}.plugin-breadcrumb a{color:#86dfd5}.plugin-breadcrumb a:hover{text-decoration:underline}
+    .plugin-note{margin:0 0 22px;color:#a9b8c8;font-size:.9rem}.location-list{display:grid;gap:12px;margin-top:15px}.location-row{display:grid;grid-template-columns:minmax(130px,1fr) minmax(220px,2.2fr) auto;align-items:end;gap:12px;padding:15px;border:1px solid #354657;border-radius:11px;background:#1d2a37}.location-name{padding-bottom:9px;font-weight:700}.location-name small{display:block;color:#95a9b9;font-weight:500}
+    dialog{width:min(100% - 32px,480px);padding:0;border:1px solid #70535a;border-radius:16px;background:#1a222d;color:#edf2f6;box-shadow:0 28px 100px #000b} dialog::backdrop{background:#03070bc9;backdrop-filter:blur(4px)}.dialog-body{padding:26px}.dialog-body h2{color:#ffe2e4}.dialog-body p{color:#b9c8d3;font-size:.9rem}.dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}.dialog-actions .secondary{margin-right:auto}
+    @media(max-width:700px){.topbar{display:block;padding:16px 0 9px}.brand{margin-bottom:13px}nav{margin:0 -7px}nav a{padding:9px 10px}.hero{padding:33px 0 23px}.panel{border-radius:15px}.device-card{padding:18px}.location-row{grid-template-columns:1fr}.location-name{padding:0}.location-row .button{width:100%}}
+    @media(max-width:440px){.summary-grid{grid-template-columns:1fr}.device-head{flex-wrap:wrap}.dialog-actions{flex-wrap:wrap}.dialog-actions .button{flex:1}.field-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="PicoMado ホーム"><span class="brand-mark" aria-hidden="true">▦</span>PicoMado</a>
+      <nav aria-label="メインナビゲーション"><a href="/">ホーム</a><a href="/plugins/youtube">YouTube</a><a href="/plugins/caricature">風刺画</a><a href="/plugins/weather">天気</a><a href="/plugins/rain-radar">雨雲</a></nav>
+    </header>
+    <div class="hero"><p class="eyebrow">Device &amp; content control</p><h1 id="page-title">PicoMado</h1><p class="lead" id="page-lead">端末とプラグインの状態を確認し、設定を管理します。</p></div>
+    <p id="notice" role="status" aria-live="polite"></p>
+    <main id="main"></main>
+  </div>
+  <dialog id="delete-dialog" aria-labelledby="delete-title">
+    <div class="dialog-body">
+      <p class="eyebrow">Danger zone</p><h2 id="delete-title">端末を削除</h2>
+      <p id="delete-description"></p>
+      <label class="field" for="delete-name">確認のため端末名を入力<input id="delete-name" type="text" autocomplete="off" spellcheck="false"></label>
+      <div class="dialog-actions"><button class="button secondary" id="delete-cancel" type="button">キャンセル</button><button class="button danger" id="delete-confirm" type="button" disabled>端末を削除</button></div>
+    </div>
+  </dialog>
+  <script>
+    const labels={youtube:'YouTube',caricature:'風刺画',weather:'天気','rain-radar':'雨雲'};
+    const deviceFields=[
+      ['wifi_timeout_seconds','Wi-Fi 試行 (秒)'],['app_timeout_seconds','Pi セッション試行 (秒)'],
+      ['retry_initial_seconds','再試行開始 (秒)'],['retry_max_seconds','再試行上限 (秒)'],
+      ['heartbeat_seconds','Heartbeat (秒)'],['offline_seconds','オフライン判定 (秒)'],
+      ['two_button_long_press_millis','２ボタン長押し (ms)']
+    ];
+    let current,weatherOptions,busy=false,deleteTarget=null;
+    const main=document.getElementById('main'),notice=document.getElementById('notice');
+    const deleteDialog=document.getElementById('delete-dialog'),deleteName=document.getElementById('delete-name');
+    const deleteConfirm=document.getElementById('delete-confirm'),deleteCancel=document.getElementById('delete-cancel');
+    function el(tag,text,className){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n}
+    function say(message,error=false){notice.textContent=message;notice.classList.toggle('error',error)}
+    async function api(path,method='GET',body){
+      const response=await fetch(path,{method,headers:{'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+      let data;try{data=await response.json()}catch{throw new Error('応答を読み取れませんでした')}
+      if(!response.ok)throw new Error(data.error||'通信エラー');
+      return data;
+    }
+    async function run(action,success='保存しました'){
+      if(busy)return false;
+      busy=true;
+      try{const next=await action();current=next;say(success);render();return true}
+      catch(error){say(error.message||'通信エラー',true);return false}
+      finally{busy=false}
+    }
+    function button(text,kind='secondary'){return el('button',text,`button ${kind}`)}
+    function field(container,key,label,value){
+      const wrap=el('label',undefined,'field');wrap.append(el('span',label));
+      const input=el('input');input.type='number';input.step='1';input.required=true;input.value=value;input.dataset.key=key;
+      wrap.append(input);container.append(wrap);return input;
+    }
+    function section(title,description,className=''){
+      const s=el('section',undefined,`panel ${className}`.trim()),head=el('div',undefined,'panel-head'),copy=el('div');
+      copy.append(el('h2',title));if(description)copy.append(el('p',description));head.append(copy);s.append(head);main.append(s);return s;
+    }
+    function renderHome(){
+      document.getElementById('page-title').textContent='ホーム';
+      document.getElementById('page-lead').textContent='端末の接続状態と設定、プラグインの表示順序をまとめて管理します。';
+      const order=section('共通プラグイン順序','すべての端末で使う表示順です。端末ごとの有効・無効は下のカードで設定します。');
+      const stack=el('div',undefined,'stack');order.append(stack);
+      current.order.forEach((id,index)=>{
+        const row=el('div',undefined,'order-row');row.append(el('span',String(index+1).padStart(2,'0'),'order-number'),el('span',labels[id]||id,'order-name'));
+        const actions=el('div',undefined,'row-actions');
+        for(const [symbol,offset,name] of [['↑',-1,'上'],['↓',1,'下']]){
+          const move=el('button',symbol,'icon-button');move.type='button';move.setAttribute('aria-label',`${labels[id]||id} を${name}へ`);
+          move.disabled=index+offset<0||index+offset>=current.order.length;
+          move.onclick=()=>{const next=[...current.order];[next[index],next[index+offset]]=[next[index+offset],next[index]];run(()=>api('/api/order','PUT',{expected_revision:current.order_revision,order:next}),'表示順を保存しました')};
+          actions.append(move);
+        }
+        row.append(actions);stack.append(row);
+      });
+      const devices=section('端末','接続時に自動登録されます。オフラインの端末も設定を保存できます。');
+      devices.querySelector('.panel-head').append(el('span',`${current.devices.length} 台`,'count'));
+      const list=el('div',undefined,'device-list');devices.append(list);
+      if(!current.devices.length)list.append(el('p','登録済み端末はありません。','empty'));
+      current.devices.forEach(d=>renderDevice(list,d));
+    }
+    function renderDevice(list,d){
+      const card=el('article',undefined,'device-card');
+      const head=el('div',undefined,'device-head'),identity=el('div'),status=el('span',d.online?'オンライン':'オフライン',`badge ${d.online?'online':''}`);
+      identity.append(el('h3',d.id,'device-id'),el('p',`対応表示: ${d.capabilities.join(' / ')||'未登録'}`,'device-caption'));
+      head.append(identity,status);card.append(head);
+      const sync=d.pending?(d.stored_revision>=d.desired_revision?'Pico 保存済み・適用確認待ち':'未同期'):'適用済み';
+      const summary=el('div',undefined,'summary-grid');
+      for(const [label,value] of [['表示中',labels[d.selected]||d.selected||'PicoMado'],['設定の同期',sync]]){
+        const item=el('div',undefined,'summary-item');item.append(el('span',label),el('strong',value));summary.append(item);
+      }
+      card.append(summary);
+      const pluginArea=el('div',undefined,'subsection');pluginArea.append(el('p','この端末で使うプラグイン','section-label'));
+      const toggles=el('div',undefined,'toggle-grid');
+      current.order.forEach(id=>{
+        const label=el('label',undefined,'toggle'),check=el('input');check.type='checkbox';check.checked=d.enabled.includes(id);
+        check.disabled=!d.capabilities.includes('lcd')&&!d.capabilities.includes('eink');
+        check.onchange=async()=>{const enabled=check.checked;check.disabled=true;const ok=await run(()=>api(`/api/devices/${encodeURIComponent(d.id)}/plugins/${encodeURIComponent(id)}`,'PUT',{incarnation:d.incarnation,expected_revision:d.enabled_revision,enabled}),'プラグイン設定を保存しました');if(!ok){check.checked=!enabled;check.disabled=false}};
+        label.append(check,el('span',labels[id]||id));toggles.append(label);
+      });
+      pluginArea.append(toggles);card.append(pluginArea);
+      const settings=el('form',undefined,'subsection');settings.append(el('p','端末別の接続・操作設定','section-label'));
+      const fields=el('div',undefined,'field-grid');const inputs=deviceFields.map(([key,label])=>field(fields,key,label,d.desired[key]));settings.append(fields);
+      const save=button('端末設定を保存','primary');save.type='submit';settings.append(save);
+      settings.onsubmit=async event=>{event.preventDefault();if(!settings.reportValidity())return;save.disabled=true;
+        const value={...d.desired};inputs.forEach(i=>value[i.dataset.key]=Number(i.value));
+        const ok=await run(()=>api(`/api/devices/${encodeURIComponent(d.id)}/settings`,'PUT',{incarnation:d.incarnation,expected_revision:d.desired_revision,settings:value}),'端末設定を保存しました');if(!ok)save.disabled=false;
+      };
+      card.append(settings);
+      const danger=el('details',undefined,'danger-zone');danger.append(el('summary','端末の管理・削除'));
+      danger.append(el('p','端末の登録情報を削除します。再接続すると新しい端末として登録されます。'));
+      const remove=button(`${d.id} を削除`,'danger');remove.type='button';remove.onclick=()=>openDelete(d);danger.append(remove);card.append(danger);
+      list.append(card);
+    }
+    function openDelete(d){
+      if(busy)return;deleteTarget={id:d.id,incarnation:d.incarnation};
+      document.getElementById('delete-description').textContent=`「${d.id}」の登録情報を削除します。再接続時は新規端末として登録されます。`;
+      deleteName.value='';deleteConfirm.disabled=true;deleteDialog.showModal();deleteCancel.focus();
+    }
+    deleteName.oninput=()=>{deleteConfirm.disabled=!deleteTarget||deleteName.value!==deleteTarget.id||busy};
+    deleteCancel.onclick=()=>deleteDialog.close();
+    deleteDialog.onclose=()=>{deleteTarget=null;deleteName.value='';deleteConfirm.disabled=true};
+    deleteConfirm.onclick=async()=>{
+      if(!deleteTarget||deleteName.value!==deleteTarget.id||busy)return;
+      const target=deleteTarget;deleteConfirm.disabled=true;
+      const ok=await run(()=>api(`/api/devices/${encodeURIComponent(target.id)}`,'DELETE',{incarnation:target.incarnation}),`${target.id} を削除しました`);
+      if(ok)deleteDialog.close();else deleteConfirm.disabled=false;
+    };
+    function renderPlugin(id){
+      document.getElementById('page-title').textContent=labels[id]||id;
+      document.getElementById('page-lead').textContent='このプラグインの共通設定を管理します。';
+      const s=section('プラグイン設定','設定の変更は次のジョブから反映します。','plugin-card');
+      const breadcrumb=el('div',undefined,'plugin-breadcrumb'),home=el('a','← ホームへ戻る');home.href='/';breadcrumb.append(home);s.prepend(breadcrumb);
+      if(id==='caricature'){s.append(el('p','現在、変更できる共通設定はありません。','plugin-note'));return}
+      const form=el('form'),fields=el('div',undefined,'field-grid');let inputs=[];
+      if(id==='youtube'){
+        const wrap=el('label',undefined,'field');wrap.append(el('span','既定 FPS'));
+        const select=el('select');for(const fps of [6,12,18,24,30]){const option=el('option',`${fps} fps`);option.value=fps;select.append(option)}
+        select.value=current.plugins.youtube_default_fps;wrap.append(select);fields.append(wrap);inputs=[select];
+      }else{
+        const key=id==='weather'?'weather_fetch':'radar_fetch',value=current.plugins[key];
+        inputs=[field(fields,'timeout_seconds','取得 timeout (秒)',value.timeout_seconds),field(fields,'retries','追加再試行 (回)',value.retries)];
+      }
+      const save=button('共通設定を保存','primary');save.type='submit';form.append(fields,save);
+      form.onsubmit=async event=>{event.preventDefault();if(!form.reportValidity())return;save.disabled=true;
+        const value=structuredClone(current.plugins);
+        if(id==='youtube')value.youtube_default_fps=Number(inputs[0].value);
+        else{const key=id==='weather'?'weather_fetch':'radar_fetch';inputs.forEach(i=>value[key][i.dataset.key]=Number(i.value))}
+        const ok=await run(()=>api('/api/plugin-settings','PUT',{expected_revision:current.plugins_revision,settings:value}),'共通設定を保存しました');if(!ok)save.disabled=false;
+      };
+      s.append(form);
+      if(id==='weather'){
+        const perDevice=section('端末別の地域と気温代表地点','地域は端末ごとに保存されます。共通設定には影響しません。','plugin-card');
+        const list=el('div',undefined,'location-list');perDevice.append(list);let count=0;
+        for(const d of current.devices){
+          const config=d.plugin_configs.weather;if(!config)continue;count++;
+          const row=el('div',undefined,'location-row'),name=el('div',d.id,'location-name');name.append(el('small',d.online?'オンライン':'オフライン'));
+          const label=el('label',undefined,'field');label.append(el('span','予報地域'));
+          const select=el('select');for(const choice of weatherOptions?.locations||[]){
+            const option=el('option',`${choice.label} · 予報: ${choice.area_label} · 気温: ${choice.point_label}`);option.value=choice.id;select.append(option);
+          }
+          select.value=config.location_id;label.append(select);
+          const saveLocation=button('地域を保存','secondary');saveLocation.onclick=async()=>{saveLocation.disabled=true;
+            const ok=await run(()=>api(`/api/devices/${encodeURIComponent(d.id)}/plugin-config/weather`,'PUT',{incarnation:d.incarnation,expected_revision:config.revision,config:{location_id:select.value}}),'地域を保存しました');if(!ok)saveLocation.disabled=false;
+          };
+          row.append(name,label,saveLocation);list.append(row);
+        }
+        if(!count)list.append(el('p','地域設定に対応する端末はありません。','empty'));
+      }
+    }
+    function render(){
+      main.replaceChildren();const id=location.pathname.startsWith('/plugins/')?location.pathname.split('/').pop():null;
+      document.querySelectorAll('nav a').forEach(a=>{if(a.pathname===location.pathname)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
+      if(id)renderPlugin(id);else renderHome();
+    }
+    Promise.all([api('/api/state'),api('/api/plugins/weather/options')]).then(([state,options])=>{current=state;weatherOptions=options;render()}).catch(error=>say(error.message||'読み込みに失敗しました',true));
+  </script>
+</body>
+</html>

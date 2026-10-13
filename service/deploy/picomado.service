@@ -1,0 +1,14 @@
+[Unit]
+Description=PicoMado Rust server
+
+[Service]
+Type=simple
+WorkingDirectory=/home/tane/.config/PicoMado
+ExecStart=/home/tane/bin/picomado-server --config /home/tane/.config/PicoMado/config.toml
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
