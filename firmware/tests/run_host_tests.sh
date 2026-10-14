@@ -44,3 +44,31 @@ for polarity in 1 0; do
         tests/backlight_test.c src/display.c src/lcd.c src/core.c -o "$work/backlight-$polarity"
     run "backlight-$polarity"
 done
+
+build input tests/input_test.c src/core.c
+run input
+for device in E-ink_0 E-ink_1; do
+    cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
+        -I"devices/$device" -Isrc -Itests/stubs tests/eink_test.c src/display_eink.c \
+        -o "$work/eink-$device"
+    run "eink-$device"
+done
+mkdir -p "$work/absent-panel"
+sed 's/^#define PM_EINK_PANEL_CONNECTED 1/#define PM_EINK_PANEL_CONNECTED 0/' \
+    devices/E-ink_1/config.sample.h > "$work/absent-panel/config.sample.h"
+cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
+    -I"$work/absent-panel" -Isrc -Itests/stubs tests/eink_test.c src/display_eink.c \
+    -o "$work/eink-absent"
+run eink-absent
+
+for device in E-ink_0 E-ink_1; do
+    cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 \
+        '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
+        -I"devices/$device" -Isrc -Itests/app_stubs tests/eink_app_test.c src/core.c \
+        -o "$work/eink-app-$device"
+    run "eink-app-$device"
+done
+
+build eink-order tests/eink_transform_dump.c
+python3 tests/eink_legacy_order_test.py "$work/eink-order"
+printf 'PASS eink-legacy-order\n'

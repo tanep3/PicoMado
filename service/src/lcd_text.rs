@@ -110,6 +110,34 @@ pub(crate) fn status_frame(title: &str, status: &str) -> Vec<u8> {
     pixels.into_iter().flat_map(u16::to_be_bytes).collect()
 }
 
+/// Kernel-owned all-OFF screen; center the actual glyph bounds.
+pub(crate) fn logo_frame() -> Vec<u8> {
+    let text = "PICO窓";
+    let size = 22;
+    let top = text.chars().map(|ch| glyph(ch, size).y).min().unwrap();
+    let bottom = text
+        .chars()
+        .map(|ch| {
+            let g = glyph(ch, size);
+            g.y + g.height as i32
+        })
+        .max()
+        .unwrap();
+    let mut pixels = vec![0xffff; 160 * 80];
+    draw(
+        &mut pixels,
+        (160, 80),
+        (
+            ((160 - width(text, size)) / 2) as i32,
+            (80 - (bottom - top)) / 2 - top,
+        ),
+        text,
+        size,
+        0,
+    );
+    pixels.into_iter().flat_map(u16::to_be_bytes).collect()
+}
+
 #[cfg(test)]
 pub(crate) fn assert_text_fits(
     text: &str,
@@ -137,6 +165,28 @@ pub(crate) fn assert_text_fits(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn all_off_logo_is_centered_black_on_white_with_real_window_glyph() {
+        assert!(FONT.chars.contains('窓'));
+        let pixels = logo_frame();
+        let black: Vec<_> = pixels
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| **p == [0, 0])
+            .map(|(i, _)| (i % 160, i / 160))
+            .collect();
+        assert!(!black.is_empty());
+        let left = black.iter().map(|p| p.0).min().unwrap();
+        let right = black.iter().map(|p| p.0).max().unwrap();
+        let top = black.iter().map(|p| p.1).min().unwrap();
+        let bottom = black.iter().map(|p| p.1).max().unwrap();
+        assert!((left + right).abs_diff(159) <= 4);
+        assert!((top + bottom).abs_diff(79) <= 2);
+        assert!(pixels.iter().all(|p| *p == 0 || *p == 255));
+    }
 
     #[test]
     fn atlas_charset_metrics_and_japanese_face_are_consistent() {

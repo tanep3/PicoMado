@@ -383,7 +383,7 @@ impl App {
             if !device.online
                 || device.owner != Owner::Remote
                 || !matches!(device.mode, Mode::Normal | Mode::Sub)
-                || !device.capabilities.contains("lcd")
+                || (!device.capabilities.contains("lcd") && !device.capabilities.contains("eink"))
                 || !self.streaming_ready(device)
             {
                 continue;
@@ -424,9 +424,13 @@ impl App {
     }
 
     fn streaming_ready(&self, device: &Device) -> bool {
-        device
-            .pending_frame_id
-            .is_none_or(|id| device.last_sent_frame == Some(id))
+        device.pending_frame_id.is_none_or(|id| {
+            if device.capabilities.contains("eink") && !device.capabilities.contains("lcd") {
+                device.last_rendered_frame == Some(id)
+            } else {
+                device.last_sent_frame == Some(id)
+            }
+        })
     }
     fn queue_streaming_frame(
         &mut self,

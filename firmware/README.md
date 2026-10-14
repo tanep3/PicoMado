@@ -1,6 +1,6 @@
-# PicoMado LCD firmware
+# PicoMado firmware (LCD / E-ink)
 
-初版の 160×80 ST7735S・4 ボタン Pico W 用です。`picomado_selftest` はネット資格情報を使わない LCD/ボタン診断、`picomado_lcd` は端末通信を含むファームです。既存 YouTube 端末の配線・ガンマ・180 度画素回転を照合して実装しました。
+160×80 ST7735S LCD・4 ボタンと、250×122 Waveshare Pico-ePaper V4・2／0 ボタンの Pico W 用です。`picomado_selftest` はネット資格情報を使わない LCD/ボタン診断、`picomado_lcd` は端末通信を含むファームです。既存 YouTube 端末の配線・ガンマ・180 度画素回転を照合して実装しました。
 
 通常 `picomado_lcd` は `PM_NORMAL_BUILD=1` で診断画像/段階待ち/バッファ回収を無効にします。個体configを編集せず、制御速度を `PM_LCD_SPI_BAUD` と同じ20MHz要求へ結線し、窓指定から全25,600B画素完了までCSを保持します。同速度の描画中再設定はしません。既存125MHz周辺クロックでは実速度は15.625MHzになる見込みで、起動USBの `lcd ready` がSDK読戻し値を記録します。40MHz要求は今回採用しません。通常USBログは診断画像ではありません。
 
@@ -16,7 +16,7 @@ SPI0: CS GP17, SCK GP18, MOSI GP19, DC GP20, RESET GP21。表示窓は 160×80�
 
 ## 待機復帰と遅延診断
 
-4ボタン版はPOWERだけで復帰し、既存の35msチャタリング判定と短押し動作を維持します。SUB／UP／DOWNでは復帰しません。2ボタンの下長押し復帰は共通判定とホスト試験に追加しましたが、E-inkバックエンドと2ボタン実機の完成を意味しません。
+4ボタン版はPOWERだけで復帰し、既存の35msチャタリング判定と短押し動作を維持します。SUB／UP／DOWNでは復帰しません。2ボタンは短押しの安定した離上で前／次、上長押しでSUB／決定、下長押しで待機／取消／復帰を共通コードから通知します。押下ごとに長押し閾値を固定し、長押し後の短押しと連続発火を抑止します。E-inkバックエンドは実装・ホスト検証済みですが、今回のC版ファームの実機表示は未確認です。
 
 通常ビルドは `PM_TRACE_ENABLE=1` で、ボタン、CRC完了、受信／描画ACK投入前後、実SPI転送開始終了、TCP戻り値、50ms以上のpollを `timing us=... event=... frame=... a=... b=... dropped=...` として記録します。固定RAMキューを使い、USBが未接続／満杯なら待たず、欠落数を示します。ACK投入・SDKのSPI戻り値はサーバ到達・LCD可視表示の証明とは区別します。診断入り修正版78571088版は08:26 UTCに転送・verify成功し、時刻イベントの出力を確認しています。元f61版は復旧用として保全しています。実機の押下遅延の原因・解決は操作ログとの照合待ちです。
 
@@ -28,7 +28,7 @@ SPI0: CS GP17, SCK GP18, MOSI GP19, DC GP20, RESET GP21。表示窓は 160×80�
 
 共有ソースは `src/` に 1 セットだけ置きます。個体設定は `devices/<端末名>/config.h`、同じ個体の Flash ID は `devices/<端末名>/board-id.txt` に分けます。実設定と `build/` は Git 除外です。`PM_DEVICE_ID` はユーザーが決めた安定名（今回 `PicoMado-lcd1`）で、Flash ID を名前に含める必要はありません。ビルド時には端末名を必須とし、`config.h` の `PM_DEVICE_ID` と選択名が異なればファームは接続しません。起動時には別ファイルの Flash ID と実ボードを照合します。
 
-`config.h` には画面方式、解像度、画素形式、LCD 制御 IC、配線、回転、オフセット、4 ボタン配置も定義します。画像長検査、LCD 初期化・描画、ボタン入力、Hello の能力申告に使用します。初版の受入対象は ST7735S 160×80 RGB565 LCD だけです。E-ink や異なる画素形式・寸法はビルド時に拒否します。現 LCD は既存 YouTube 送信側が RGB565 に反転と赤青交換をかけてから送っていたため、標準 RGB565BE を送る PicoMado では `PM_LCD_COMPENSATE_INVERT_BGR=1` を LCD 転送直前に適用します。ローカル画面とサーバ画像の両方に一度だけ適用します。
+`config.h` には画面方式、解像度、画素形式、LCD 制御 IC、配線、回転、オフセット、4 ボタン配置も定義します。画像長検査、表示初期化・描画、ボタン入力、Hello の能力申告に使用します。LCD は160×80 RGB565BE、E-ink は250×122 mono1（MSB-first、白=1、行間paddingなし、3813B）を受けます。E-ink は旧実動V4の全画面更新だけを実装し、未知のパネル版・寸法・形式はビルド時に拒否します。現 LCD は既存 YouTube 送信側が RGB565 に反転と赤青交換をかけてから送っていたため、標準 RGB565BE を送る PicoMado では `PM_LCD_COMPENSATE_INVERT_BGR=1` を LCD 転送直前に適用します。ローカル画面とサーバ画像の両方に一度だけ適用します。
 
 ```sh
 firmware/tools/build.sh --device PicoMado-lcd1
@@ -39,7 +39,7 @@ firmware/tools/build.sh --device PicoMado-lcd1
 
 ## 通信と状態
 
-Pico 起点で direct TCP または TailSocks SOCKS5 CONNECT を行い、TCP 16153 `/device` の WebSocket へ Upgrade します。サーバの現 `protocol.rs` に合わせ、binary WebSocket に version/kind/length envelope と JSON を載せます。TCP 分割と WebSocket 分割をバッファリングし、長さ・種別・画像 160×80 RGB565 BE・連続 offset・最大 4096 B の断片・CRC32・device/session/display/screen owner 世代を検査します。受信バッファは 32 KiB、TCP 受信窓は 16 MSS です。安全なバッファへ取り込んだ分はすぐ受信枠を戻し、バッファ末尾側に 1 受信窓分の空きを残します。現サーバの 4096 バイト画像断片を JSON 配列にした 1 メッセージ全体を保持できます。サーバの画像断片サイズや符号化を変えた場合は再評価が必要です。完全受信後に ReceiptAck、SPI 描画後に RenderedAck を別々に返します。古い世代の受信や再接続後の残片は捨てます。
+Pico 起点で direct TCP または TailSocks SOCKS5 CONNECT を行い、TCP 16153 `/device` の WebSocket へ Upgrade します。サーバの現 `protocol.rs` に合わせ、binary WebSocket に version/kind/length envelope と JSON を載せます。TCP 分割と WebSocket 分割をバッファリングし、長さ・種別・画像寸法／設定形式（LCD RGB565BE または E-ink mono1）・連続 offset・最大 4096 B の断片・CRC32・device/session/display/screen owner 世代を検査します。受信バッファは 32 KiB、TCP 受信窓は 16 MSS です。安全なバッファへ取り込んだ分はすぐ受信枠を戻し、バッファ末尾側に 1 受信窓分の空きを残します。現サーバの 4096 バイト画像断片を JSON 配列にした 1 メッセージ全体を保持できます。サーバの画像断片サイズや符号化を変えた場合は再評価が必要です。完全受信後に ReceiptAck、SPI 描画後に RenderedAck を別々に返します。古い世代の受信や再接続後の残片は捨てます。
 
 前回選択ネットワークとサーバ同期済み接続時間設定を Flash 末尾 4 KiB の先頭 1 ページに CRC 付きで保存します。資格情報自体はファーム個体設定に含みます。新ファームの Wi-Fi IPv4 は DHCP を使い、旧 YouTube ファームの固定 IP ビルド指定は引き継ぎません。接続中のサブは現在の試行を中断して家/外メニュー、サブで保存/接続、電源で破棄/元の経路へ戻ります。稼働中の上/下はサーバに操作を渡し、通常画面の電源はサーバ応答後に待機します。サブモードの電源はサーバへ取消しを渡します。Wi-Fi または WebSocket 断では同じプロファイルを再試行し、初期の接続 15/10 秒、再試行 5→30 秒、heartbeat 15 秒をサーバ設定で更新します。TCP keepalive も切断検知の補助に使います。
 
@@ -64,3 +64,30 @@ USBログはGPIO UARTではなくUSB CDC（個体serialで識別したttyACM）�
 ## 今回のLCD実機確認（2026-10-13）
 
 ユーザーが4プラグインの実機動作を確認しました。統合サーバの最終回帰は137件成功（実HTTPSのopt-in1件は未実行）、fmt・全target clippyも成功しています。風刺画は実生成・履歴・frame408の描画ACKまで担当報告で確認済みです。上の時刻付き診断記録は各時点の観測であり、通信遅延全般の解決や2ボタンE-ink実機の完成を示すものではありません。
+
+
+## E-ink 端末（2026-10-14）
+
+`src/main.c`／`net.c`／`core.c` は共通で、CMake が LCD の `display.c`＋`lcd.c` または E-ink の `display_eink.c` を選びます。E-ink_0 は0ボタン、E-ink_1 は上GP20（物理26番）・下GP21（物理27番）・共通GND物理28番、内蔵pull-up・押下LOWです。表示のSPI1／4MHz、CS9・SCK10・MOSI11・DC8・RESET12・BUSY13は旧V4実装と公式設定を継承しています。配線・世代の根拠と未確認点は [E-ink 検証記録](eink-verification-2026-10-14.md) を参照してください。
+
+個体config.hはGit除外・0600です。HOME/AWAY等の10通信マクロはLCD個体の値をそのまま流用し、固定端末IPを追加していません。E-ink_1はモジュール未到着のため`PM_EINK_PANEL_CONNECTED=0`です。この状態でもWi-Fi／WebSocket／ボタン処理を続け、ReceiptAckは完全受信後に返します。表示していない画像にRenderedAckは返しません。到着したパネルがV4と確認できてからCONNECTED=1で再ビルドしてください。V3の実機受入は未実施です。
+
+表示はメインループから段階的に進み、BUSY待ちはsleepループを使いません。1 pollのRAM送信は最大128B、初期化から更新まで10秒の期限を設けます。待機要求では未開始の再描画を破棄し、進行中の物理更新だけを完了させて画像を保持します。sleep後の100msも非同期です。フレームの世代が変わった更新には描画ACKを返しません。
+
+実機Flash IDが未確認の間は、次のコマンドでビルド検証のみ行えます。
+
+```sh
+firmware/tools/build.sh --device E-ink_0 --unbound
+firmware/tools/build.sh --device E-ink_1 --unbound
+```
+
+成果物は`build/.unbound/<端末ID>/`に隔離し、manifestをUNBOUNDとします。実機への書込みは禁止され、ファームも実ボードに接続できません。本人確認後の16桁Flash IDをGit除外の`devices/<端末ID>/board-id.txt`へ設定し、通常ビルドを作り直してください。その後`flash.sh --device E-ink_0 --check-only`で対象を照合し、親側の確認済み対象にのみ通常のflash.shを使います。実機の本人確認／BOOTSEL確認前に書き込まないでください。
+
+サーバ側は3813B mono1の生成・配信・検証を追加しました。風刺画は既存250×122の1bit PNGを使い、他の既存LCD描画は白余白を付けて1bitへ変換します。E-inkの動画はRenderedAck後だけ次の共有再生位置を取り込み、LCDの送信を待たせません。この変更はユーザーの承認後、既存削除featureと運用設定を維持してPicoMadoサーバへ反映済みです。E-ink_0のframe817でReceipt／Renderedの両ACKを確認しました。旧風刺画サービス・履歴は保持しています。
+
+
+2026-10-14の実機試行：E-ink_0のローカル表示崩れは旧V4の最終SPI転置漏れと特定し、4000B完全一致のe8409d06版へ再書込み・verify済みです。本番反映は初回auto-review拒否後にユーザー承認を受け、同じ操作の一度の再試行で成功しました。HOME／Hello／Receipt／Rendered（frame817）、LCDの再接続とframe818描画も確認しました。旧風刺画サービス・履歴は維持。E-ink_0の実表示成功はユーザー確認済みです。詳細・SHA256・サイズ・残件は [E-ink 検証記録](eink-verification-2026-10-14.md) を参照してください。
+
+2026-10-14追加修正：天気はLCDの色・形を保ち、E-inkのアイコンだけ黒く描きます。Webで現在機能をOFF／全OFFにした直後の新画面を同じ接続へ送り、古い動画・取得・ACKを拒否します。FrameStartの任意mode=normal/subにより、WebでSubを離れた際の局所入力状態も同期します。旧メッセージにmodeが無ければ従来どおりです。LCDにはこの同期版の書込みが必要で、再BOOTSEL待ちです。E-ink_0は0入力なので再書込み不要。E-ink_1の未結合準備UF2には同期修正を含みます。
+
+本番サーバは18:53:43 JSTに今回の修正版へ更新・再起動済み。既存削除feature／設定、旧サービスを維持しました。実Web保存で天気→全OFFロゴ→元の雨雲を試し、E-ink_0のframe889〜891とLCDのframe892〜894で両ACKを確認。同じセッションを維持し、終了後の両端末設定は試験前の雨雲のみONへ復元しました。サービス174成功、ファーム23実行PASS、fmt／clippy／Release成功。詳細は検証記録を参照してください。

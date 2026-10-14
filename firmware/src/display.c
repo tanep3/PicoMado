@@ -19,7 +19,7 @@ void pm_display_standby(void) { pm_lcd_black();pm_lcd_backlight(false); }
 void pm_display_wake(void) { pm_lcd_backlight(true); }
 void pm_display_reference_pattern(void) { pm_lcd_reference_pattern(); }
 #elif PM_DISPLAY_TYPE == PM_DISPLAY_EINK
-#error "E-ink backend and server pixel contract are not implemented or verified"
+// E-ink symbols are supplied by the independently selected display_eink.c.
 #else
 #error "Unsupported display backend selection"
 #endif

@@ -15,6 +15,14 @@ pub const MAX_CHUNK_BYTES: usize = 64 * 1024;
 pub const IMAGE_FRAGMENT_BYTES: usize = 4096;
 pub const LCD_FRAME_BYTES: usize = 160 * 80 * 2;
 
+fn valid_frame_contract(width: u16, height: u16, format: &str, byte_len: u32) -> bool {
+    (width == 160 && height == 80 && format == "rgb565be" && byte_len as usize == LCD_FRAME_BYTES)
+        || (width == 250
+            && height == 122
+            && format == "mono1"
+            && byte_len as usize == crate::eink::FRAME_BYTES)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum WireMessage {
@@ -62,6 +70,9 @@ pub enum WireMessage {
     },
     FrameStart {
         token: FrameToken,
+        /// Optional for legacy frames; a new frame carries its logical mode.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<String>,
         width: u16,
         height: u16,
         format: String,
@@ -151,12 +162,9 @@ impl FrameAssembler {
                 format,
                 byte_len,
                 crc32,
+                ..
             } => {
-                if width != 160
-                    || height != 80
-                    || format != "rgb565be"
-                    || byte_len as usize != LCD_FRAME_BYTES
-                {
+                if !valid_frame_contract(width, height, &format, byte_len) {
                     return Err(ProtocolError::InvalidFrame);
                 }
                 self.active = Some((
@@ -343,11 +351,7 @@ fn validate_image_message(message: &WireMessage) -> Result<(), ProtocolError> {
             format,
             byte_len,
             ..
-        } if *width != 160
-            || *height != 80
-            || format != "rgb565be"
-            || *byte_len as usize != LCD_FRAME_BYTES =>
-        {
+        } if !valid_frame_contract(*width, *height, format, *byte_len) => {
             Err(ProtocolError::InvalidLength)
         }
         WireMessage::FrameChunk { bytes, .. }
@@ -435,6 +439,7 @@ mod tests {
         };
         let bytes = vec![0x5a; LCD_FRAME_BYTES];
         let start = WireMessage::FrameStart {
+            mode: None,
             token: token.clone(),
             width: 160,
             height: 80,
@@ -484,6 +489,7 @@ mod tests {
         }
         assert!(matches!(
             encode(&WireMessage::FrameStart {
+                mode: None,
                 token,
                 width: 1,
                 height: 80,
@@ -519,6 +525,7 @@ mod tests {
         let mut terminal = GatedFrameReceiver::new(screen);
         let pixels = vec![7; LCD_FRAME_BYTES];
         let start = WireMessage::FrameStart {
+            mode: None,
             token: token.clone(),
             width: 160,
             height: 80,
@@ -578,6 +585,7 @@ mod tests {
         };
         let pixels = vec![0x5a; LCD_FRAME_BYTES];
         let start = WireMessage::FrameStart {
+            mode: None,
             token: token.clone(),
             width: 160,
             height: 80,
@@ -634,6 +642,7 @@ mod tests {
         let mut fresh_receiver = GatedFrameReceiver::new(fresh_screen);
         fresh_receiver
             .accept(WireMessage::FrameStart {
+                mode: None,
                 token: fresh.clone(),
                 width: 160,
                 height: 80,

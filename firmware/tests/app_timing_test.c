@@ -236,8 +236,8 @@ static void test_frame_pipeline(void){
     uint8_t zeros[PM_IMAGE_BYTES]={0};uint32_t crc=pm_crc32(zeros,sizeof zeros);
     const char *pattern="\"token\":{\"device_id\":\"%s\",\"incarnation\":1,\"session_epoch\":1,\"display_epoch\":1,\"screen_owner_epoch\":42,\"frame_id\":900}";
     char token[320];snprintf(token,sizeof token,pattern,PM_DEVICE_ID);
-    snprintf(json,sizeof json,"{\"type\":\"frame_start\",\"data\":{%s,\"width\":160,\"height\":80,\"format\":\"rgb565be\",\"byte_len\":25600,\"crc32\":%lu}}",token,(unsigned long)crc);
-    process(12,json);
+    snprintf(json,sizeof json,"{\"type\":\"frame_start\",\"data\":{%s,\"mode\":\"normal\",\"width\":160,\"height\":80,\"format\":\"rgb565be\",\"byte_len\":25600,\"crc32\":%lu}}",token,(unsigned long)crc);
+    sub_mode=true;process(12,json);assert(!sub_mode);
     for(unsigned offset=0;offset<PM_IMAGE_BYTES;offset+=PM_FRAGMENT_BYTES){
         unsigned n=PM_IMAGE_BYTES-offset;if(n>PM_FRAGMENT_BYTES)n=PM_FRAGMENT_BYTES;
         int prefix=snprintf(json,sizeof json,"{\"type\":\"frame_chunk\",\"data\":{%s,\"offset\":%u,\"bytes\":[",token,offset);

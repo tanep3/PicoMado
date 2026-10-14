@@ -149,6 +149,17 @@ impl ContentPlugin for WeatherContent {
             index: browse.index(),
         })
     }
+    fn eink_frame_for(&self, ctx: &PluginContext, lcd: &[u8]) -> Option<Vec<u8>> {
+        let slot = self.slot(ctx)?;
+        if slot.error {
+            return None;
+        }
+        let (set, day) = slot.browse.as_ref()?.current();
+        if render_lcd(set, day).ok()?.as_slice() != lcd {
+            return None;
+        }
+        render_eink(set, day).ok()
+    }
     fn current_frame(&self, ctx: &PluginContext) -> Option<Vec<u8>> {
         let slot = self.slot(ctx)?;
         if slot.error
@@ -884,6 +895,18 @@ fn location_labels(area: &str, point: &str) -> (String, String) {
 /// Draw the 160×80 RGB565 composition with native-size Japanese glyphs.
 /// Long location labels are explicitly abbreviated without shrinking them.
 pub fn render_lcd(set: &ForecastSet, day: &ForecastDay) -> Result<Vec<u8>, WeatherError> {
+    render_forecast(set, day, false)
+}
+
+pub fn render_eink(set: &ForecastSet, day: &ForecastDay) -> Result<Vec<u8>, WeatherError> {
+    Ok(crate::eink::from_lcd(&render_forecast(set, day, true)?))
+}
+
+fn render_forecast(
+    set: &ForecastSet,
+    day: &ForecastDay,
+    monochrome_icon: bool,
+) -> Result<Vec<u8>, WeatherError> {
     if !LOCATIONS
         .iter()
         .any(|l| l.area_code == set.area_code && l.point_code == set.point_code)
@@ -925,8 +948,9 @@ pub fn render_lcd(set: &ForecastSet, day: &ForecastDay) -> Result<Vec<u8>, Weath
         .first()
         .copied()
         .ok_or(WeatherError::IncompleteForecast)?;
+    let ink = |r, g, b| if monochrome_icon { 0 } else { color(r, g, b) };
     if kind == b'1' {
-        im.circle(34, 54, 10, color(0xff, 0xd3, 0x4f));
+        im.circle(34, 54, 10, ink(0xff, 0xd3, 0x4f));
         for (x, y) in [
             (0, -17),
             (0, 17),
@@ -942,18 +966,18 @@ pub fn render_lcd(set: &ForecastSet, day: &ForecastDay) -> Result<Vec<u8>, Weath
                 54 + y * 2 / 3,
                 34 + x,
                 54 + y,
-                color(0xdf, 0x9a, 0),
+                ink(0xdf, 0x9a, 0),
             );
         }
     } else {
-        let cloud = color(0xd3, 0xe3, 0xec);
+        let cloud = ink(0xd3, 0xe3, 0xec);
         im.circle(24, 57, 11, cloud);
         im.circle(38, 50, 13, cloud);
         im.rect(17, 54, 49, 66, cloud);
-        im.line(17, 66, 49, 66, color(0x4a, 0x63, 0x79));
+        im.line(17, 66, 49, 66, ink(0x4a, 0x63, 0x79));
         if kind == b'3' || kind == b'4' {
             for x in [23, 34, 45] {
-                im.line(x, 70, x - 3, 77, color(0x23, 0x84, 0xcb));
+                im.line(x, 70, x - 3, 77, ink(0x23, 0x84, 0xcb));
             }
         }
     }
@@ -1036,6 +1060,66 @@ impl crate::fetch::SourceFetcher for JmaHttpFetcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eink_icons_keep_geometry_black_contrast_and_lcd_palette() {
+        let set = ForecastSet::tokyo_from_cache(CACHE, "icons", "2026-10-12").unwrap();
+        for code in ["100", "200", "300", "400"] {
+            let mut day = set.days[0].clone();
+            day.weather_code = code.into();
+            let lcd = render_lcd(&set, &day).unwrap();
+            let ink_lcd = render_forecast(&set, &day, true).unwrap();
+            let mono = render_eink(&set, &day).unwrap();
+            assert_eq!(mono.len(), crate::eink::FRAME_BYTES);
+            let pixel = |pixels: &[u8], x: usize, y: usize| {
+                u16::from_be_bytes([pixels[(y * 160 + x) * 2], pixels[(y * 160 + x) * 2 + 1]])
+            };
+            if code == "100" {
+                assert_eq!(pixel(&lcd, 34, 54), color(255, 211, 79));
+                assert_eq!(pixel(&ink_lcd, 34, 54), 0);
+                assert_eq!(pixel(&ink_lcd, 34, 37), 0);
+            } else {
+                assert_eq!(pixel(&lcd, 38, 50), color(211, 227, 236));
+                assert_eq!(pixel(&ink_lcd, 38, 50), 0);
+                if code == "300" || code == "400" {
+                    assert_eq!(pixel(&ink_lcd, 23, 70), 0);
+                }
+            }
+            // Recolour only existing icon strokes; keep every other LCD pixel.
+            for y in 0..80 {
+                for x in 0..160 {
+                    if pixel(&lcd, x, y) != pixel(&ink_lcd, x, y) {
+                        assert!((10..=51).contains(&x) && (37..=77).contains(&y));
+                        assert_eq!(pixel(&ink_lcd, x, y), 0);
+                    }
+                }
+            }
+            let black = |pixels: &[u8]| {
+                (55..118)
+                    .flat_map(|y| (15..82).map(move |x| (x, y)))
+                    .filter(|(x, y)| {
+                        let b = y * 250 + x;
+                        pixels[b / 8] & (0x80 >> (b % 8)) == 0
+                    })
+                    .count()
+            };
+            assert!(black(&mono) > black(&crate::eink::from_lcd(&lcd)) + 200);
+            if let Ok(directory) = std::env::var("PM_EINK_EVIDENCE_DIR") {
+                let path = std::path::Path::new(&directory);
+                std::fs::create_dir_all(path).unwrap();
+                for (suffix, bytes) in [
+                    ("lcd.rgb565be", lcd),
+                    (
+                        "before.mono1",
+                        crate::eink::from_lcd(&render_lcd(&set, &day).unwrap()),
+                    ),
+                    ("after.mono1", mono),
+                ] {
+                    std::fs::write(path.join(format!("weather-{code}-{suffix}")), bytes).unwrap();
+                }
+            }
+        }
+    }
 
     #[test]
     fn large_lcd_text_fits_national_labels_and_temperature_extremes() {

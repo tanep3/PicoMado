@@ -682,6 +682,29 @@ impl App {
     /// Compose a per-device mode indicator only in the outbound frame copy.
     /// In particular, plugin history and shared artwork remain untouched.
     fn compose_lcd_frame(&self, device_id: &str, mut bytes: Vec<u8>) -> Vec<u8> {
+        if let Some(device) = self
+            .runtime
+            .world
+            .devices
+            .get(device_id)
+            .filter(|d| d.capabilities.contains("eink") && !d.capabilities.contains("lcd"))
+        {
+            let ctx = PluginContext {
+                token: crate::session_token(device_id, device),
+                settings_revision: device.settings_revision,
+                mode: device.mode.clone(),
+            };
+            let mut mono = device
+                .selected
+                .as_ref()
+                .and_then(|id| self.contents.get(id))
+                .and_then(|plugin| plugin.eink_frame_for(&ctx, &bytes))
+                .unwrap_or_else(|| crate::eink::from_lcd(&bytes));
+            if device.mode == Mode::Sub {
+                crate::eink::draw_sub(&mut mono);
+            }
+            return mono;
+        }
         if self
             .runtime
             .world
@@ -926,16 +949,28 @@ impl App {
     }
 
     fn queue_selected_cached_frame(&mut self, token: &SessionToken) -> Result<(), AppError> {
+        self.queue_selected_frame(token, false)
+    }
+
+    fn queue_selected_frame(
+        &mut self,
+        token: &SessionToken,
+        include_loading: bool,
+    ) -> Result<(), AppError> {
         let Some(device) = self.runtime.world.devices.get(&token.device_id) else {
             return Ok(());
         };
         // A date observation may already have queued the current display's
         // image. RequestFrame permits only one pending frame per display.
-        if !matches!(device.mode, Mode::Normal | Mode::Sub) || device.pending_frame_id.is_some() {
+        if !session_current(device, token)
+            || device.owner != Owner::Remote
+            || !matches!(device.mode, Mode::Normal | Mode::Sub)
+            || device.pending_frame_id.is_some()
+        {
             return Ok(());
         }
         let Some(id) = device.selected.as_ref() else {
-            return Ok(());
+            return self.queue_logo_frame(token);
         };
         let ctx = PluginContext {
             token: token.clone(),
@@ -943,7 +978,10 @@ impl App {
             mode: device.mode.clone(),
         };
         let preparing = std::time::Instant::now();
-        let pixels = self.contents.get(id).and_then(|p| p.current_frame(&ctx));
+        let pixels = self.contents.get(id).and_then(|p| {
+            p.current_frame(&ctx)
+                .or_else(|| include_loading.then(|| p.loading_frame()))
+        });
         self.image_preparation_us = self
             .image_preparation_us
             .saturating_add(preparing.elapsed().as_micros());
@@ -951,6 +989,40 @@ impl App {
             let id = id.clone();
             self.queue_lcd_frame(token, &id, pixels)?;
         }
+        Ok(())
+    }
+
+    fn queue_logo_frame(&mut self, token: &SessionToken) -> Result<(), AppError> {
+        if self.frame_assets.len() >= 128 {
+            return Err(AppError::Conflict("transient frame asset limit"));
+        }
+        let handle = format!(
+            "logo:{}:{}",
+            token.device_id, self.runtime.world.next_frame_id
+        );
+        let pixels = self.compose_lcd_frame(&token.device_id, crate::lcd_text::logo_frame());
+        self.change(|engine, state| {
+            let device = state
+                .world
+                .devices
+                .get(&token.device_id)
+                .ok_or(AppError::NotFound)?;
+            let decision = engine
+                .handle(
+                    &state.world,
+                    &Event::RequestLogoFrame {
+                        token: crate::display_token(&token.device_id, device),
+                        asset_handle: handle.clone(),
+                    },
+                )
+                .map_err(|_| AppError::Conflict("logo frame rejected"))?;
+            if decision.applied.is_none() {
+                return Err(AppError::Conflict("logo frame not ready"));
+            }
+            state.accept(decision)?;
+            Ok(())
+        })?;
+        self.frame_assets.insert(handle, Arc::new(pixels));
         Ok(())
     }
 
@@ -1158,6 +1230,18 @@ impl App {
         self.frame_assets.get(handle).cloned()
     }
 
+    pub fn frame_mode(&self, token: &FrameToken) -> Option<&'static str> {
+        let device = self.runtime.world.devices.get(&token.device_id)?;
+        if !frame_current(device, token) {
+            return None;
+        }
+        match device.mode {
+            Mode::Normal => Some("normal"),
+            Mode::Sub => Some("sub"),
+            _ => None,
+        }
+    }
+
     pub fn frame_is_current(&self, token: &FrameToken) -> bool {
         self.runtime
             .world
@@ -1319,11 +1403,13 @@ impl App {
         plugin: &str,
         enabled: bool,
     ) -> Result<(), AppError> {
-        self.change(|engine, state| {
+        let mut contents = self.contents.clone();
+        let (reselected, token) = self.change(|engine, state| {
             let device = state.world.devices.get(id).ok_or(AppError::NotFound)?;
             if device.incarnation != incarnation {
                 return Err(AppError::Conflict("stale device incarnation"));
             }
+            let previous_epoch = device.display_epoch;
             let decision = engine
                 .handle(
                     &state.world,
@@ -1336,8 +1422,26 @@ impl App {
                 )
                 .map_err(|_| AppError::Conflict("plugin update rejected"))?;
             state.accept(decision)?;
-            Ok(())
-        })
+            let device = &state.world.devices[id];
+            let reselected = device.display_epoch != previous_epoch;
+            let token = crate::session_token(id, device);
+            if reselected {
+                for content in contents.values_mut() {
+                    content.session_reset(id, incarnation);
+                }
+                state
+                    .plugin_states
+                    .extend(contents.iter().map(|(id, p)| (id.clone(), p.save_state())));
+            }
+            Ok((reselected, token))
+        })?;
+        self.contents = contents;
+        if reselected {
+            let today = self.clock.today_jst();
+            self.observe_plugin_date(&token, &today)?;
+            self.queue_selected_frame(&token, true)?;
+        }
+        Ok(())
     }
 
     pub fn set_device_settings(
@@ -1670,6 +1774,166 @@ pub struct AppView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn current_delivery(app: &App, id: &str) -> (FrameToken, Arc<Vec<u8>>) {
+        app.pending_effects()
+            .into_iter()
+            .find_map(|(_, effect)| match effect {
+                Effect::SendFrame {
+                    token,
+                    asset_handle,
+                } if token.device_id == id && app.frame_is_current(&token) => {
+                    Some((token, app.frame_asset(&asset_handle).unwrap()))
+                }
+                _ => None,
+            })
+            .expect("current selection must queue a frame")
+    }
+    fn web_enabled(app: &mut App, id: &str, plugin: &str, enabled: bool) {
+        let d = &app.runtime.world.devices[id];
+        let inc = d.incarnation;
+        let rev = d.settings_revision;
+        app.set_enabled(id, inc, rev, plugin, enabled).unwrap();
+    }
+    #[test]
+    fn web_selection_delivers_immediately_rejects_old_video_and_fetch_and_keeps_valid_selection() {
+        use crate::application::{PlaybackOffer, PlaybackTarget};
+        use crate::plugin_jobs::PlaybackSpec;
+        for cap in ["lcd", "eink"] {
+            let temp = tempfile::tempdir().unwrap();
+            let mut app = App::open_with_clock(
+                &temp.path().join("state.db"),
+                Arc::new(SwitchDayClock(std::sync::atomic::AtomicU8::new(0))),
+            )
+            .unwrap();
+            let token = app.hello("desk", [cap.into()].into(), 1).unwrap();
+            let old = current_delivery(&app, "desk").0;
+            let target = crate::display_token("desk", &app.runtime.world.devices["desk"]);
+            let jobs = app.plan_plugin_fetches(0, "2026-10-12").unwrap();
+            app.publish_plugin_source(
+                "weather",
+                &token,
+                1,
+                include_bytes!("../assets/jma-tokyo-20261012.json"),
+                "cached",
+                "2026-10-12",
+            )
+            .unwrap();
+            web_enabled(&mut app, "desk", "caricature", false);
+            web_enabled(&mut app, "desk", "rain-radar", false);
+            assert_eq!(
+                app.runtime.world.devices["desk"].display_epoch,
+                old.display_epoch
+            );
+            assert!(app.frame_is_current(&old));
+            web_enabled(&mut app, "desk", "youtube", false);
+            let (fresh, pixels) = current_delivery(&app, "desk");
+            assert_eq!(
+                app.runtime.world.devices["desk"].selected.as_deref(),
+                Some("weather")
+            );
+            assert_eq!(app.runtime.world.devices["desk"].mode, Mode::Normal);
+            assert!(fresh.display_epoch > old.display_epoch && !app.frame_is_current(&old));
+            assert_eq!(pixels.len(), if cap == "lcd" { 25600 } else { 3813 });
+            let offer = PlaybackOffer {
+                plugin: "youtube".into(),
+                spec: PlaybackSpec {
+                    asset_id: "old".into(),
+                    generation: 1,
+                    fps: 10,
+                    frame_count: 10,
+                    started_mono_ms: 0,
+                    source: serde_json::Value::Null,
+                },
+                targets: vec![PlaybackTarget { token: target }],
+            };
+            assert_eq!(
+                app.accept_playback_pixels(&offer, vec![0; 25600]).unwrap(),
+                0
+            );
+            for job in jobs {
+                assert!(!app
+                    .complete_plugin_fetch(
+                        &job,
+                        1,
+                        Ok(include_bytes!("../assets/jma-tokyo-20261012.json").to_vec())
+                    )
+                    .unwrap());
+            }
+            assert!(!app
+                .terminal_event(Event::RenderedAck { token: old })
+                .unwrap());
+            assert_eq!(current_delivery(&app, "desk").0, fresh);
+        }
+    }
+    #[test]
+    fn web_off_resets_browse_and_all_off_logo_survives_offline_reconnect() {
+        for cap in ["lcd", "eink"] {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("state.db");
+            let clock = Arc::new(SwitchDayClock(std::sync::atomic::AtomicU8::new(0)));
+            let mut app = App::open_with_clock(&path, clock.clone()).unwrap();
+            let token = app.hello("desk", [cap.into()].into(), 1).unwrap();
+            app.publish_plugin_source(
+                "weather",
+                &token,
+                1,
+                include_bytes!("../assets/jma-tokyo-20261012.json"),
+                "cached",
+                "2026-10-12",
+            )
+            .unwrap();
+            for id in ["youtube", "caricature", "rain-radar"] {
+                web_enabled(&mut app, "desk", id, false);
+            }
+            app.button(&token, ButtonAction::Sub).unwrap();
+            app.button(&token, ButtonAction::Down).unwrap();
+            assert_eq!(app.plugin_position(&token).unwrap().index, 1);
+            let epoch = app.runtime.world.devices["desk"].display_epoch;
+            web_enabled(&mut app, "desk", "caricature", true);
+            assert_eq!(app.runtime.world.devices["desk"].display_epoch, epoch);
+            assert_eq!(app.plugin_position(&token).unwrap().index, 1);
+            web_enabled(&mut app, "desk", "weather", false);
+            assert_eq!(app.runtime.world.devices["desk"].mode, Mode::Normal);
+            web_enabled(&mut app, "desk", "weather", true);
+            web_enabled(&mut app, "desk", "caricature", false);
+            assert_eq!(app.plugin_position(&token).unwrap().index, 0);
+            assert_eq!(
+                app.plugin_position(&token).unwrap().target_date,
+                "2026-10-12"
+            );
+            web_enabled(&mut app, "desk", "weather", false);
+            let (logo, pixels) = current_delivery(&app, "desk");
+            assert_eq!(app.runtime.world.devices["desk"].selected, None);
+            let expected = crate::lcd_text::logo_frame();
+            assert_eq!(
+                pixels.as_slice(),
+                if cap == "lcd" {
+                    expected
+                } else {
+                    crate::eink::from_lcd(&expected)
+                }
+            );
+            assert_eq!(app.frame_mode(&logo), Some("normal"));
+            app.disconnect(token.clone()).unwrap();
+            web_enabled(&mut app, "desk", "weather", true);
+            assert!(!app
+                .pending_effects()
+                .iter()
+                .any(|(_, e)| matches!(e, Effect::SendFrame { .. })));
+            drop(app);
+            let mut app = App::open_with_clock(&path, clock).unwrap();
+            let next = app.hello("desk", [cap.into()].into(), 2).unwrap();
+            assert_eq!(
+                app.selection_for(&next).unwrap().0.as_deref(),
+                Some("weather")
+            );
+            assert_eq!(
+                current_delivery(&app, "desk").0.session_epoch,
+                next.session_epoch
+            );
+        }
+    }
 
     #[test]
     fn fresh_plugins_deliver_distinct_idle_images_and_cancel_old_generation() {

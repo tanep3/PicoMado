@@ -126,6 +126,14 @@ pub trait ContentPlugin: Send + Sync {
         today_jst: &str,
     ) -> Result<(), ContentError>;
     fn position(&self, ctx: &PluginContext) -> Option<PluginPosition>;
+    /// An uncached selected plugin replaces the previous image while fetching.
+    fn loading_frame(&self) -> Vec<u8> {
+        crate::lcd_text::status_frame(&self.id().to_ascii_uppercase(), "FETCHING")
+    }
+    /// Optional native monochrome asset matching the exact queued LCD snapshot.
+    fn eink_frame_for(&self, _ctx: &PluginContext, _lcd: &[u8]) -> Option<Vec<u8>> {
+        None
+    }
     fn current_frame(&self, _ctx: &PluginContext) -> Option<Vec<u8>> {
         None
     }

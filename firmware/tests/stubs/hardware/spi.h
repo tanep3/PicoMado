@@ -4,6 +4,7 @@
 #include <stdbool.h>
 typedef struct { unsigned unused; } spi_inst_t;
 extern spi_inst_t *spi0;
+extern spi_inst_t *spi1;
 #define SPI_CPOL_0 0
 #define SPI_CPHA_0 0
 #define SPI_MSB_FIRST 0

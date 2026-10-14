@@ -1087,6 +1087,13 @@ impl ContentPlugin for CaricatureContent {
         }
         artwork_position(self.displayed_artwork(ctx)?).ok()
     }
+    fn eink_frame_for(&self, ctx: &PluginContext, lcd: &[u8]) -> Option<Vec<u8>> {
+        let art = self.displayed_artwork(ctx)?;
+        if art.lcd_rgb565be != lcd {
+            return None;
+        }
+        crate::eink::from_png(&art.eink_png)
+    }
     fn current_frame(&self, ctx: &PluginContext) -> Option<Vec<u8>> {
         if ctx.mode == Mode::Sub {
             if let Some(browse) = self
@@ -2195,6 +2202,18 @@ mod tests {
         assert_eq!(content.current_frame(&sub).unwrap()[0], 3);
         complete_browse(&mut content, "a", "one");
         assert_eq!(content.current_frame(&sub).unwrap()[0], 1);
+    }
+
+    #[test]
+    fn eink_delivery_uses_native_art_without_rescaling_lcd_or_mutating_archive() {
+        let content = browse_content();
+        let ctx = browse_ctx("a", Mode::Normal);
+        let art = content.latest().unwrap();
+        let mono = content.eink_frame_for(&ctx, &art.lcd_rgb565be).unwrap();
+        assert_eq!(mono, crate::eink::from_png(&art.eink_png).unwrap());
+        assert_eq!(mono.len(), 3813);
+        assert!(content.eink_frame_for(&ctx, &vec![99; 25600]).is_none());
+        assert_eq!(content.latest().unwrap().eink_png, art.eink_png);
     }
 
     #[test]

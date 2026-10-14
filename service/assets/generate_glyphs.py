@@ -14,7 +14,7 @@ locations = json.loads((ROOT / 'jma-locations.json').read_text())
 chars = ''.join(dict.fromkeys(base + ''.join(
     str(item[key]) for item in locations
     for key in ('label', 'office_label', 'area_label', 'point_label')
-) + (ROOT / 'radar-chars.txt').read_text()))
+) + (ROOT / 'radar-chars.txt').read_text() + '窓'))
 pixels = bytearray()
 glyphs = []
 for size in SIZES:

@@ -438,19 +438,29 @@ fn enqueue_outbox(
                 let asset = {
                     let guard = app.lock().map_err(|_| ())?;
                     if guard.frame_is_current(&frame) {
-                        guard.frame_asset(&asset_handle)
+                        guard
+                            .frame_asset(&asset_handle)
+                            .zip(guard.frame_mode(&frame))
                     } else {
                         None
                     }
                 };
-                let Some(asset) = asset else {
+                let Some((asset, mode)) = asset else {
                     continue;
                 };
+                let (width, height, format) = if asset.len() == crate::eink::FRAME_BYTES {
+                    (250, 122, "mono1")
+                } else if asset.len() == crate::protocol::LCD_FRAME_BYTES {
+                    (160, 80, "rgb565be")
+                } else {
+                    return Err(());
+                };
                 let start = WireMessage::FrameStart {
+                    mode: Some(mode.into()),
                     token: frame.clone(),
-                    width: 160,
-                    height: 80,
-                    format: "rgb565be".into(),
+                    width,
+                    height,
+                    format: format.into(),
                     byte_len: asset.len() as u32,
                     crc32: crc32fast::hash(&asset),
                 };
@@ -821,6 +831,209 @@ mod tests {
     use std::sync::Arc;
     use std::task::{Context, Poll};
     use tokio_tungstenite::tungstenite::Message as ClientMessage;
+
+    #[test]
+    fn lcd_and_eink_dispatch_use_independent_dimensions_format_crc_and_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = Arc::new(std::sync::Mutex::new(
+            crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap(),
+        ));
+        for (id, cap, size, dimensions, format) in [
+            ("lcd", "lcd", 25600, (160, 80), "rgb565be"),
+            ("E-ink_0", "eink", 3813, (250, 122), "mono1"),
+        ] {
+            let token = app
+                .lock()
+                .unwrap()
+                .hello(id, [cap.into()].into(), 1)
+                .unwrap();
+            let frame = app
+                .lock()
+                .unwrap()
+                .queue_lcd_frame(&token, "youtube", vec![255; 25600])
+                .unwrap();
+            let mut queue = FairQueue::default();
+            enqueue_outbox(
+                &app,
+                &token,
+                &mut queue,
+                &mut 1,
+                &mut std::collections::BTreeMap::new(),
+            )
+            .unwrap();
+            let mut assembler = FrameAssembler::default();
+            let mut complete = None;
+            while let Some(packet) = queue.pop_for(id) {
+                let message = Decoder::default().push(&packet.bytes).unwrap().remove(0);
+                if let WireMessage::FrameStart {
+                    width,
+                    height,
+                    format: actual,
+                    byte_len,
+                    ..
+                } = &message
+                {
+                    assert_eq!((*width, *height), dimensions);
+                    assert_eq!(actual, format);
+                    assert_eq!(*byte_len as usize, size);
+                }
+                if matches!(
+                    message,
+                    WireMessage::FrameStart { .. } | WireMessage::FrameChunk { .. }
+                ) {
+                    if let Some(result) = assembler.accept(message).unwrap() {
+                        complete = Some(result);
+                    }
+                }
+            }
+            let (received, pixels) = complete.unwrap();
+            assert_eq!(received, frame);
+            assert_eq!(pixels, vec![255; size]);
+        }
+    }
+
+    #[tokio::test]
+    async fn http_settings_push_weather_and_logo_to_lcd_and_eink_without_reconnect() {
+        for cap in ["lcd", "eink"] {
+            let temp = tempfile::tempdir().unwrap();
+            let app = Arc::new(std::sync::Mutex::new(
+                App::open_with_clock(&temp.path().join("state.db"), Arc::new(FixtureClock))
+                    .unwrap(),
+            ));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let web_app = app.clone();
+            let server =
+                tokio::spawn(
+                    async move { axum::serve(listener, web::router(web_app)).await.unwrap() },
+                );
+            let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{address}/device"))
+                .await
+                .unwrap();
+            ws.send(ClientMessage::Binary(
+                encode(&WireMessage::Hello {
+                    device_id: "desk".into(),
+                    capabilities: vec![cap.into()],
+                    screen_owner_epoch: 1,
+                })
+                .unwrap()
+                .into(),
+            ))
+            .await
+            .unwrap();
+            let session = match read_wire(&mut ws).await {
+                WireMessage::Welcome {
+                    incarnation,
+                    session_epoch,
+                } => SessionToken {
+                    device_id: "desk".into(),
+                    incarnation,
+                    session_epoch,
+                },
+                other => panic!("{other:?}"),
+            };
+            let mut assembler = FrameAssembler::default();
+            let first = loop {
+                let message = read_wire(&mut ws).await;
+                if matches!(
+                    message,
+                    WireMessage::FrameStart { .. } | WireMessage::FrameChunk { .. }
+                ) {
+                    if let Some((token, _)) = assembler.accept(message).unwrap() {
+                        break token;
+                    }
+                }
+            };
+            app.lock()
+                .unwrap()
+                .publish_plugin_source(
+                    "weather",
+                    &session,
+                    1,
+                    include_bytes!("../assets/jma-tokyo-20261012.json"),
+                    "cached",
+                    "2026-10-12",
+                )
+                .unwrap();
+            let client = reqwest::Client::new();
+            for plugin in ["caricature", "rain-radar", "youtube", "weather"] {
+                let d = app.lock().unwrap().view().devices.remove(0);
+                let response=client.put(format!("http://{address}/api/devices/desk/plugins/{plugin}"))
+                    .header("Content-Type","application/json").body(serde_json::to_vec(&serde_json::json!({"incarnation":d.incarnation,"expected_revision":d.enabled_revision,"enabled":false})).unwrap()).send().await.unwrap();
+                assert!(response.status().is_success());
+                let view: serde_json::Value =
+                    serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
+                if plugin == "caricature" || plugin == "rain-radar" {
+                    assert_eq!(view["devices"][0]["selected"], "youtube");
+                    continue;
+                }
+                let (frame, pixels) = loop {
+                    let message = read_wire(&mut ws).await;
+                    if let WireMessage::FrameStart { mode, .. } = &message {
+                        assert_eq!(mode.as_deref(), Some("normal"));
+                    }
+                    if matches!(
+                        message,
+                        WireMessage::FrameStart { .. } | WireMessage::FrameChunk { .. }
+                    ) {
+                        if let Some(result) = assembler.accept(message).unwrap() {
+                            break result;
+                        }
+                    }
+                };
+                assert!(frame.display_epoch > first.display_epoch);
+                let expected = if plugin == "youtube" {
+                    let set = ForecastSet::tokyo_from_cache(
+                        include_bytes!("../assets/jma-tokyo-20261012.json"),
+                        "cached",
+                        "2026-10-12",
+                    )
+                    .unwrap();
+                    if cap == "lcd" {
+                        crate::weather::render_lcd(&set, &set.days[0]).unwrap()
+                    } else {
+                        crate::weather::render_eink(&set, &set.days[0]).unwrap()
+                    }
+                } else {
+                    let logo = crate::lcd_text::logo_frame();
+                    if cap == "lcd" {
+                        logo
+                    } else {
+                        crate::eink::from_lcd(&logo)
+                    }
+                };
+                assert_eq!(pixels, expected);
+                for message in [
+                    WireMessage::ReceiptAck {
+                        token: frame.clone(),
+                    },
+                    WireMessage::RenderedAck {
+                        token: frame.clone(),
+                    },
+                ] {
+                    ws.send(ClientMessage::Binary(encode(&message).unwrap().into()))
+                        .await
+                        .unwrap();
+                }
+                tokio::time::timeout(Duration::from_secs(2), async {
+                    loop {
+                        if app.lock().unwrap().view().devices[0].last_rendered_frame
+                            == Some(frame.frame_id)
+                        {
+                            break;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                assert!(app.lock().unwrap().session_is_current(&session));
+            }
+            assert_eq!(app.lock().unwrap().view().devices[0].selected, None);
+            ws.close(None).await.unwrap();
+            server.abort();
+        }
+    }
 
     struct FixtureClock;
     impl Clock for FixtureClock {

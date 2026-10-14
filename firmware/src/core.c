@@ -73,3 +73,23 @@ bool pm_button_wake_step(pm_button *b,unsigned count,unsigned index,
     if(!pm_button_wakes(count,index,true))return false;
     b->wake_reported=true;return true;
 }
+
+int pm_button_input_step(pm_button *b,unsigned count,unsigned index,bool pressed,
+                         uint32_t now,uint32_t long_ms,bool standby){
+    bool was_stable=b->stable;
+    bool edge=pm_button_step(b,pressed,now);
+    if(count==4)return edge && (!standby || index==2)?(int)index:-1;
+    if(count!=2 || index>=2)return -1;
+    if(edge){b->held_ms=now;b->press_long_ms=long_ms;b->long_reported=false;b->wake_armed=true;}
+    if(b->stable && pressed && b->wake_armed && !b->long_reported &&
+       (uint32_t)(now-b->held_ms)>=b->press_long_ms){
+        b->long_reported=true;
+        return !standby || index==1?(index==0?0:2):-1;
+    }
+    if(was_stable && !b->stable){
+        bool short_press=b->wake_armed && !b->long_reported;
+        b->wake_armed=false;
+        return short_press && !standby?(index==0?1:3):-1;
+    }
+    return -1;
+}

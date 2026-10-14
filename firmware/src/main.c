@@ -35,9 +35,21 @@ static struct {
     uint32_t crc;
 } settings;
 static app_state state;
-static pm_button buttons[PM_BUTTON_COUNT];
-static const uint button_pins[PM_BUTTON_COUNT]={PM_BUTTON_SUB_PIN,PM_BUTTON_UP_PIN,
-    PM_BUTTON_POWER_PIN,PM_BUTTON_DOWN_PIN};
+static pm_button buttons[4];
+#if PM_BUTTON_COUNT == 4
+static const uint button_pins[4]={PM_BUTTON_SUB_PIN,PM_BUTTON_UP_PIN,PM_BUTTON_POWER_PIN,PM_BUTTON_DOWN_PIN};
+#elif PM_BUTTON_COUNT == 2
+static const uint button_pins[4]={PM_BUTTON_UP_PIN,PM_BUTTON_DOWN_PIN};
+#elif PM_BUTTON_COUNT == 0
+static const uint button_pins[4]={0};
+#else
+#error "Supported input counts are 0, 2 and 4"
+#endif
+static unsigned input_count(void){return PM_BUTTON_COUNT;}
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+static bool drawing,panel_standby;
+static pm_token drawing_token;
+#endif
 static uint8_t active_profile,menu_profile;
 static uint64_t owner_epoch=1,incarnation,session_epoch,display_epoch;
 static uint32_t started_ms,retry_ms=5000,last_heartbeat_ms;
@@ -144,6 +156,14 @@ static void wifi_off(void){
     if(wifi_enabled){cyw43_arch_disable_sta_mode();wifi_enabled=false;}
 }
 static void standby(void){
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+    pm_display_standby();
+    if(pm_display_busy()){
+        if(!panel_standby)owner_epoch++;
+        panel_standby=true;pm_reset(&assembly);pending_render_ack=false;
+        pending_standby=false;wifi_off();return;
+    }
+#endif
     pm_display_standby();
 #if PM_DIAGNOSTIC_BOOT
     pm_logf("%s\n","lcd black: standby");
@@ -252,8 +272,8 @@ static bool send_pending_render_ack(void){
 static bool send_hello(void){
     int n=snprintf(outbound_json,sizeof outbound_json,
         "{\"type\":\"hello\",\"data\":{\"device_id\":\"%s\","
-        "\"capabilities\":[\"%s\"],\"screen_owner_epoch\":%llu}}",
-        PM_DEVICE_ID,pm_display_capability(),(unsigned long long)owner_epoch);
+        "\"capabilities\":[\"%s\",\"buttons%u\"],\"screen_owner_epoch\":%llu}}",
+        PM_DEVICE_ID,pm_display_capability(),PM_BUTTON_COUNT,(unsigned long long)owner_epoch);
     return n>0 && (size_t)n<sizeof outbound_json && pm_net_send(1,outbound_json);
 }
 static void heartbeat(void){
@@ -357,12 +377,22 @@ static void process(uint8_t kind,const char *j){
     if(await_selection || t.incarnation!=incarnation || t.session_epoch!=session_epoch ||
        t.screen_owner_epoch!=owner_epoch || t.display_epoch<display_epoch)return;
     if(kind==12){
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+        if(drawing)return;
+#endif
         uint64_t w,h,len,crc;
         if(!number(j,"width",&w)||!number(j,"height",&h)||
            !number(j,"byte_len",&len)||!number(j,"crc32",&crc)||
-           !string_equals(j,"format","rgb565be") ||
-           !pm_start(&assembly,t,w,h,"rgb565be",len,crc))pm_reset(&assembly);
-        else {display_epoch=t.display_epoch;pm_trace_event(PM_TRACE_FRAME_START,t.frame_id,0,0);}
+           !string_equals(j,"format",PM_PIXEL_FORMAT_NAME) ||
+           !pm_start(&assembly,t,w,h,PM_PIXEL_FORMAT_NAME,len,crc))pm_reset(&assembly);
+        else {
+            display_epoch=t.display_epoch;
+            // Web changes can leave SUB without a physical button response.
+            // Only a validated current frame may replace the cached mode.
+            if(string_equals(j,"mode","normal"))sub_mode=false;
+            else if(string_equals(j,"mode","sub"))sub_mode=true;
+            pm_trace_event(PM_TRACE_FRAME_START,t.frame_id,0,0);
+        }
         return;
     }
     uint64_t offset;size_t count;bool complete;
@@ -384,7 +414,11 @@ static void process(uint8_t kind,const char *j){
         bool drawn=pm_display_frame(assembly.pixels,PM_IMAGE_BYTES);
         pm_trace_frame_context(0);
         if(!drawn){retry();return;}
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+        drawing=true;drawing_token=t;return;
+#else
         have_display=true;last_rendered=t;
+#endif
 #if PM_DIAGNOSTIC_STAGE
         pm_logf("diag frame_spi_complete=%llu\n",(unsigned long long)t.frame_id);
 #endif
@@ -394,11 +428,26 @@ static void process(uint8_t kind,const char *j){
     }
     pending_render_token=t;pending_render_ack=true;
 }
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+static void poll_display(void){
+    pm_display_poll();
+    bool drawn;
+    if(pm_display_take_result(&drawn)){
+        drawing=false;
+        if(drawn && state==ACTIVE && !await_selection && !panel_standby &&
+           pm_token_current(drawing_token,incarnation,session_epoch,display_epoch,owner_epoch)){
+            have_display=true;last_rendered=drawing_token;
+            pending_render_token=drawing_token;pending_render_ack=true;
+        }
+    }
+    if(panel_standby && !pm_display_busy()){panel_standby=false;standby();}
+}
+#endif
 static void button(unsigned i,bool long_press){
 #if PM_DIAGNOSTIC_STAGE
     pm_logf("diag button=%u state=%u\n",i,(unsigned)state);
 #endif
-    if(state==STANDBY){if(pm_button_wakes(PM_BUTTON_COUNT,i,long_press))start_wifi();return;}
+    if(state==STANDBY){if(i==2 && (PM_BUTTON_COUNT==4 || long_press))start_wifi();return;}
     if(state==MENU){
         if(i==1||i==3){
             if(profile_ready(menu_profile^1)){
@@ -431,7 +480,7 @@ static void diagnostic_hold(uint32_t duration_ms,bool watch_buttons){
     uint32_t start=now_ms();
     while((uint32_t)(now_ms()-start)<duration_ms){
         cyw43_arch_poll();
-        if(watch_buttons)for(unsigned i=0;i<PM_BUTTON_COUNT;i++)
+        if(watch_buttons)for(unsigned i=0;i<input_count();i++)
             if(pm_button_step(&buttons[i],!gpio_get(button_pins[i]),now_ms())){
                 pm_logf("diag local_button=%u\n",i);
                 pm_display_status("BUTTON",names[i]);
@@ -472,7 +521,7 @@ int main(void){
              (c>='0'&&c<='9')||c=='-'||c=='_'))id_valid=false;
     }
     if(!id_valid){pm_display_status("CONFIG","BAD ID");while(true)sleep_ms(1000);}
-    for(unsigned i=0;i<PM_BUTTON_COUNT;i++){
+    for(unsigned i=0;i<input_count();i++){
         gpio_init(button_pins[i]);gpio_set_dir(button_pins[i],GPIO_IN);gpio_pull_up(button_pins[i]);
     }
     if(!net_ok){pm_display_status("WIFI","INIT ERROR");while(true)sleep_ms(1000);}
@@ -489,14 +538,17 @@ int main(void){
     while(true){
         uint64_t loop_started=pm_trace_clock();
         uint32_t now=now_ms();
-        for(unsigned i=0;i<PM_BUTTON_COUNT;i++){
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+        bool draining=panel_standby;
+        poll_display();
+        if(draining){pm_trace_flush();sleep_ms(5);continue;}
+#endif
+        for(unsigned i=0;i<input_count();i++){
             bool pressed=!gpio_get(button_pins[i]);
             bool was_pressed=buttons[i].stable;
-            bool event=state==STANDBY
-                ?pm_button_wake_step(&buttons[i],PM_BUTTON_COUNT,i,pressed,now,settings.long_ms)
-                :pm_button_step(&buttons[i],pressed,now);
+            int event=pm_button_input_step(&buttons[i],PM_BUTTON_COUNT,i,pressed,now,settings.long_ms,state==STANDBY);
             if(!was_pressed && buttons[i].stable)pm_trace_event(PM_TRACE_BUTTON,0,(int32_t)i,(uint32_t)state);
-            if(event)button(i,state==STANDBY && PM_BUTTON_COUNT==2);
+            if(event>=0)button((unsigned)event,PM_BUTTON_COUNT==2 && (event==0 || event==2));
         }
         log_usb_snapshot();
         if(state==STANDBY){pm_trace_flush();sleep_ms(5);continue;}

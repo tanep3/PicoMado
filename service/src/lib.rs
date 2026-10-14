@@ -4,6 +4,7 @@ pub mod application;
 pub mod caricature;
 pub mod content;
 mod display_badge;
+pub mod eink;
 pub mod fetch;
 pub mod host;
 mod lcd_text;
@@ -228,6 +229,10 @@ pub enum Event {
         plugin: PluginId,
         asset_handle: String,
     },
+    RequestLogoFrame {
+        token: DisplayToken,
+        asset_handle: String,
+    },
     RequestStreamingFrame {
         token: DisplayToken,
         plugin: PluginId,
@@ -269,9 +274,9 @@ impl Event {
             | Self::LocalOwner { token, .. }
             | Self::PluginInput { token, .. } => &token.device_id,
             Self::BeginFetch { token, .. } | Self::PluginTick { token, .. } => &token.device_id,
-            Self::RequestFrame { token, .. } | Self::RequestStreamingFrame { token, .. } => {
-                &token.device_id
-            }
+            Self::RequestFrame { token, .. }
+            | Self::RequestLogoFrame { token, .. }
+            | Self::RequestStreamingFrame { token, .. } => &token.device_id,
             Self::FetchCompleted { token, .. } | Self::FetchFailed { token, .. } => {
                 &token.device_id
             }
@@ -379,6 +384,10 @@ pub enum Transition {
         plugin: PluginId,
         asset_handle: String,
     },
+    RequestLogoFrame {
+        token: DisplayToken,
+        asset_handle: String,
+    },
     RequestStreamingFrame {
         token: DisplayToken,
         plugin: PluginId,
@@ -405,9 +414,9 @@ impl Transition {
             | Self::RefreshView { token, .. }
             | Self::LocalOwner { token, .. } => &token.device_id,
             Self::BeginFetch { token, .. } => &token.device_id,
-            Self::RequestFrame { token, .. } | Self::RequestStreamingFrame { token, .. } => {
-                &token.device_id
-            }
+            Self::RequestFrame { token, .. }
+            | Self::RequestLogoFrame { token, .. }
+            | Self::RequestStreamingFrame { token, .. } => &token.device_id,
             Self::FetchCompleted { token, .. } => &token.device_id,
             Self::RenderedAck(token) | Self::ReceiptAck(token) | Self::FrameSent(token) => {
                 &token.device_id
@@ -743,6 +752,17 @@ fn core_candidates<'a>(
                 asset_handle: asset_handle.clone(),
             },
         ),
+        Event::RequestLogoFrame {
+            token,
+            asset_handle,
+        } => (
+            Priority::Periodic,
+            "logo-frame-request",
+            Transition::RequestLogoFrame {
+                token: token.clone(),
+                asset_handle: asset_handle.clone(),
+            },
+        ),
         Event::RequestStreamingFrame {
             token,
             plugin,
@@ -864,6 +884,43 @@ fn invalidate_display(id: &str, device: &mut Device, out: &mut Vec<Effect>) {
         incarnation: device.incarnation,
         through_display_epoch: device.display_epoch - 1,
     });
+}
+
+fn request_display_frame(
+    state: &mut World,
+    out: &mut Vec<Effect>,
+    token: DisplayToken,
+    plugin: Option<&str>,
+    asset_handle: String,
+) -> Result<bool, Error> {
+    let Some(d) = state.devices.get_mut(&token.device_id) else {
+        return Ok(false);
+    };
+    if (plugin.is_none() && d.mode != Mode::Normal)
+        || !frame_display_current(d, &token)
+        || d.selected.as_deref() != plugin
+        || d.pending_frame_id.is_some()
+    {
+        return Ok(false);
+    }
+    let frame_id = state.next_frame_id;
+    let frame = FrameToken {
+        device_id: token.device_id,
+        incarnation: token.incarnation,
+        session_epoch: token.session_epoch,
+        display_epoch: token.display_epoch,
+        screen_owner_epoch: token.screen_owner_epoch,
+        frame_id,
+    };
+    d.pending_frame_id = Some(frame_id);
+    d.last_sent_frame = None;
+    d.last_received_frame = None;
+    state.next_frame_id += 1;
+    out.push(Effect::SendFrame {
+        token: frame,
+        asset_handle,
+    });
+    Ok(true)
 }
 
 fn apply(
@@ -1235,35 +1292,11 @@ fn apply(
             token,
             plugin,
             asset_handle,
-        } => {
-            let Some(d) = state.devices.get_mut(&token.device_id) else {
-                return Ok(false);
-            };
-            if !frame_display_current(d, &token)
-                || d.selected.as_deref() != Some(plugin.as_str())
-                || d.pending_frame_id.is_some()
-            {
-                return Ok(false);
-            }
-            let frame_id = state.next_frame_id;
-            let frame = FrameToken {
-                device_id: token.device_id,
-                incarnation: token.incarnation,
-                session_epoch: token.session_epoch,
-                display_epoch: token.display_epoch,
-                screen_owner_epoch: token.screen_owner_epoch,
-                frame_id,
-            };
-            d.pending_frame_id = Some(frame_id);
-            d.last_sent_frame = None;
-            d.last_received_frame = None;
-            state.next_frame_id += 1;
-            out.push(Effect::SendFrame {
-                token: frame,
-                asset_handle,
-            });
-            Ok(true)
-        }
+        } => request_display_frame(state, out, token, Some(&plugin), asset_handle),
+        Transition::RequestLogoFrame {
+            token,
+            asset_handle,
+        } => request_display_frame(state, out, token, None, asset_handle),
         Transition::RequestStreamingFrame {
             token,
             plugin,

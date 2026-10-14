@@ -10,7 +10,12 @@
 
 #define PM_W PM_DISPLAY_WIDTH
 #define PM_H PM_DISPLAY_HEIGHT
+// mono1 is a continuous MSB-first, white=1 bitstream (no row padding).
+#if PM_PIXEL_FORMAT == PM_PIXEL_MONO1
+#define PM_IMAGE_BYTES ((PM_W * PM_H + 7) / 8)
+#else
 #define PM_IMAGE_BYTES (PM_W * PM_H * PM_PIXEL_BYTES)
+#endif
 #define PM_FRAGMENT_BYTES 4096
 
 typedef struct {
@@ -34,7 +39,7 @@ bool pm_token_equal(pm_token a, pm_token b);
 bool pm_token_current(pm_token token, uint64_t incarnation, uint64_t session,
                       uint64_t display, uint64_t owner);
 
-typedef struct { bool raw, stable; uint32_t changed_ms; uint32_t held_ms; bool wake_reported, wake_armed; } pm_button;
+typedef struct { bool raw, stable; uint32_t changed_ms; uint32_t held_ms; bool wake_reported, wake_armed; uint32_t press_long_ms; bool long_reported; } pm_button;
 bool pm_button_step(pm_button *button, bool pressed, uint32_t now_ms);
 
 // Four-button POWER index2 wakes on the existing debounced press.
@@ -42,3 +47,9 @@ bool pm_button_step(pm_button *button, bool pressed, uint32_t now_ms);
 bool pm_button_wakes(unsigned count,unsigned index,bool long_press);
 bool pm_button_wake_step(pm_button *button,unsigned count,unsigned index,
                          bool pressed,uint32_t now_ms,uint32_t long_ms);
+
+// Logical indices match the four-button contract: SUB, UP, POWER, DOWN.
+// Returns -1 for no event. Two-button short events occur on stable release.
+int pm_button_input_step(pm_button *button, unsigned count, unsigned index,
+                         bool pressed, uint32_t now_ms, uint32_t long_ms,
+                         bool standby);
