@@ -40,7 +40,7 @@ E-ink_0のFlash IDはE6614864D3813227。本人確認後の単一BOOTSELで取得
 | --- | --- | ---: | ---: | ---: | --- |
 | E-ink_0 | build/E-ink_0/E-ink_0.uf2 | 718336 | 365180 | 159136 | load／verify済み |
 | E-ink_1 | build/.unbound/E-ink_1/E-ink_1.uf2 | 720896 | 366468 | 155228 | 未結合・禁止 |
-| PicoMado-lcd1 | build/PicoMado-lcd1/PicoMado-lcd1.uf2 | 718848 | 365348 | 198680 | 再BOOTSEL待ち |
+| PicoMado-lcd1 | build/PicoMado-lcd1/PicoMado-lcd1.uf2 | 718848 | 365348 | 198680 | load／verify済み |
 
 ELF dataは両方0。静的RAM量でありスタック等を含む実測最大値ではない。E-ink_1はCONNECTED=0で表示処理が最適化除去されるため、転置修正によるUF2差分はない。モジュール到着後のCONNECTED=1再ビルドは修正された共通変換を使用する。
 
@@ -61,7 +61,7 @@ PicoMado-lcd1 ea8d2a3a9a98dc635117ac6819a2901281549bf874213a40896cee7bcde71a1b
 
 ## 残件
 
-1. LCDのモード同期版を再BOOTSEL照合後に書込み・verifyする。中断時の書込み成功を仮定しない。E-ink_0は実表示成功をユーザー確認済みで、今回の天気・Web修正に再書込みは不要。
+1. LCDの物理SUB押下からWeb変更で解除される操作全体の目視受入。局所Sub→Normal同期は実mainのホスト試験済み、更新LCDのWeb再配信は両ACK確認済み。E-ink_0は今回再書込み不要。
 2. E-ink_1の実機Flash IDと到着モジュール世代を確認。現在は未結合・CONNECTED=0で未転送。
 3. 2ボタン実機、AWAY実機、天気／雨雲の最終可読性・電流・長期運転は未確認。本番反映の承認ブロッカーは解消済み。
 
@@ -82,3 +82,13 @@ FrameStartへ後方互換の任意mode=normal/subを追加。共通Pico入力実
 - 現在のユーザー設定は両端末ともrain-radarのみON。実HTTP保存でweatherをON（選択維持）、rain-radarをOFF（天気へ即時）、weatherをOFF（ロゴへ即時）、rain-radarをON（元へ復元）を試験した。CASで並行変更を保護。
 - E-ink_0：incarnation4／session10を維持し、天気frame889、全OFFロゴ890、復元雨雲891でReceiptAck／RenderedAck。各画像3813B、実更新約2.6秒。LCD：incarnation3／session128を維持し、天気892、ロゴ893、復元雨雲894で両ACK、各25600B。
 - 試験後は両端末ともrain-radarのみON／選択rain-radar／online。公開メタデータ証跡はtask-3/eink-evidence/live-settings-acks.json。秘密config、UF2、private board-idはGit除外を維持。
+
+## LCDモード同期版の実機書込み完了
+
+ユーザーの再BOOTSEL連絡後、既存flash.shで単一対象Flash ID E661640843239D21を照合。準備済みPicoMado-lcd1 UF2（718848B、SHA256 ea8d2a3a9a98dc635117ac6819a2901281549bf874213a40896cee7bcde71a1b）をloadし、Flash verify100% OK、アプリ再起動、終了コード0を確認した。書込みログ最終時刻は2026-10-14 19:05:43 JST。/tmp/picomado-lcd-mode-flash.txtへ記録。
+
+通常USBは同じE661640843239D21へ復帰。HOME／ACTIVE／READY／IP取得を確認。incarnation3／新session129へ再接続し、rain-radarのframe904でサーバ側ReceiptAck／RenderedAck、USB側CRC25600B／Receipt投入／Rendered投入を確認した。未接続中のUSB診断欠落4件はカウントされているが、サーバ側の両ACK到着を確認した。
+
+更新後のLCDだけでWeb保存を再試験。weather ONで現在rain-radarを維持、rain-radar OFFで天気frame905、weather OFFで中央ロゴ906、rain-radar ONで復元frame907へ即時配信し、すべてReceiptAck／RenderedAckを確認した。session129を維持、最後はrain-radarのみON／選択rain-radar／online、enabled_revision40。証跡はtask-3/eink-evidence/lcd-postflash-settings-acks.json。物理SUBの押下とその後のWeb解除は今回は操作しておらず、実mainホスト試験の同期確認と区別する。
+
+サーバはPID14966・18:53:43 JST起動の3bb276ff版のまま、追加ビルド／再起動なし。E-inkへの書込みや設定変更なし。実装コミット37c0e80に続き、この実機検証記録だけを関連コミットし、pushしない。
