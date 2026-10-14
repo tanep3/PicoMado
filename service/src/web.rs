@@ -24,6 +24,14 @@ pub fn router(app: SharedApp) -> Router {
         .route("/api/plugins/{plugin}/options", get(plugin_options))
         .route("/api/plugins/{plugin}", get(plugin_state))
         .route(
+            "/api/plugins/caricature/protections",
+            get(caricature_protections).put(update_caricature_protections),
+        )
+        .route(
+            "/api/plugins/caricature/originals/{id}",
+            get(caricature_original),
+        )
+        .route(
             "/api/plugins/{plugin}/commands",
             axum::routing::post(plugin_command),
         )
@@ -109,6 +117,64 @@ async fn plugin_state(
     })
 }
 
+fn protection_error(error: crate::caricature::CaricatureError) -> ApiError {
+    use crate::caricature::CaricatureError;
+    ApiError(match error {
+        CaricatureError::Stale => AppError::Conflict("stale protection revision"),
+        CaricatureError::InvalidRequest | CaricatureError::InvalidSource => {
+            AppError::Invalid("invalid artwork protection")
+        }
+        _ => AppError::Conflict("artwork protection unavailable"),
+    })
+}
+
+async fn caricature_protections(
+    State(app): State<SharedApp>,
+) -> Result<Json<crate::caricature::retention::ProtectionSnapshot>, ApiError> {
+    let paths = with_app(&app, |app| {
+        app.plugin_paths("caricature").ok_or(AppError::NotFound)
+    })?;
+    tokio::task::spawn_blocking(move || {
+        crate::caricature::retention::ProtectionLedger::new(paths.data.join("artwork"))
+            .snapshot()
+            .map(Json)
+    })
+    .await
+    .map_err(|_| ApiError(AppError::Conflict("protection worker unavailable")))?
+    .map_err(protection_error)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProtectionChange {
+    expected_revision: u64,
+    artwork_ids: Vec<String>,
+    protect: bool,
+}
+
+async fn update_caricature_protections(
+    State(app): State<SharedApp>,
+    Json(body): Json<ProtectionChange>,
+) -> Result<Json<crate::caricature::retention::ProtectionSnapshot>, ApiError> {
+    let paths = with_app(&app, |app| {
+        app.plugin_paths("caricature").ok_or(AppError::NotFound)
+    })?;
+    tokio::task::spawn_blocking(move || {
+        let store = crate::caricature::store::ArtworkStore::new(paths.data.join("artwork"));
+        crate::caricature::retention::ProtectionLedger::new(paths.data.join("artwork"))
+            .update(
+                &store,
+                body.expected_revision,
+                &body.artwork_ids,
+                body.protect,
+            )
+            .map(Json)
+    })
+    .await
+    .map_err(|_| ApiError(AppError::Conflict("protection worker unavailable")))?
+    .map_err(protection_error)
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PluginCommandBody {
@@ -186,6 +252,48 @@ async fn plugin_asset(
             (axum::http::header::CONTENT_TYPE, content_type),
             (axum::http::header::CACHE_CONTROL, "no-store".into()),
             (axum::http::header::X_CONTENT_TYPE_OPTIONS, "nosniff".into()),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+/// Full Web preview for published caricatures. Older archives without a WebP
+/// sidecar retain their existing E-ink PNG preview.
+async fn caricature_original(
+    State(app): State<SharedApp>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let paths = with_app(&app, |app| {
+        app.plugin_asset("caricature", &id)
+            .map(|(paths, _)| paths)
+            .ok_or(AppError::NotFound)
+    })?;
+    let (bytes, content_type) = tokio::task::spawn_blocking(move || {
+        use crate::caricature::{store::ArtworkStore, OriginalCodec};
+        let store = ArtworkStore::new(paths.data.join("artwork"));
+        let artwork = store
+            .artwork(&id)
+            .map_err(|_| AppError::NotFound)?
+            .ok_or(AppError::NotFound)?;
+        if artwork.original_codec == Some(OriginalCodec::HalfWebpQ90) {
+            let bytes = store
+                .original(&artwork)
+                .map_err(|_| AppError::Conflict("artwork original unavailable"))?
+                .ok_or(AppError::NotFound)?;
+            Ok((bytes, "image/webp"))
+        } else {
+            Ok((artwork.eink_png, "image/png"))
+        }
+    })
+    .await
+    .map_err(|_| ApiError(AppError::Conflict("artwork worker unavailable")))?
+    .map_err(ApiError)?;
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, content_type),
+            (axum::http::header::CACHE_CONTROL, "no-store"),
+            (axum::http::header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         ],
         bytes,
     )
@@ -340,6 +448,162 @@ mod tests {
         let status = response.status();
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
         (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn caricature_protection_api_persists_and_rejects_stale_or_unknown() {
+        use crate::caricature::store::ArtworkStore;
+        use crate::caricature::{Artwork, ArtworkMetadata, GenerationInput, GenerationSettings};
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("state.db");
+        let app = App::open(&database).unwrap();
+        let paths = app.plugin_paths("caricature").unwrap();
+        let store = ArtworkStore::new(paths.data.join("artwork"));
+        let art = Artwork {
+            id: "protected-1".into(),
+            metadata: ArtworkMetadata {
+                job_id: "protected".into(),
+                slot: 0,
+                created_at_unix: 0,
+                input: GenerationInput::News,
+                source_urls: vec![],
+                news_summary: None,
+                settings: GenerationSettings::default(),
+            },
+            original_sha256: None,
+            original_codec: None,
+            eink_png: crate::caricature::test_canonical_png(),
+            lcd_rgb565be: vec![0; 160 * 80 * 2],
+        };
+        store.publish(art, 0).unwrap();
+        let router = router(Arc::new(Mutex::new(app)));
+        let route = "/api/plugins/caricature/protections";
+        assert_eq!(
+            call(&router, Method::GET, route, json!({})).await.1["revision"],
+            0
+        );
+        let changed = json!({"expected_revision":0,"artwork_ids":["protected-1"],"protect":true});
+        let (status, value) = call(&router, Method::PUT, route, changed.clone()).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(value["protected_ids"][0], "protected-1");
+        assert_eq!(
+            call(&router, Method::PUT, route, changed).await.0,
+            StatusCode::CONFLICT
+        );
+        let unknown = json!({"expected_revision":1,"artwork_ids":["unknown"],"protect":true});
+        assert_eq!(
+            call(&router, Method::PUT, route, unknown).await.0,
+            StatusCode::BAD_REQUEST
+        );
+        drop(router);
+        let reopened = super::router(Arc::new(Mutex::new(App::open(&database).unwrap())));
+        assert_eq!(
+            call(&reopened, Method::GET, route, json!({})).await.1["protected_ids"][0],
+            "protected-1"
+        );
+    }
+
+    #[tokio::test]
+    async fn caricature_web_preview_uses_saved_webp_and_legacy_png_only() {
+        use crate::caricature::originals::half_webp_quality90;
+        use crate::caricature::store::ArtworkStore;
+        use crate::caricature::{
+            Artwork, ArtworkMetadata, CaricatureContent, GenerationInput, GenerationSettings,
+            HistoryEntry, OriginalCodec,
+        };
+        use sha2::Digest;
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = App::open(&temp.path().join("state.db")).unwrap();
+        let paths = app.plugin_paths("caricature").unwrap();
+        let store = ArtworkStore::new(paths.data.join("artwork"));
+        let canonical = crate::caricature::test_canonical_png();
+        let artwork = |id: &str| Artwork {
+            id: id.into(),
+            metadata: ArtworkMetadata {
+                job_id: id.into(),
+                slot: 0,
+                created_at_unix: 0,
+                input: GenerationInput::News,
+                source_urls: vec![],
+                news_summary: None,
+                settings: GenerationSettings::default(),
+            },
+            original_sha256: None,
+            original_codec: None,
+            eink_png: canonical.clone(),
+            lcd_rgb565be: vec![0; 160 * 80 * 2],
+        };
+        let legacy = store.publish(artwork("legacy-1"), 1).unwrap();
+        let mut recent = artwork("recent-1");
+        let original = half_webp_quality90(&canonical).unwrap();
+        recent.original_sha256 = Some(format!("{:x}", sha2::Sha256::digest(&original)));
+        recent.original_codec = Some(OriginalCodec::HalfWebpQ90);
+        let recent = store.publish_with_original(recent, &original, 2).unwrap();
+        let mut snapshot = serde_json::to_value(CaricatureContent::default()).unwrap();
+        snapshot["history"] = serde_json::to_value(
+            [&legacy, &recent]
+                .iter()
+                .map(|p| HistoryEntry {
+                    artwork_id: p.artwork.id.clone(),
+                    metadata: p.artwork.metadata.clone(),
+                    publish_seq: p.publish_seq,
+                    published_at_unix: p.published_at_unix,
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let mut content = CaricatureContent::default();
+        crate::content::ContentPlugin::load_state(&mut content, snapshot).unwrap();
+        app.replace_test_content("caricature", Box::new(content));
+        let router = router(Arc::new(Mutex::new(app)));
+        for (id, mime, expected) in [
+            ("recent-1", "image/webp", original.as_slice()),
+            ("legacy-1", "image/png", canonical.as_slice()),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/plugins/caricature/originals/{id}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()[axum::http::header::CONTENT_TYPE], mime);
+            let bytes = response.into_body().collect().await.unwrap().to_bytes();
+            assert_eq!(bytes.as_ref(), expected);
+            let dimensions = image::load_from_memory(&bytes).unwrap();
+            let expected_size = if id == "recent-1" {
+                (125, 61)
+            } else {
+                (250, 122)
+            };
+            assert_eq!((dimensions.width(), dimensions.height()), expected_size);
+        }
+        std::fs::remove_file(paths.data.join("artwork/archive/recent-1.original.webp")).unwrap();
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/plugins/caricature/originals/recent-1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/plugins/caricature/originals/unknown")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

@@ -329,6 +329,8 @@ pub struct App {
     mono_origin: std::time::Instant,
     persistence_us: u128,
     image_preparation_us: u128,
+    #[cfg(feature = "caricature-retention-delete")]
+    last_retention_day: Option<String>,
 }
 
 #[derive(Debug)]
@@ -374,6 +376,16 @@ impl App {
                body TEXT NOT NULL
              );",
         )?;
+        if crate::caricature::retention::deletion_enabled() {
+            let artwork_root = root.join("caricature/data/artwork");
+            let cache_root = root.join("caricature/cache/artwork_variants");
+            crate::caricature::retention::recover_pending_deletes(
+                &crate::caricature::retention::ProtectionLedger::new(artwork_root),
+                &cache_root,
+                &connection,
+            )
+            .map_err(|_| AppError::Conflict("caricature retention recovery failed"))?;
+        }
         let existing: Option<(i64, String)> = connection
             .query_row(
                 "SELECT schema_version, body FROM app_state WHERE id = 1",
@@ -421,6 +433,8 @@ impl App {
             mono_origin: std::time::Instant::now(),
             persistence_us: 0,
             image_preparation_us: 0,
+            #[cfg(feature = "caricature-retention-delete")]
+            last_retention_day: None,
         })
     }
 
@@ -463,6 +477,116 @@ impl App {
         });
         self.dispatch.send_replace(());
         Ok(result)
+    }
+
+    #[cfg(any(test, feature = "caricature-retention-delete"))]
+    fn caricature_retention_pins(&self) -> BTreeSet<String> {
+        let mut ids = self
+            .contents
+            .get("caricature")
+            .map(|content| content.retention_references())
+            .unwrap_or_default();
+        for record in self.runtime.jobs.jobs.values() {
+            if record.job.token.plugin == "caricature" && !record.status.finished() {
+                if let Some(id) = record
+                    .job
+                    .payload
+                    .get("artwork_id")
+                    .and_then(|x| x.as_str())
+                {
+                    ids.insert(id.to_owned());
+                }
+            }
+        }
+        ids
+    }
+
+    #[cfg(any(test, feature = "caricature-retention-delete"))]
+    pub(crate) fn sweep_caricature_retention(
+        &mut self,
+        today: time::Date,
+    ) -> Result<usize, AppError> {
+        use crate::caricature::retention::{
+            begin_pending_delete, expired_candidates, finish_pending_delete, ProtectionLedger,
+        };
+        use crate::caricature::store::ArtworkStore;
+        let paths = self.plugin_paths("caricature").ok_or(AppError::NotFound)?;
+        let root = paths.data.join("artwork");
+        let cache = paths.cache.join("artwork_variants");
+        let ledger = ProtectionLedger::new(root.clone());
+        let store = ArtworkStore::new(root.clone());
+        let pins = self.caricature_retention_pins();
+        let candidates = expired_candidates(
+            &store
+                .history()
+                .map_err(|_| AppError::Conflict("caricature archive unavailable"))?,
+            today,
+            &ledger
+                .snapshot()
+                .map_err(|_| AppError::Conflict("caricature protection unavailable"))?,
+            &pins,
+        )
+        .map_err(|_| AppError::Conflict("caricature expiry invalid"))?;
+        let mut removed = 0;
+        for id in candidates {
+            ledger
+                .locked(|| {
+                    let pins = self.caricature_retention_pins();
+                    let current =
+                        expired_candidates(&store.history()?, today, &ledger.read()?, &pins)?;
+                    if !current.contains(&id) {
+                        return Ok(());
+                    }
+                    let mut content = self
+                        .contents
+                        .get("caricature")
+                        .expect("installed plugin")
+                        .clone();
+                    content
+                        .retire_artwork(&id)
+                        .map_err(|_| crate::caricature::CaricatureError::InvalidTransition)?;
+                    let snapshot = content.save_state();
+                    begin_pending_delete(&root, &id)?;
+                    self.change(|_, state| {
+                        state.plugin_states.insert("caricature".into(), snapshot);
+                        let revision = state
+                            .managed_revisions
+                            .entry("caricature".into())
+                            .or_insert(1);
+                        *revision = revision
+                            .checked_add(1)
+                            .ok_or(AppError::Conflict("plugin revision exhausted"))?;
+                        Ok(())
+                    })
+                    .map_err(|_| crate::caricature::CaricatureError::Io)?;
+                    self.contents.insert("caricature".into(), content);
+                    finish_pending_delete(&ledger, &cache, &self.connection, &id)?;
+                    removed += 1;
+                    Ok(())
+                })
+                .map_err(|_| AppError::Conflict("caricature retention failed"))?;
+        }
+        Ok(removed)
+    }
+
+    #[cfg(feature = "caricature-retention-delete")]
+    pub fn run_scheduled_caricature_retention(&mut self) -> Result<(), AppError> {
+        if !crate::caricature::retention::deletion_enabled() {
+            return Ok(());
+        }
+        let now = time::OffsetDateTime::from_unix_timestamp(self.clock.unix_seconds())
+            .map_err(|_| AppError::Conflict("clock unavailable"))?
+            .to_offset(time::UtcOffset::from_hms(9, 0, 0).expect("JST"));
+        if now.hour() != 3 {
+            return Ok(());
+        }
+        let day = now.date().to_string();
+        if self.last_retention_day.as_deref() == Some(&day) {
+            return Ok(());
+        }
+        self.sweep_caricature_retention(now.date())?;
+        self.last_retention_day = Some(day);
+        Ok(())
     }
 
     #[cfg(test)]
@@ -531,8 +655,8 @@ impl App {
         Ok(completed)
     }
 
-    /// Queue one complete RGB565 big-endian LCD image. The pixel buffer is
-    /// immutable and never written into SQLite or claimed to be drawn here.
+    /// Queue one complete RGB565 big-endian LCD image. The source pixels are
+    /// never written into SQLite or claimed to be drawn here.
     pub fn queue_lcd_frame(
         &mut self,
         token: &SessionToken,
@@ -550,8 +674,24 @@ impl App {
             token.device_id, self.runtime.world.next_frame_id
         );
         let frame = self.request_frame(token, plugin, &handle)?;
+        let bytes = self.compose_lcd_frame(&token.device_id, bytes);
         self.frame_assets.insert(handle, Arc::new(bytes));
         Ok(frame)
+    }
+
+    /// Compose a per-device mode indicator only in the outbound frame copy.
+    /// In particular, plugin history and shared artwork remain untouched.
+    fn compose_lcd_frame(&self, device_id: &str, mut bytes: Vec<u8>) -> Vec<u8> {
+        if self
+            .runtime
+            .world
+            .devices
+            .get(device_id)
+            .is_some_and(|device| device.mode == Mode::Sub)
+        {
+            crate::display_badge::draw_sub_rgb565be(&mut bytes);
+        }
+        bytes
     }
 
     /// Deliver a completed source to a plugin by ID. Source parsing and
@@ -791,7 +931,7 @@ impl App {
         };
         // A date observation may already have queued the current display's
         // image. RequestFrame permits only one pending frame per display.
-        if device.mode != Mode::Normal || device.pending_frame_id.is_some() {
+        if !matches!(device.mode, Mode::Normal | Mode::Sub) || device.pending_frame_id.is_some() {
             return Ok(());
         }
         let Some(id) = device.selected.as_ref() else {
@@ -932,6 +1072,10 @@ impl App {
                 return Err(AppError::Invalid("invalid plugin source"))
             }
         };
+        let work = plan
+            .event
+            .as_ref()
+            .and_then(|_| plugin.button_work(&ctx, action));
         if let Some(event) = plan.event {
             if !self.terminal_event(event)? {
                 let (selected, display_epoch) =
@@ -941,7 +1085,12 @@ impl App {
                     display_epoch,
                 });
             }
-            self.contents.insert(id.clone(), plugin);
+            if let Some(work) = work {
+                let work_ctx = self.command_context();
+                self.accept_work_plan(&id, plugin, work, &work_ctx, None)?;
+            } else {
+                self.contents.insert(id.clone(), plugin);
+            }
             if let Some(frame) = plan.frame {
                 self.queue_lcd_frame(token, &id, frame)?;
             }
@@ -1118,6 +1267,9 @@ impl App {
             Ok(changed)
         })?;
         if changed {
+            for plugin in self.contents.values_mut() {
+                plugin.session_reset(&token.device_id, token.incarnation);
+            }
             eprintln!(
                 "picomado device_disconnect id={} incarnation={} session_epoch={}",
                 token.device_id, token.incarnation, token.session_epoch

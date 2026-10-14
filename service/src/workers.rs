@@ -103,7 +103,12 @@ pub async fn run_work(
                 }
             }
             _ = tick.tick(), if !stopping => {
-                app.lock().map_err(|_| AppError::Conflict("application unavailable"))?.plan_scheduled_work()?;
+                let mut guard = app.lock().map_err(|_| AppError::Conflict("application unavailable"))?;
+                guard.plan_scheduled_work()?;
+                #[cfg(feature = "caricature-retention-delete")]
+                if let Err(error) = guard.run_scheduled_caricature_retention() {
+                    eprintln!("picomado caricature retention deferred: {error:?}");
+                }
                 inspect = true;
             }
             changed = notifications.changed(), if !stopping => {

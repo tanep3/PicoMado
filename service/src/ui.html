@@ -54,6 +54,16 @@
     textarea{min-height:140px;resize:vertical;font:inherit;color:inherit;background:#111c26;border:1px solid #344654;border-radius:8px;padding:10px}
     progress{width:100%;accent-color:#68c7bc}
     .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}
+    .caricature-panel{max-width:1100px}.caricature-panel .content-preview{width:min(100%,750px);height:auto;max-height:none;border:1px solid #415363}
+    .caricature-settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}.prompt-text{margin:7px 0 0;color:#a9b8c8;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem}
+    .advanced{margin-top:20px;padding-top:15px;border-top:1px solid #344250}.advanced>summary{cursor:pointer;color:#b7c7d5;font-size:.88rem;font-weight:700}.advanced>div{padding-top:10px}
+    .calendar-toolbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px}.calendar-toolbar strong{min-width:8em;text-align:center}
+    .calendar-week,.calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}.calendar-week span{text-align:center;color:#a9b8c8;font-weight:700}.calendar-grid{margin-top:5px}
+    .calendar-day{min-width:0;min-height:118px;padding:8px;text-align:left;color:#e9eef4;background:#1b2733;border:1px solid #354759;border-radius:9px;cursor:pointer;overflow:hidden}.calendar-day:hover,.calendar-day[aria-pressed=true]{border-color:#68d6c9;background:#213a42}.calendar-day.empty{background:transparent;border:0;cursor:default}.calendar-day strong,.calendar-day small{display:block}.calendar-day small{font-size:.73rem;color:#a9b8c8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.calendar-day img{display:block;width:100%;aspect-ratio:250/122;object-fit:contain;background:white;image-rendering:pixelated;margin:5px 0}
+    .artwork-list{display:grid;gap:15px}.artwork-card{padding:18px;background:#1b2733;border:1px solid #354759;border-radius:11px}.artwork-card h3{overflow-wrap:anywhere}.artwork-card time{display:block;color:#a9b8c8;margin:5px 0}.artwork-card p{white-space:pre-wrap;overflow-wrap:anywhere}.artwork-card a{color:#86dfd5;text-decoration:underline;overflow-wrap:anywhere}.artwork-card textarea{display:block;width:100%;min-height:85px}.artwork-card details{margin:12px 0}.artwork-card summary{cursor:pointer}
+    .artwork-open{display:block;width:min(100%,750px);padding:0;border:0;background:transparent;text-align:left;cursor:pointer}.artwork-open .content-preview{width:100%}
+    .protect-pick{display:block;width:min(100%,750px);padding:8px;border:2px solid #536779;border-radius:10px;background:#172432;color:#e9eef4;text-align:left}.protect-pick[aria-pressed=true]{border-color:#68d6c9;background:#16443e}.protect-pick .content-preview{width:100%;margin:0 0 6px}.protected-mark{display:inline-block;margin:8px 0;padding:3px 9px;border-radius:99px;background:#244d41;color:#a6eed6;font-size:.78rem;font-weight:750}.protect-actions{position:sticky;bottom:8px;padding:12px;background:#132832;border:1px solid #42636b;border-radius:10px}
+    @media(max-width:650px){.calendar-grid{gap:2px}.calendar-day{min-height:80px;padding:4px}.calendar-day img{max-height:30px}.calendar-day small{font-size:.65rem}}
   </style>
 </head>
 <body>
@@ -183,9 +193,9 @@
     function renderPlugin(id){
       document.getElementById('page-title').textContent=labels[id]||id;
       document.getElementById('page-lead').textContent='このプラグインの共通設定を管理します。';
+      if(id==='caricature'){renderManaged(id);return}
       const s=section('プラグイン設定','設定の変更は次のジョブから反映します。','plugin-card');
       const breadcrumb=el('div',undefined,'plugin-breadcrumb'),home=el('a','← ホームへ戻る');home.href='/';breadcrumb.append(home);s.prepend(breadcrumb);
-      if(id==='caricature'){s.append(el('p','題材・画風・モデル・生成を下の共有設定で管理します。','plugin-note'));renderManaged(id);return}
       const form=el('form'),fields=el('div',undefined,'field-grid');let inputs=[];
       if(id==='youtube'){
         const wrap=el('label',undefined,'field');wrap.append(el('span','既定 FPS'));
@@ -223,11 +233,19 @@
         if(!count)list.append(el('p','地域設定に対応する端末はありません。','empty'));
       }
     }
-    const managedViews={},drafts={youtube:{whole:true},caricature:{}};
+    const managedViews={},drafts={youtube:{whole:true},caricature:{}};let protectionView={revision:0,protected_ids:[]};
     function bytesText(n){return `${((Number(n)||0)/1048576).toFixed(1)} MiB`}
     async function loadManaged(){
       const id=location.pathname.split('/').pop();
       if(['youtube','caricature'].includes(id))managedViews[id]=await api(`/api/plugins/${id}`);
+      if(id==='caricature')protectionView=await api('/api/plugins/caricature/protections');
+    }
+    async function saveCaricatureProtections(protect){
+      const selected=drafts.caricature.protectionSelection;if(busy||!selected?.size)return;
+      busy=true;
+      try{protectionView=await api('/api/plugins/caricature/protections','PUT',{expected_revision:protectionView.revision,artwork_ids:[...selected],protect});drafts.caricature.protectionSelection=new Set();drafts.caricature.protectMode=false;say(protect?'チェックした画像を削除対象から保護しました':'チェックした画像の保護を解除しました');render()}
+      catch(error){say(error.message||'保護の保存に失敗しました',true);protectionView=await api('/api/plugins/caricature/protections').catch(()=>protectionView);render()}
+      finally{busy=false}
     }
     async function managedCommand(id,command,message='要求を受け付けました'){
       if(busy)return false;busy=true;
@@ -279,6 +297,7 @@
     }
     function renderManaged(id){
       const view=managedViews[id];if(!view)return;const data=view.data||{};
+      if(id==='caricature'){renderCaricature(data);return}
       const panel=section(id==='youtube'?'共有動画と再生':'作画と共有設定','この内容はプラグインを表示中の端末で共有します。端末別設定はホームで管理します。','plugin-card');
       jobsPanel(id,panel);
       if(id==='youtube'){
@@ -306,45 +325,48 @@
           for(const conversion of Object.values(video.conversions||{})){const item=el('div',undefined,'actions');item.append(el('span',`${conversion.fps} fps · ${(conversion.clip.start_ms/1000).toFixed(1)}–${(conversion.clip.end_ms/1000).toFixed(1)} 秒 · ${bytesText(conversion.bytes)}`));const play=button('再生');play.onclick=()=>managedCommand(id,{kind:'play',key:conversion.key});item.append(play);row.append(item)}
           const remove=button('この動画を削除','danger');remove.onclick=()=>deleteVideo(video);row.append(remove);history.append(row);
         }
-      }else{
-        const settings=data.settings||{},fields=el('div',undefined,'field-grid');
-        for(const [label,key,items,kind]of[['題材','topic',data.topics||[],'set_topic'],['画風','style',data.styles||[],'set_style']]){
-          const wrap=el('label',undefined,'field');wrap.append(el('span',label));const select=el('select');
-          for(const item of items){const option=el('option',item.label);option.value=item.id;select.append(option)}select.value=settings[key]?.id||'';select.onchange=()=>managedCommand(id,{kind,id:select.value});wrap.append(select);fields.append(wrap);
-        }
-        for(const [label,key,kind]of[['ニュースのモデル','news_model','set_news_model'],['画像のモデル','image_model','set_image_model']]){
-          const input=textField(fields,label,'text',settings[key]);const save=button('保存');save.onclick=()=>managedCommand(id,{kind,model:input.value});input.parentElement.append(save);
-        }
-        panel.append(fields);
-        const normal=el('form',undefined,'subsection'),normalFields=el('div',undefined,'field-grid');
-        const lambda=textField(normalFields,'DPID λ','number',settings.dpid_lambda);lambda.min=0;lambda.max=1;lambda.step=.05;
-        const threshold=textField(normalFields,'白黒しきい値','number',settings.threshold);threshold.min=1;threshold.max=254;threshold.step=1;
-        const save=button('画像処理設定を保存');save.type='submit';normal.append(normalFields,save);normal.onsubmit=e=>{e.preventDefault();if(normal.reportValidity())managedCommand(id,{kind:'set_normalizer',dpid_lambda:Number(lambda.value),threshold:Number(threshold.value)})};panel.append(normal);
-        for(const [label,key,kind]of[['ニュース取得','news_retry','set_news_retry'],['画像生成','image_retry','set_image_retry']]){
-          const form=el('form',undefined,'subsection');form.append(el('p',`${label}の再試行`,'section-label'));const fs=el('div',undefined,'field-grid'),policy=settings[key]||{};
-          const controls=[['retry_count','追加試行回数'],['interval_seconds','試行間隔（秒）'],['deadline_seconds','全体期限（秒・0は無効）'],['attempt_timeout_seconds','1試行の期限（秒）']].map(([k,l])=>{const input=textField(fs,l,'number',policy[k]);input.min=k==='attempt_timeout_seconds'?1:0;input.step=1;return[k,input]});
-          const save=button('再試行設定を保存');save.type='submit';form.append(fs,save);form.onsubmit=e=>{e.preventDefault();if(form.reportValidity())managedCommand(id,{kind,policy:Object.fromEntries(controls.map(([k,input])=>[k,Number(input.value)]))})};panel.append(form);
-        }
-        const automatic=document.createElement('label');automatic.className='row';
-        const automaticInput=document.createElement('input');automaticInput.type='checkbox';automaticInput.checked=settings.automatic_generation!==false;
-        automaticInput.onchange=()=>managedCommand(id,{kind:'set_automatic_generation',enabled:automaticInput.checked});
-        automatic.append(automaticInput,document.createTextNode('毎時の自動生成'));panel.append(automatic);
-        const generate=button('選択した題材から作画','primary');generate.onclick=()=>managedCommand(id,{kind:'generate_news'});panel.append(generate);
-        const custom=el('form',undefined,'subsection'),text=textField(custom,'任意文章から作画','textarea',drafts.caricature.text??data.last_custom_text,true);text.maxLength=4000;text.oninput=()=>drafts.caricature.text=text.value;
-        const submit=button('この文章で作画','primary');submit.type='submit';custom.append(submit);custom.onsubmit=e=>{e.preventDefault();if(custom.reportValidity())managedCommand(id,{kind:'generate_custom',text:text.value})};panel.append(custom);
-        if(data.generation_error)panel.append(el('p',data.generation_error,'error'));
-        const history=section('作品履歴','履歴からの一時表示は、共有の最新作品と履歴を変更しません。','plugin-card');
-        const filter=textField(history,'日付で絞り込み','date',drafts.caricature.day);filter.onchange=()=>{drafts.caricature.day=filter.value;render()};
-        const entries=[...(data.history||[])].reverse().filter(item=>!filter.value||new Date(item.metadata.created_at_unix*1000).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'})===filter.value);
-        if(!entries.length)history.append(el('p','該当する作品はありません。','empty'));
-        for(const item of entries){const card=el('article',undefined,'device-card'),image=el('img');image.src=`/api/plugins/caricature/assets/${encodeURIComponent(item.artwork_id)}`;image.alt='作品プレビュー';image.className='content-preview';card.append(image,el('h3',item.artwork_id));
-          card.append(el('p',item.metadata.summary||new Date(item.metadata.created_at_unix*1000).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'})));
-          for(const url of item.metadata.source_urls||[]){const link=el('a','ニュース出典');link.href=url;link.rel='noopener noreferrer';link.target='_blank';card.append(link)}
-          const devices=current.devices.filter(d=>d.online&&d.selected==='caricature');if(devices.length){const select=el('select');for(const d of devices){const option=el('option',d.id);option.value=d.id;select.append(option)}const show=button('この端末へ一時表示');show.onclick=()=>managedCommand(id,{kind:'show_history',artwork_id:item.artwork_id,device_id:select.value});card.append(select,show)}else card.append(el('p','風刺画を表示中のオンライン端末がありません。','plugin-note'));
-          history.append(card);
-        }
+
       }
     }
+    function jstDay(unix){return new Date(unix*1000).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'})}
+    function artworkUrl(id){return `/api/plugins/caricature/assets/${encodeURIComponent(id)}`}
+    function artworkOriginalUrl(id){return `/api/plugins/caricature/originals/${encodeURIComponent(id)}`}
+    function safeSource(value){try{const url=new URL(value);return ['https:','http:'].includes(url.protocol)&&!url.username&&!url.password?url.href:null}catch{return null}}
+    function artworkCard(item,latest=false){
+      const meta=item.metadata,card=el('article',undefined,'artwork-card');
+      const summary=meta.news_summary||'',custom=meta.input?.CustomText;
+      const title=summary||custom||'作品';card.append(el('h3',title.slice(0,120)));
+      const stamp=el('time',new Date(meta.created_at_unix*1000).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'})+' JST');stamp.dateTime=new Date(meta.created_at_unix*1000).toISOString();card.append(stamp);
+      const image=el('img');image.src=artworkOriginalUrl(item.artwork_id);image.alt=title;image.loading='lazy';image.className='content-preview';
+      if(latest){const open=el('button',undefined,'artwork-open');open.type='button';open.setAttribute('aria-label','この作品の日付を開く');open.append(image);open.onclick=()=>{drafts.caricature.day=jstDay(meta.created_at_unix);drafts.caricature.protectMode=false;drafts.caricature.protectionSelection=new Set();drafts.caricature.month=drafts.caricature.day.slice(0,7);render();document.getElementById('caricature-day')?.scrollIntoView({block:'start'})};card.append(open)}else if(drafts.caricature.protectMode){const pick=el('button',undefined,'protect-pick'),selected=drafts.caricature.protectionSelection||new Set();pick.type='button';pick.setAttribute('aria-pressed',String(selected.has(item.artwork_id)));pick.setAttribute('aria-label',`${title}を選択`);pick.append(image,el('span',selected.has(item.artwork_id)?'✓ 選択中':'クリックして選択'));pick.onclick=()=>{if(selected.has(item.artwork_id))selected.delete(item.artwork_id);else selected.add(item.artwork_id);drafts.caricature.protectionSelection=selected;render()};card.append(pick)}else card.append(image);
+      if(protectionView.protected_ids?.includes(item.artwork_id))card.append(el('span','削除保護中','protected-mark'));
+      if(summary)card.append(el('p',summary));
+      if(custom){const label=el('label',undefined,'field');label.append(el('span','作画に使った文章'));const copy=el('textarea');copy.readOnly=true;copy.value=custom;label.append(copy);card.append(label)}
+      else{const sources=(meta.source_urls||[]).map(safeSource).filter(Boolean),source=el('p');source.append('出典: ');if(sources.length){for(const url of sources){const link=el('a',url);link.href=url;link.target='_blank';link.rel='noopener noreferrer';source.append(link,' ')}}else source.append('未登録');card.append(source)}
+      const opened=drafts.caricature.openUsedSettings??=new Set(),used=el('details');used.open=opened.has(item.artwork_id);used.ontoggle=()=>{if(!used.isConnected)return;if(used.open)opened.add(item.artwork_id);else opened.delete(item.artwork_id)};used.append(el('summary','この作品の生成時に使った設定'));for(const [label,value] of [['情報取得プロンプト',meta.settings?.topic?.prompt],['作画テイスト',meta.settings?.style?.prompt]])if(value)used.append(el('p',`${label}: ${value}`));card.append(used);
+      if(!latest){const devices=current.devices.filter(d=>d.online&&d.selected==='caricature');if(devices.length){const actions=el('div',undefined,'actions'),select=el('select');select.setAttribute('aria-label','表示先の端末');for(const d of devices){const option=el('option',d.id);option.value=d.id;select.append(option)}const show=button('この端末へ一時表示');show.onclick=()=>managedCommand('caricature',{kind:'show_history',artwork_id:item.artwork_id,device_id:select.value});actions.append(select,show);card.append(actions)}}
+      return card;
+    }
+    function renderCaricature(data){
+      const draft=drafts.caricature,settings=data.settings||{},history=[...(data.history||[])].sort((a,b)=>a.publish_seq-b.publish_seq);
+      if(!draft.month)draft.month=new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'}).slice(0,7);
+      const settingsPanel=section('現在の設定（次の生成に適用）','題材と画風を選べます。変更は次の生成から反映します。','caricature-panel');
+      const choices=el('div',undefined,'caricature-settings');
+      for(const [label,key,items,kind]of[['情報取得プロンプト','topic',data.topics||[],'set_topic'],['作画テイスト','style',data.styles||[],'set_style']]){
+        const wrap=el('label',undefined,'field'),select=el('select');wrap.append(el('span',label));for(const item of items){const option=el('option',item.label);option.value=item.id;select.append(option)}select.value=settings[key]?.id||'';select.onchange=()=>managedCommand('caricature',{kind,id:select.value},`${label}を保存しました`);wrap.append(select);const prompt=el('p',settings[key]?.prompt||'','prompt-text');wrap.append(prompt);choices.append(wrap)
+      }settingsPanel.append(choices);
+      const toggles=el('div',undefined,'actions');for(const [label,key,kind,defaultOn]of[['毎時の自動生成','automatic_generation','set_automatic_generation',true],['画像に見出しを付ける','include_heading','set_include_heading',false]]){const wrap=el('label',undefined,'toggle'),input=el('input');input.type='checkbox';input.checked=settings[key]??defaultOn;input.onchange=()=>managedCommand('caricature',{kind,enabled:input.checked},`${label}を保存しました`);wrap.append(input,el('span',label));toggles.append(wrap)}settingsPanel.append(toggles);
+      const advanced=el('details',undefined,'advanced');advanced.open=!!draft.advancedOpen;advanced.ontoggle=()=>{draft.advancedOpen=advanced.open};advanced.append(el('summary','詳細設定'));const inner=el('div');advanced.append(inner);
+      const models=el('div',undefined,'field-grid');for(const [label,key,kind]of[['ニュースのモデル','news_model','set_news_model'],['画像のモデル','image_model','set_image_model']]){const input=textField(models,label,'text',settings[key]);const save=button('保存');save.onclick=()=>managedCommand('caricature',{kind,model:input.value});input.parentElement.append(save)}inner.append(models);
+      const normal=el('form',undefined,'subsection'),normalFields=el('div',undefined,'field-grid');const lambda=textField(normalFields,'DPID λ','number',settings.dpid_lambda);lambda.min=0;lambda.max=1;lambda.step=.05;const threshold=textField(normalFields,'白黒しきい値','number',settings.threshold);threshold.min=1;threshold.max=254;threshold.step=1;const normalSave=button('画像処理設定を保存');normalSave.type='submit';normal.append(normalFields,normalSave);normal.onsubmit=e=>{e.preventDefault();if(normal.reportValidity())managedCommand('caricature',{kind:'set_normalizer',dpid_lambda:Number(lambda.value),threshold:Number(threshold.value)})};inner.append(normal);
+      for(const [label,key,kind]of[['ニュース取得','news_retry','set_news_retry'],['画像生成','image_retry','set_image_retry']]){const form=el('form',undefined,'subsection');form.append(el('p',`${label}の再試行`,'section-label'));const fs=el('div',undefined,'field-grid'),policy=settings[key]||{};const controls=[['retry_count','追加試行回数'],['interval_seconds','試行間隔（秒）'],['deadline_seconds','全体期限（秒・0は無効）'],['attempt_timeout_seconds','1試行の期限（秒）']].map(([k,l])=>{const input=textField(fs,l,'number',policy[k]);input.min=k==='attempt_timeout_seconds'?1:0;input.step=1;return[k,input]});const save=button('再試行設定を保存');save.type='submit';form.append(fs,save);form.onsubmit=e=>{e.preventDefault();if(form.reportValidity())managedCommand('caricature',{kind,policy:Object.fromEntries(controls.map(([k,input])=>[k,Number(input.value)]))})};inner.append(form)}settingsPanel.append(advanced);
+      const create=section('新しい絵を生成','生成には数分かかる場合があります。','caricature-panel');const generate=button('選択した題材から作画','primary');generate.onclick=()=>managedCommand('caricature',{kind:'generate_news'});create.append(generate);const custom=el('form',undefined,'subsection'),text=textField(custom,'文章から直接作画','textarea',draft.text??data.last_custom_text,true);text.maxLength=4000;text.oninput=()=>draft.text=text.value;custom.append(el('p','ニュース調査を行わず、入力した文章から作画します。','plugin-note'));const submit=button('この文章で作画','primary');submit.type='submit';custom.append(submit);custom.onsubmit=e=>{e.preventDefault();if(custom.reportValidity())managedCommand('caricature',{kind:'generate_custom',text:text.value})};create.append(custom);if(data.generation_error)create.append(el('p',data.generation_error,'error'));jobsPanel('caricature',create);
+      const latest=section('最新の絵','作品を選ぶと、その日の履歴を開きます。','caricature-panel');const latestItem=history.find(item=>item.artwork_id===data.latest_artwork_id);if(latestItem)latest.append(artworkCard(latestItem,true));else latest.append(el('p','公開済みの絵はまだありません。','empty'));
+      const archive=section('作品カレンダー','日本時間の日付から保存された絵を探せます。','caricature-panel'),toolbar=el('nav',undefined,'calendar-toolbar');toolbar.setAttribute('aria-label','月の移動');const prev=button('前の月'),next=button('次の月'),monthLabel=el('strong');const [year,month]=draft.month.split('-').map(Number);monthLabel.textContent=`${year}年${month}月`;prev.onclick=()=>{draft.month=new Date(Date.UTC(year,month-2,1)).toISOString().slice(0,7);draft.day=null;draft.protectMode=false;draft.protectionSelection=new Set();render()};next.onclick=()=>{draft.month=new Date(Date.UTC(year,month,1)).toISOString().slice(0,7);draft.day=null;draft.protectMode=false;draft.protectionSelection=new Set();render()};toolbar.append(prev,monthLabel,next);archive.append(toolbar);
+      const week=el('div',undefined,'calendar-week');week.setAttribute('aria-hidden','true');for(const day of ['日','月','火','水','木','金','土'])week.append(el('span',day));archive.append(week);const grid=el('div',undefined,'calendar-grid');grid.setAttribute('aria-label','月間カレンダー');archive.append(grid);const map=new Map();for(const item of history){const day=jstDay(item.metadata.created_at_unix);if(day.startsWith(draft.month)){const list=map.get(day)||[];list.push(item);map.set(day,list)}}const start=new Date(Date.UTC(year,month-1,1)).getUTCDay(),count=new Date(Date.UTC(year,month,0)).getUTCDate();for(let i=0;i<start;i++)grid.append(el('div',undefined,'calendar-day empty'));for(let n=1;n<=count;n++){const day=`${draft.month}-${String(n).padStart(2,'0')}`,items=map.get(day)||[],cell=el('button',undefined,'calendar-day');cell.type='button';cell.setAttribute('aria-label',`${day} ${items.length}枚`);cell.setAttribute('aria-pressed',String(draft.day===day));cell.append(el('strong',String(n)));if(items.length){const image=el('img');image.src=artworkUrl(items.at(-1).artwork_id);image.alt='';image.loading='lazy';cell.append(image,el('small',`${items.length}枚 · ${(items.at(-1).metadata.news_summary||items.at(-1).metadata.input?.CustomText||'作品').slice(0,50)}`))}cell.onclick=()=>{draft.day=day;draft.protectMode=false;draft.protectionSelection=new Set();render();document.getElementById('caricature-day')?.scrollIntoView({block:'start'})};grid.append(cell)}archive.append(el('p',map.size?'日付を選ぶと、作品と出典を表示します。':'この月の画像はありません。','plugin-note'));
+      if(draft.day){const dayPanel=section(`${draft.day} の画像`,'作品の概要と出典、生成時の設定を確認できます。','caricature-panel');dayPanel.id='caricature-day';const items=map.get(draft.day)||[],mode=button(draft.protectMode?'保護選択を終了':'削除プロテクトモード');mode.onclick=()=>{draft.protectMode=!draft.protectMode;draft.protectionSelection=new Set();render()};dayPanel.append(mode);const list=el('div',undefined,'artwork-list');if(!items.length)list.append(el('p','この日の画像はありません。','empty'));for(const item of items)list.append(artworkCard(item));dayPanel.append(list);if(draft.protectMode){const actions=el('div',undefined,'actions protect-actions'),chosen=draft.protectionSelection?.size||0;actions.append(el('span',`${chosen}枚選択中`));const save=button('チェック画像を削除しない','primary'),release=button('チェック画像の保護を解除');save.disabled=release.disabled=!chosen;save.onclick=()=>saveCaricatureProtections(true);release.onclick=()=>saveCaricatureProtections(false);actions.append(release,save);dayPanel.append(actions)}}
+    }
+
     function render(){
       main.replaceChildren();const id=location.pathname.startsWith('/plugins/')?location.pathname.split('/').pop():null;
       document.querySelectorAll('nav a').forEach(a=>{if(a.pathname===location.pathname)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});

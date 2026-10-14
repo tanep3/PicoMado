@@ -1,6 +1,7 @@
 //! Adapter to the common, generation-tokened plugin job worker.
 
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
@@ -11,8 +12,12 @@ use serde_json::Value;
 use crate::plugin_jobs::{JobExecutionContext, JobFailure, JobOutcome, PluginJobExecutor};
 
 use super::external::{self, ExternalOptions, GenerationResult};
+use super::hash::sha256_hex;
+use super::originals::half_webp_quality90;
+use super::retention::{cleanup_published_work, deletion_enabled};
 use super::store::{ArtworkStore, Publication};
-use super::{recent_source_keys, Artwork, GenerationJob, PublishedSource, ID};
+use super::variants::{VariantCache, VariantSpec};
+use super::{recent_source_keys, Artwork, GenerationJob, OriginalCodec, PublishedSource, ID};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -25,6 +30,10 @@ pub enum CaricatureWork {
         device_id: String,
         incarnation: u64,
     },
+    CleanupWork {
+        now_unix: i64,
+        active_job_ids: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -33,11 +42,16 @@ pub enum CaricatureSuccess {
     Published {
         job: Box<GenerationJob>,
         publication: Box<Publication>,
+        #[serde(default)]
+        template_warning: Option<String>,
     },
     HistoryFrame {
         artwork: Box<Artwork>,
         device_id: String,
         incarnation: u64,
+    },
+    WorkCleaned {
+        removed: usize,
     },
 }
 
@@ -82,6 +96,7 @@ impl PluginJobExecutor for CaricatureExecutor {
                 return JobOutcome::Cancelled;
             }
             let store = ArtworkStore::new(context.paths.data.join("artwork"));
+            let cache = VariantCache::new(context.paths.cache.join("artwork_variants"));
             match work {
                 CaricatureWork::Generate { job } => {
                     let job = *job;
@@ -108,6 +123,7 @@ impl PluginJobExecutor for CaricatureExecutor {
                             return success(CaricatureSuccess::Published {
                                 job: Box::new(recovered),
                                 publication: Box::new(publication),
+                                template_warning: None,
                             });
                         }
                         Ok(_) => {}
@@ -139,7 +155,7 @@ impl PluginJobExecutor for CaricatureExecutor {
                         executor.generated_root,
                     );
                     options.codex = executor.codex;
-                    options.python = executor.python;
+                    options.python = executor.python.clone();
                     let cancel_flag = options.cancel.clone();
                     let mut cancel = context.cancel.clone();
                     context.progress.report(Some(5), "Generating artwork");
@@ -153,8 +169,12 @@ impl PluginJobExecutor for CaricatureExecutor {
                             return JobOutcome::Cancelled;
                         }
                     };
-                    let (job, artwork) = match result {
-                        GenerationResult::Validated { job, artwork } => (*job, *artwork),
+                    let (job, mut artwork, template_warning) = match result {
+                        GenerationResult::Validated {
+                            job,
+                            artwork,
+                            warning,
+                        } => (*job, *artwork, warning),
                         GenerationResult::Failed { stage, reason, .. } => {
                             let code = if matches!(stage, super::GenerationStage::News) {
                                 "news_failed"
@@ -168,7 +188,31 @@ impl PluginJobExecutor for CaricatureExecutor {
                         return JobOutcome::Cancelled;
                     }
                     let artwork_id = artwork.id.clone();
-                    let publication = match store.publish(artwork, unix_now()) {
+                    let original_path = context
+                        .paths
+                        .data
+                        .join("work")
+                        .join(&job.request.job_id)
+                        .join("normalize")
+                        .join(job.image_attempts.to_string())
+                        .join("original.png");
+                    let original = match fs::read(original_path) {
+                        Ok(bytes) => bytes,
+                        Err(_) => return failed("publish_failed", "Original artwork unavailable"),
+                    };
+                    let archived_original = match half_webp_quality90(&original) {
+                        Ok(bytes) => bytes,
+                        Err(_) => {
+                            return failed("publish_failed", "Original WebP conversion failed")
+                        }
+                    };
+                    artwork.original_sha256 = Some(sha256_hex(&archived_original));
+                    artwork.original_codec = Some(OriginalCodec::HalfWebpQ90);
+                    let publication = match store.publish_with_original(
+                        artwork,
+                        &archived_original,
+                        unix_now(),
+                    ) {
                         Ok(v) => v,
                         Err(_) => match store.latest() {
                             Ok(Some(latest))
@@ -180,10 +224,13 @@ impl PluginJobExecutor for CaricatureExecutor {
                             _ => return failed("publish_failed", "Artwork publication failed"),
                         },
                     };
+                    // Native LCD/E-ink variants are already embedded in the archive;
+                    // only other profiles receive a separate cache file.
                     context.progress.report(Some(100), "Artwork published");
                     success(CaricatureSuccess::Published {
                         job: Box::new(job),
                         publication: Box::new(publication),
+                        template_warning,
                     })
                 }
                 CaricatureWork::ShowHistory {
@@ -191,21 +238,50 @@ impl PluginJobExecutor for CaricatureExecutor {
                     device_id,
                     incarnation,
                 } => {
-                    let history = match store.history() {
+                    let artwork = match store.artwork(&artwork_id) {
                         Ok(v) => v,
                         Err(_) => {
                             return failed("archive_unavailable", "Artwork archive unavailable")
                         }
                     };
-                    let Some(entry) = history.into_iter().find(|p| p.artwork.id == artwork_id)
-                    else {
+                    let Some(mut artwork) = artwork else {
                         return failed("unknown_artwork", "Artwork not found");
                     };
+                    if let Ok(variant) = cache.get_or_render(
+                        &store,
+                        &artwork,
+                        VariantSpec::lcd(&artwork),
+                        &executor.python,
+                    ) {
+                        artwork.lcd_rgb565be = variant.bytes;
+                    }
                     success(CaricatureSuccess::HistoryFrame {
-                        artwork: Box::new(entry.artwork),
+                        artwork: Box::new(artwork),
                         device_id,
                         incarnation,
                     })
+                }
+                CaricatureWork::CleanupWork {
+                    now_unix,
+                    active_job_ids,
+                } => {
+                    if !deletion_enabled() {
+                        return success(CaricatureSuccess::WorkCleaned { removed: 0 });
+                    }
+                    let work_root = context.paths.data.join("work");
+                    match tokio::task::spawn_blocking(move || {
+                        cleanup_published_work(
+                            &store,
+                            &work_root,
+                            now_unix,
+                            &active_job_ids.into_iter().collect(),
+                        )
+                    })
+                    .await
+                    {
+                        Ok(Ok(removed)) => success(CaricatureSuccess::WorkCleaned { removed }),
+                        _ => failed("cleanup_failed", "Artwork work cleanup failed"),
+                    }
                 }
             }
         })
@@ -271,6 +347,8 @@ mod tests {
                 news_summary: Some("news".into()),
                 settings,
             },
+            original_sha256: None,
+            original_codec: None,
             eink_png: crate::caricature::test_canonical_png(),
             lcd_rgb565be: vec![0; WIDTH_LCD * HEIGHT_LCD * 2],
         };
@@ -304,13 +382,85 @@ mod tests {
         let JobOutcome::Succeeded(value) = result else {
             panic!("committed job did not recover");
         };
-        let CaricatureSuccess::Published { job, publication } =
-            serde_json::from_value(value).unwrap()
+        let CaricatureSuccess::Published {
+            job, publication, ..
+        } = serde_json::from_value(value).unwrap()
         else {
             panic!("wrong success");
         };
         assert_eq!(job.state, GenerationState::Validated);
         assert_eq!(publication.artwork.id, artwork.id);
         assert_eq!(store.history().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn history_sub_frame_uses_shared_variant_cache() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("data");
+        let cache_root = temp.path().join("cache");
+        let store = ArtworkStore::new(data.join("artwork"));
+        let artwork = Artwork {
+            id: "history-1".into(),
+            metadata: ArtworkMetadata {
+                job_id: "history".into(),
+                slot: 0,
+                created_at_unix: 0,
+                input: GenerationInput::News,
+                source_urls: vec![],
+                news_summary: None,
+                settings: GenerationSettings::default(),
+            },
+            original_sha256: None,
+            original_codec: None,
+            eink_png: crate::caricature::test_canonical_png(),
+            lcd_rgb565be: vec![0x55; WIDTH_LCD * HEIGHT_LCD * 2],
+        };
+        store.publish(artwork.clone(), 0).unwrap();
+        let executor = CaricatureExecutor {
+            codex: "/absent/codex".into(),
+            python: "/absent/python".into(),
+            generated_root: temp.path().join("none"),
+        };
+        for _ in 0..2 {
+            let (_sender, receiver) = tokio::sync::watch::channel(false);
+            let context = JobExecutionContext {
+                token: JobToken {
+                    plugin: ID.into(),
+                    slot: "history".into(),
+                    generation: 1,
+                },
+                paths: PluginPaths {
+                    data: data.clone(),
+                    cache: cache_root.clone(),
+                },
+                cancel: receiver,
+                progress: JobProgressSink::default(),
+            };
+            let result = executor
+                .execute(
+                    serde_json::to_value(CaricatureWork::ShowHistory {
+                        artwork_id: artwork.id.clone(),
+                        device_id: "device-a".into(),
+                        incarnation: 3,
+                    })
+                    .unwrap(),
+                    context,
+                )
+                .await;
+            let JobOutcome::Succeeded(value) = result else {
+                panic!("history failed")
+            };
+            let CaricatureSuccess::HistoryFrame {
+                artwork: shown,
+                device_id,
+                incarnation,
+            } = serde_json::from_value(value).unwrap()
+            else {
+                panic!("wrong result")
+            };
+            assert_eq!(shown.lcd_rgb565be, artwork.lcd_rgb565be);
+            assert_eq!((device_id.as_str(), incarnation), ("device-a", 3));
+        }
+        assert!(!cache_root.join("artwork_variants").exists());
     }
 }

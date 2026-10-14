@@ -12,7 +12,10 @@ from PIL import Image
 
 
 def main():
-    source, target, lam, threshold = sys.argv[1:]
+    source, target, lam, threshold = sys.argv[1:5]
+    canvas_width, canvas_height = map(int, sys.argv[5:7]) if len(sys.argv) == 7 else (250, 122)
+    if not 1 <= canvas_width <= 2048 or not 1 <= canvas_height <= 2048:
+        raise ValueError("invalid canvas size")
     lam = float(lam)
     threshold = int(threshold)
     if not np.isfinite(lam) or not 0 <= lam <= 1 or not 1 <= threshold <= 254:
@@ -24,12 +27,12 @@ def main():
         image.load()
         gray = image.convert("L")
     width, height = gray.size
-    if width * 122 > height * 250:
-        size = 250, max(1, round(height * 250 / width))
-    elif width * 122 < height * 250:
-        size = max(1, round(width * 122 / height)), 122
+    if width * canvas_height > height * canvas_width:
+        size = canvas_width, max(1, round(height * canvas_width / width))
+    elif width * canvas_height < height * canvas_width:
+        size = max(1, round(width * canvas_height / height)), canvas_height
     else:
-        size = 250, 122
+        size = canvas_width, canvas_height
     luminance = np.asarray(gray, dtype=np.float32) / np.float32(255.0)
     pixels = np.ascontiguousarray(np.repeat(luminance[:, :, None], 3, axis=2))
     reduced = dpid_resize(pixels, size[1], size[0], lam)
@@ -39,8 +42,8 @@ def main():
         raise ValueError("invalid DPID output")
     output = np.rint(np.clip(reduced[:, :, 0], 0, 1) * 255).astype(np.uint8)
     fitted = Image.fromarray(output)
-    canvas = Image.new("L", (250, 122), 255)
-    canvas.paste(fitted, ((250 - size[0]) // 2, (122 - size[1]) // 2))
+    canvas = Image.new("L", (canvas_width, canvas_height), 255)
+    canvas.paste(fitted, ((canvas_width - size[0]) // 2, (canvas_height - size[1]) // 2))
     canonical = canvas.point(lambda n: 255 if n >= threshold else 0, mode="1")
     canonical.save(target, format="PNG", optimize=False)
 

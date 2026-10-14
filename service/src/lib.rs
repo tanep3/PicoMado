@@ -3,6 +3,7 @@
 pub mod application;
 pub mod caricature;
 pub mod content;
+mod display_badge;
 pub mod fetch;
 pub mod host;
 mod lcd_text;

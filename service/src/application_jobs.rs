@@ -39,7 +39,7 @@ impl App {
     pub fn monotonic_millis(&self) -> u64 {
         self.mono_origin.elapsed().as_millis().min(u64::MAX as u128) as u64
     }
-    fn command_context(&self) -> CommandContext {
+    pub(super) fn command_context(&self) -> CommandContext {
         CommandContext {
             now_unix: self.clock.unix_seconds(),
             now_mono_ms: self.monotonic_millis(),
@@ -96,7 +96,7 @@ impl App {
         self.work_signal.subscribe()
     }
 
-    fn accept_work_plan(
+    pub(super) fn accept_work_plan(
         &mut self,
         plugin: &str,
         mut content: Box<dyn ContentPlugin>,
@@ -471,6 +471,7 @@ impl App {
             state.accept(decision)?;
             Ok(frame)
         })?;
+        let pixels = self.compose_lcd_frame(&session.device_id, pixels);
         self.frame_assets.insert(handle, Arc::new(pixels));
         Ok(frame)
     }
@@ -711,6 +712,73 @@ mod tests {
             app.accept_playback_pixels(&old_read, vec![3; crate::protocol::LCD_FRAME_BYTES])
                 .unwrap(),
             0
+        );
+    }
+
+    #[test]
+    fn streaming_badge_is_per_device_and_disappears_after_sub_mode() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = App::open(&temp.path().join("state.db")).unwrap();
+        // Supply a streaming test fixture under a plugin whose kernel contract
+        // supports Sub. This exercises the shared streaming delivery path.
+        app.contents
+            .insert("caricature".into(), Box::new(FakeContent::default()));
+        let sub = app.hello("sub", ["lcd".into()].into(), 1).unwrap();
+        let normal = app.hello("normal", ["lcd".into()].into(), 1).unwrap();
+        app.button(&sub, ButtonAction::Next).unwrap();
+        app.button(&normal, ButtonAction::Next).unwrap();
+        app.terminal_event(Event::EnterSub { token: sub.clone() })
+            .unwrap();
+        let original = vec![0x42; crate::protocol::LCD_FRAME_BYTES];
+        let offer = app.playback_offers().remove(0);
+        assert_eq!(
+            app.accept_playback_pixels(&offer, original.clone())
+                .unwrap(),
+            2
+        );
+        let frames: BTreeMap<_, _> = app
+            .pending_effects()
+            .into_iter()
+            .filter_map(|(_, effect)| match effect {
+                Effect::SendFrame {
+                    token,
+                    asset_handle,
+                } => Some((token.device_id, app.frame_asset(&asset_handle).unwrap())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(frames["normal"].as_ref(), &original);
+        assert_eq!(&frames["sub"][0..2], &[0x42, 0x42]);
+        assert_eq!(
+            &frames["sub"][(69 * 160 + 3) * 2..(69 * 160 + 3) * 2 + 2],
+            &[255, 255]
+        );
+
+        app.terminal_event(Event::Power { token: sub.clone() })
+            .unwrap();
+        let offer = app.playback_offers().remove(0);
+        assert_eq!(
+            app.accept_playback_pixels(&offer, original.clone())
+                .unwrap(),
+            1
+        );
+        let normal_again = app
+            .pending_effects()
+            .into_iter()
+            .find_map(|(_, effect)| match effect {
+                Effect::SendFrame {
+                    token,
+                    asset_handle,
+                } if token.device_id == sub.device_id && app.frame_is_current(&token) => {
+                    app.frame_asset(&asset_handle)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(normal_again.as_ref(), &original);
+        assert_eq!(
+            app.selection_for(&normal).unwrap().0.as_deref(),
+            Some("caricature")
         );
     }
     #[tokio::test]

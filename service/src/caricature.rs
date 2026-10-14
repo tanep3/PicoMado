@@ -6,7 +6,11 @@ mod evidence;
 pub mod executor;
 pub mod external;
 mod hash;
+pub mod originals;
+pub mod retention;
 pub mod store;
+mod templates;
+pub mod variants;
 pub use executor::{CaricatureExecutor, CaricatureSuccess, CaricatureWork};
 
 use serde::{Deserialize, Serialize};
@@ -16,7 +20,7 @@ use time::{OffsetDateTime, UtcOffset};
 use crate::content::{
     ButtonAction, ContentError, ContentPlugin, PluginContext, PluginPlan, PluginPosition,
 };
-use crate::{Candidate, Capability, Event, Plugin, WorldQuery};
+use crate::{Candidate, Capability, Event, Mode, Plugin, Priority, Transition, WorldQuery};
 
 pub const ID: &str = "caricature";
 pub const WIDTH_LCD: usize = 160;
@@ -90,6 +94,8 @@ pub struct GenerationSettings {
     pub image_model: String,
     #[serde(default = "automatic_generation_default")]
     pub automatic_generation: bool,
+    #[serde(default)]
+    pub include_heading: bool,
     pub dpid_lambda: f64,
     pub threshold: u8,
     pub news_retry: RetryPolicy,
@@ -138,6 +144,7 @@ impl Default for GenerationSettings {
             style: Selection { id: "newspaper_cartoon".into(), label: "新聞風刺画".into(), prompt: "新聞の一コマ風刺画。太く抑揚のある黒い輪郭、白地に少数の象徴物、大きな主役と短い視覚的オチを置く。細かな網点を避け、背景は簡略化する。".into() },
             news_model: DEFAULT_MODEL.into(), image_model: DEFAULT_MODEL.into(),
             automatic_generation: true,
+            include_heading: false,
             dpid_lambda: 0.75, threshold: 128,
             news_retry: RetryPolicy::default(),
             image_retry: RetryPolicy { attempt_timeout_seconds: 300, ..RetryPolicy::default() },
@@ -378,6 +385,12 @@ pub struct ArtworkMetadata {
 pub struct Artwork {
     pub id: String,
     pub metadata: ArtworkMetadata,
+    /// SHA-256 of the immutable original sidecar. None on legacy art.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_sha256: Option<String>,
+    /// None preserves the original-PNG format used by older snapshots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_codec: Option<OriginalCodec>,
     /// Canonical display asset. Validated 250x122 monochrome PNG.
     pub eink_png: Vec<u8>,
     /// RGB565 big-endian 160x80, accepted by the shared LCD queue.
@@ -392,6 +405,10 @@ impl Artwork {
                 .id
                 .bytes()
                 .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+            || self.original_sha256.as_ref().is_some_and(|digest| {
+                digest.len() != 64 || !digest.bytes().all(|c| c.is_ascii_hexdigit())
+            })
+            || (self.original_codec.is_some() && self.original_sha256.is_none())
             || self.lcd_rgb565be.len() != WIDTH_LCD * HEIGHT_LCD * 2
             || self.eink_png.len() > 20_000_000
             || self.eink_png.len() < 33
@@ -420,6 +437,12 @@ impl Artwork {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OriginalCodec {
+    HalfWebpQ90,
+}
+
 /// Pure projection for the shared content route. The host persists artwork,
 /// then calls `set_latest` and queues returned pixel buffers for selected LCDs.
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -434,7 +457,21 @@ pub struct CaricatureContent {
     history: Vec<HistoryEntry>,
     #[serde(skip)]
     temporary: BTreeMap<String, (u64, Artwork)>,
+    #[serde(skip)]
+    browsing: BTreeMap<String, HistoryBrowse>,
     next_manual_slot: i64,
+    last_work_cleanup_day: Option<String>,
+}
+
+/// A device's display at entry is kept independently from the shared latest
+/// artwork. IDs, rather than vector indices, survive new publications.
+#[derive(Clone)]
+struct HistoryBrowse {
+    token: crate::SessionToken,
+    start: Artwork,
+    shown: Artwork,
+    cursor_id: String,
+    pending_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -465,6 +502,9 @@ pub enum CaricatureCommand {
         model: String,
     },
     SetAutomaticGeneration {
+        enabled: bool,
+    },
+    SetIncludeHeading {
         enabled: bool,
     },
     SetNormalizer {
@@ -668,6 +708,10 @@ impl CaricatureContent {
                     plan.cancel_slots.push("hourly".into());
                 }
             }
+            CaricatureCommand::SetIncludeHeading { enabled } => {
+                self.settings.include_heading = enabled;
+                self.settings.revision += 1;
+            }
             CaricatureCommand::SetNormalizer {
                 dpid_lambda,
                 threshold,
@@ -729,36 +773,53 @@ impl CaricatureContent {
         &mut self,
         ctx: &crate::plugin_jobs::CommandContext,
     ) -> Result<Option<crate::plugin_jobs::PluginWorkPlan>, ContentError> {
-        if !self.settings.automatic_generation {
-            return Ok(None);
+        let mut plan = crate::plugin_jobs::PluginWorkPlan::default();
+        // Around 03:00 JST, once per calendar day, even when auto generation
+        // is paused. Cleanup only touches verified, published staging folders.
+        let utc_second = ctx.now_unix.rem_euclid(86_400);
+        if (18 * 3600..19 * 3600).contains(&utc_second)
+            && self.last_work_cleanup_day.as_deref() != Some(ctx.today_jst.as_str())
+        {
+            self.last_work_cleanup_day = Some(ctx.today_jst.clone());
+            plan.jobs.push(crate::plugin_jobs::JobRequest {
+                slot: "work_cleanup".into(),
+                payload: serde_json::to_value(CaricatureWork::CleanupWork {
+                    now_unix: ctx.now_unix,
+                    active_job_ids: self
+                        .state
+                        .jobs
+                        .values()
+                        .filter(|job| job.recoverable())
+                        .map(|job| job.request.job_id.clone())
+                        .collect(),
+                })
+                .map_err(|_| ContentError::InvalidSource)?,
+                timeout_seconds: 300,
+            });
         }
-        if !self.topic_valid() || !self.style_valid() {
-            return Err(ContentError::InvalidSource);
+        if self.settings.automatic_generation && self.state.hourly_due(ctx.now_unix) {
+            if !self.topic_valid() || !self.style_valid() {
+                return Err(ContentError::InvalidSource);
+            }
+            let slot = hourly_slot(ctx.now_unix);
+            let request = GenerationRequest {
+                job_id: format!("hour_{slot}"),
+                slot,
+                requested_at_unix: ctx.now_unix,
+                input: GenerationInput::News,
+                settings: self.settings.clone(),
+            };
+            match self.state.accept(request) {
+                Ok(job) => plan.jobs.push(generation_job_request("hourly", job)?),
+                Err(CaricatureError::InvalidTransition) => {}
+                Err(_) => return Err(ContentError::InvalidSource),
+            }
         }
-        if !self.state.hourly_due(ctx.now_unix) {
-            return Ok(None);
-        }
-        let slot = hourly_slot(ctx.now_unix);
-        let request = GenerationRequest {
-            job_id: format!("hour_{slot}"),
-            slot,
-            requested_at_unix: ctx.now_unix,
-            input: GenerationInput::News,
-            settings: self.settings.clone(),
-        };
-        let job = match self.state.accept(request) {
-            Ok(v) => v,
-            Err(CaricatureError::InvalidTransition) => return Ok(None),
-            Err(_) => return Err(ContentError::InvalidSource),
-        };
-        Ok(Some(crate::plugin_jobs::PluginWorkPlan {
-            jobs: vec![generation_job_request("hourly", job)?],
-            ..Default::default()
-        }))
+        Ok((!plan.jobs.is_empty()).then_some(plan))
     }
     pub fn work_completed(
         &mut self,
-        _ctx: &crate::plugin_jobs::CommandContext,
+        ctx: &crate::plugin_jobs::CommandContext,
         job: &crate::plugin_jobs::PluginJob,
         result: &crate::plugin_jobs::JobOutcome,
     ) -> Result<crate::plugin_jobs::PluginWorkPlan, ContentError> {
@@ -770,12 +831,18 @@ impl CaricatureContent {
             (CaricatureWork::Generate { .. }, crate::plugin_jobs::JobOutcome::Succeeded(value)) => {
                 let success: CaricatureSuccess = serde_json::from_value(value.clone())
                     .map_err(|_| ContentError::InvalidSource)?;
-                let CaricatureSuccess::Published { job, publication } = success else {
+                let CaricatureSuccess::Published {
+                    job,
+                    publication,
+                    template_warning,
+                } = success
+                else {
                     return Err(ContentError::InvalidSource);
                 };
                 self.state
                     .apply_validated(*job, &publication.artwork.id, publication.published_at_unix)
                     .map_err(|_| ContentError::Stale)?;
+                self.state.generation_error = template_warning;
                 self.set_latest(publication.artwork.clone())
                     .map_err(|_| ContentError::InvalidSource)?;
                 self.temporary.clear();
@@ -810,7 +877,11 @@ impl CaricatureContent {
                 self.state.cancel(&job.request.job_id);
             }
             (
-                CaricatureWork::ShowHistory { .. },
+                CaricatureWork::ShowHistory {
+                    artwork_id,
+                    device_id: requested_device,
+                    incarnation: requested_incarnation,
+                },
                 crate::plugin_jobs::JobOutcome::Succeeded(value),
             ) => {
                 let success: CaricatureSuccess = serde_json::from_value(value.clone())
@@ -826,14 +897,42 @@ impl CaricatureContent {
                 artwork
                     .validate()
                     .map_err(|_| ContentError::InvalidSource)?;
-                self.temporary
-                    .insert(device_id.clone(), (incarnation, *artwork));
+                if job.token.slot.starts_with("browse_") {
+                    let active = ctx.devices.iter().any(|device| {
+                        device.context.token.device_id == device_id
+                            && device.context.token.incarnation == incarnation
+                            && device.context.mode == crate::Mode::Sub
+                            && device.selected.as_deref() == Some(ID)
+                    });
+                    let Some(browse) = self.browsing.get_mut(&device_id) else {
+                        return Ok(plan);
+                    };
+                    if !active
+                        || device_id != requested_device
+                        || incarnation != requested_incarnation
+                        || !ctx
+                            .devices
+                            .iter()
+                            .any(|device| device.context.token == browse.token)
+                        || browse.cursor_id != artwork_id
+                        || browse.pending_id.as_deref() != Some(artwork_id.as_str())
+                        || artwork.id != artwork_id
+                    {
+                        return Ok(plan);
+                    }
+                    browse.shown = *artwork;
+                    browse.pending_id = None;
+                } else {
+                    self.temporary
+                        .insert(device_id.clone(), (incarnation, *artwork));
+                }
                 plan.refresh = RefreshTargets::Devices(vec![crate::DeviceToken {
                     device_id,
                     incarnation,
                 }]);
             }
             (CaricatureWork::ShowHistory { .. }, _) => {}
+            (CaricatureWork::CleanupWork { .. }, _) => {}
         }
         Ok(plan)
     }
@@ -855,9 +954,71 @@ impl CaricatureContent {
     pub fn latest(&self) -> Option<&Artwork> {
         self.latest.as_ref()
     }
+
+    fn displayed_artwork(&self, ctx: &PluginContext) -> Option<&Artwork> {
+        if ctx.mode == crate::Mode::Sub {
+            if let Some(browse) = self
+                .browsing
+                .get(&ctx.token.device_id)
+                .filter(|browse| browse.token == ctx.token)
+            {
+                return Some(&browse.shown);
+            }
+        }
+        self.temporary
+            .get(&ctx.token.device_id)
+            .filter(|(incarnation, _)| *incarnation == ctx.token.incarnation)
+            .map(|(_, artwork)| artwork)
+            .or(self.latest.as_ref())
+    }
+}
+
+fn browse_slot(device_id: &str) -> String {
+    format!("browse_{}", hash::sha256_hex(device_id.as_bytes()))
+}
+
+fn artwork_position(artwork: &Artwork) -> Result<PluginPosition, ContentError> {
+    Ok(PluginPosition {
+        plugin: ID.into(),
+        dataset_id: artwork.id.clone(),
+        target_date: artwork.jst_day().map_err(|_| ContentError::InvalidSource)?,
+        index: 0,
+    })
 }
 
 impl ContentPlugin for CaricatureContent {
+    fn retention_references(&self) -> BTreeSet<String> {
+        let mut ids = BTreeSet::new();
+        if let Some(art) = &self.latest {
+            ids.insert(art.id.clone());
+        }
+        for (_, art) in self.temporary.values() {
+            ids.insert(art.id.clone());
+        }
+        for browse in self.browsing.values() {
+            ids.insert(browse.start.id.clone());
+            ids.insert(browse.shown.id.clone());
+            ids.insert(browse.cursor_id.clone());
+            if let Some(id) = &browse.pending_id {
+                ids.insert(id.clone());
+            }
+        }
+        ids
+    }
+    fn retire_artwork(&mut self, id: &str) -> Result<(), ContentError> {
+        if self.retention_references().contains(id) {
+            return Err(ContentError::Unavailable);
+        }
+        let before = self.history.len();
+        self.history.retain(|entry| entry.artwork_id != id);
+        if before == self.history.len() {
+            return Err(ContentError::InvalidSource);
+        }
+        self.state.jobs.retain(|_, job| {
+            !matches!(&job.state, GenerationState::Published { artwork_id } if artwork_id == id)
+        });
+        Ok(())
+    }
     fn web_state(&self) -> serde_json::Value {
         CaricatureContent::web_state(self)
     }
@@ -915,21 +1076,27 @@ impl ContentPlugin for CaricatureContent {
         self.set_latest(art)
             .map_err(|_| ContentError::InvalidSource)
     }
-    fn position(&self, _ctx: &PluginContext) -> Option<PluginPosition> {
-        let art = self
-            .temporary
-            .get(&_ctx.token.device_id)
-            .filter(|(incarnation, _)| *incarnation == _ctx.token.incarnation)
-            .map(|(_, artwork)| artwork)
-            .or(self.latest.as_ref())?;
-        Some(PluginPosition {
-            plugin: ID.into(),
-            dataset_id: art.id.clone(),
-            target_date: art.jst_day().ok()?,
-            index: 0,
-        })
+    fn position(&self, ctx: &PluginContext) -> Option<PluginPosition> {
+        if ctx.mode == Mode::Sub
+            && !self
+                .browsing
+                .get(&ctx.token.device_id)
+                .is_some_and(|browse| browse.token == ctx.token)
+        {
+            return None;
+        }
+        artwork_position(self.displayed_artwork(ctx)?).ok()
     }
     fn current_frame(&self, ctx: &PluginContext) -> Option<Vec<u8>> {
+        if ctx.mode == Mode::Sub {
+            if let Some(browse) = self
+                .browsing
+                .get(&ctx.token.device_id)
+                .filter(|browse| browse.token == ctx.token)
+            {
+                return Some(browse.shown.lcd_rgb565be.clone());
+            }
+        }
         if let Some((_, artwork)) = self
             .temporary
             .get(&ctx.token.device_id)
@@ -957,16 +1124,146 @@ impl ContentPlugin for CaricatureContent {
     }
     fn plan(
         &mut self,
-        _ctx: &PluginContext,
-        _action: ButtonAction,
+        ctx: &PluginContext,
+        action: ButtonAction,
     ) -> Result<PluginPlan, ContentError> {
-        Err(ContentError::Unsupported)
+        let device_id = &ctx.token.device_id;
+        let event = match (action, &ctx.mode) {
+            (ButtonAction::Sub, crate::Mode::Normal) => {
+                let start = self
+                    .displayed_artwork(ctx)
+                    .cloned()
+                    .ok_or(ContentError::Unavailable)?;
+                self.browsing.insert(
+                    device_id.clone(),
+                    HistoryBrowse {
+                        token: ctx.token.clone(),
+                        cursor_id: start.id.clone(),
+                        shown: start.clone(),
+                        start,
+                        pending_id: None,
+                    },
+                );
+                Some(Event::EnterSub {
+                    token: ctx.token.clone(),
+                })
+            }
+            (ButtonAction::Up | ButtonAction::Down, crate::Mode::Sub) => {
+                let browse = self
+                    .browsing
+                    .get(device_id)
+                    .filter(|browse| browse.token == ctx.token)
+                    .ok_or(ContentError::Unavailable)?;
+                let index = self
+                    .history
+                    .iter()
+                    .position(|entry| entry.artwork_id == browse.cursor_id)
+                    .ok_or(ContentError::Unavailable)?;
+                let next = if action == ButtonAction::Up {
+                    index.checked_sub(1)
+                } else {
+                    (index + 1 < self.history.len()).then_some(index + 1)
+                };
+                let Some(next) = next else {
+                    return Ok(PluginPlan {
+                        event: None,
+                        frame: None,
+                        position: artwork_position(&browse.shown)?,
+                    });
+                };
+                let target = self.history[next].artwork_id.clone();
+                let cached = if browse.shown.id == target {
+                    Some(browse.shown.clone())
+                } else if browse.start.id == target {
+                    Some(browse.start.clone())
+                } else {
+                    self.latest.as_ref().filter(|art| art.id == target).cloned()
+                };
+                let browse = self.browsing.get_mut(device_id).expect("checked above");
+                browse.cursor_id = target.clone();
+                browse.pending_id = if cached.is_none() { Some(target) } else { None };
+                if let Some(artwork) = cached {
+                    browse.shown = artwork;
+                }
+                Some(Event::PluginInput {
+                    token: ctx.token.clone(),
+                    name: if action == ButtonAction::Up {
+                        "up"
+                    } else {
+                        "down"
+                    }
+                    .into(),
+                })
+            }
+            (ButtonAction::Power | ButtonAction::Sub, crate::Mode::Sub) => {
+                let browse = self
+                    .browsing
+                    .remove(device_id)
+                    .filter(|browse| browse.token == ctx.token)
+                    .ok_or(ContentError::Unavailable)?;
+                let selected = if action == ButtonAction::Power {
+                    browse.start
+                } else {
+                    browse.shown
+                };
+                self.temporary
+                    .insert(device_id.clone(), (ctx.token.incarnation, selected));
+                Some(Event::Power {
+                    token: ctx.token.clone(),
+                })
+            }
+            _ => return Err(ContentError::Unsupported),
+        };
+        let art = self
+            .displayed_artwork(ctx)
+            .ok_or(ContentError::Unavailable)?;
+        Ok(PluginPlan {
+            event,
+            frame: Some(art.lcd_rgb565be.clone()),
+            position: artwork_position(art)?,
+        })
+    }
+    fn button_work(
+        &self,
+        ctx: &PluginContext,
+        action: ButtonAction,
+    ) -> Option<crate::plugin_jobs::PluginWorkPlan> {
+        use crate::plugin_jobs::{JobRequest, PluginWorkPlan};
+        let slot = browse_slot(&ctx.token.device_id);
+        match (action, &ctx.mode) {
+            (ButtonAction::Up | ButtonAction::Down, crate::Mode::Sub) => {
+                let browse = self.browsing.get(&ctx.token.device_id)?;
+                let mut plan = PluginWorkPlan::default();
+                if let Some(artwork_id) = &browse.pending_id {
+                    plan.jobs.push(JobRequest {
+                        slot,
+                        payload: serde_json::to_value(CaricatureWork::ShowHistory {
+                            artwork_id: artwork_id.clone(),
+                            device_id: ctx.token.device_id.clone(),
+                            incarnation: ctx.token.incarnation,
+                        })
+                        .ok()?,
+                        timeout_seconds: 30,
+                    });
+                } else {
+                    plan.cancel_slots.push(slot);
+                }
+                Some(plan)
+            }
+            (ButtonAction::Power | ButtonAction::Sub, crate::Mode::Sub) => Some(PluginWorkPlan {
+                cancel_slots: vec![slot],
+                ..Default::default()
+            }),
+            _ => None,
+        }
     }
     fn session_reset(&mut self, device_id: &str, _incarnation: u64) {
         self.temporary.remove(device_id);
+        self.browsing.remove(device_id);
     }
     fn delete_device(&mut self, device_id: &str) {
         self.temporary.remove(device_id);
+        self.browsing.remove(device_id);
     }
     fn save_state(&self) -> serde_json::Value {
         serde_json::to_value(self).expect("caricature state")
@@ -976,7 +1273,15 @@ impl ContentPlugin for CaricatureContent {
             return Ok(());
         } // Legacy placeholder had no state.
 
-        let next: Self = serde_json::from_value(value).map_err(|_| ContentError::InvalidSource)?;
+        let mut next: Self =
+            serde_json::from_value(value).map_err(|_| ContentError::InvalidSource)?;
+        // Older snapshots contain their own catalogue. Add newly bundled topics
+        // without replacing existing choices, settings, jobs or artwork.
+        for topic in &self.topics {
+            if !next.topics.iter().any(|existing| existing.id == topic.id) {
+                next.topics.push(topic.clone());
+            }
+        }
         next.settings
             .validate_without_topic()
             .map_err(|_| ContentError::InvalidSource)?;
@@ -1042,10 +1347,46 @@ impl Plugin for CaricaturePlugin {
     }
     fn candidates<'a>(
         &'a self,
-        _query: &'a dyn WorldQuery,
-        _event: &'a Event,
+        query: &'a dyn WorldQuery,
+        event: &'a Event,
     ) -> Box<dyn Iterator<Item = Candidate> + 'a> {
-        Box::new(std::iter::empty())
+        let candidate = match event {
+            Event::EnterSub { token }
+                if query.device(&token.device_id).is_some_and(|device| {
+                    device.selected.as_deref() == Some(ID) && device.mode == Mode::Normal
+                }) =>
+            {
+                Some(Candidate::new(
+                    query,
+                    &token.device_id,
+                    Priority::User,
+                    "caricature-browse-start",
+                    Transition::EnterMode {
+                        token: token.clone(),
+                        mode: Mode::Sub,
+                    },
+                ))
+            }
+            Event::PluginInput { token, name }
+                if (name == "up" || name == "down")
+                    && query.device(&token.device_id).is_some_and(|device| {
+                        device.selected.as_deref() == Some(ID) && device.mode == Mode::Sub
+                    }) =>
+            {
+                Some(Candidate::new(
+                    query,
+                    &token.device_id,
+                    Priority::User,
+                    "caricature-browse-move",
+                    Transition::RefreshView {
+                        token: token.clone(),
+                        plugin: ID.into(),
+                    },
+                ))
+            }
+            _ => None,
+        };
+        Box::new(candidate.into_iter())
     }
 }
 
@@ -1256,6 +1597,8 @@ mod tests {
                 news_summary: None,
                 settings: GenerationSettings::default(),
             },
+            original_sha256: None,
+            original_codec: None,
             eink_png: test_canonical_png(),
             lcd_rgb565be: vec![0; WIDTH_LCD * HEIGHT_LCD * 2],
         };
@@ -1299,6 +1642,26 @@ mod tests {
         assert_eq!(job.request.slot, 2);
         assert_eq!(planned.jobs[0].slot, "hourly");
         assert!(content.plan_schedule(&ctx).unwrap().is_none());
+    }
+    #[test]
+    fn work_cleanup_is_daily_even_when_automatic_generation_is_paused() {
+        let mut content = CaricatureContent::default();
+        content.settings.automatic_generation = false;
+        let mut ctx = crate::plugin_jobs::CommandContext {
+            now_unix: 18 * 3600,
+            now_mono_ms: 0,
+            today_jst: "1970-01-02".into(),
+            settings: crate::settings::PluginSettings::default(),
+            devices: vec![],
+        };
+        let plan = content.plan_schedule(&ctx).unwrap().unwrap();
+        assert_eq!(plan.jobs.len(), 1);
+        assert_eq!(plan.jobs[0].slot, "work_cleanup");
+        assert_eq!(plan.jobs[0].payload["kind"], "cleanup_work");
+        assert!(content.plan_schedule(&ctx).unwrap().is_none());
+        ctx.now_unix += 86_400;
+        ctx.today_jst = "1970-01-03".into();
+        assert_eq!(content.plan_schedule(&ctx).unwrap().unwrap().jobs.len(), 1);
     }
     #[test]
     fn catalog_prompt_edit_refreshes_selected_snapshot() {
@@ -1379,6 +1742,91 @@ mod tests {
         assert!(compatible.settings.automatic_generation);
     }
     #[test]
+    fn old_snapshot_gains_yahoo_preset_without_losing_selection_or_settings() {
+        let mut old = crate::plugins::contents().remove(ID).unwrap();
+        old.load_state(serde_json::Value::Null).unwrap();
+        let mut state = old.save_state();
+        let selected = {
+            let topics = state["topics"].as_array_mut().unwrap();
+            topics.retain(|item| item["id"] != "yahoo_news_jp");
+            topics[2].clone()
+        };
+        state["settings"]["image_model"] = serde_json::json!("custom-model");
+        state["settings"]["topic"] = selected;
+        state["settings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("include_heading");
+        for _ in 0..2 {
+            let mut restored = crate::plugins::contents().remove(ID).unwrap();
+            restored.load_state(state).unwrap();
+            let view = restored.web_state();
+            assert_eq!(view["settings"]["topic"]["id"], "science");
+            assert_eq!(view["settings"]["image_model"], "custom-model");
+            assert_eq!(view["settings"]["include_heading"], false);
+            let topics = view["topics"].as_array().unwrap();
+            assert_eq!(
+                topics
+                    .iter()
+                    .filter(|item| item["id"] == "yahoo_news_jp")
+                    .count(),
+                1
+            );
+            let yahoo = topics
+                .iter()
+                .find(|item| item["id"] == "yahoo_news_jp")
+                .unwrap();
+            assert_eq!(yahoo["label"], "最新Yahooニュース");
+            assert_eq!(yahoo["prompt"], "24時間以内に発表された、知っておくべき日本のYahooニュースを1件選び、何が起きたかを要約してください。");
+            state = restored.save_state();
+        }
+    }
+    #[test]
+    fn heading_command_persists_and_old_artwork_metadata_is_compatible() {
+        let ctx = crate::plugin_jobs::CommandContext {
+            now_unix: 3600,
+            now_mono_ms: 0,
+            today_jst: "1970-01-01".into(),
+            settings: crate::settings::PluginSettings::default(),
+            devices: vec![],
+        };
+        let mut content = CaricatureContent::default();
+        assert!(!content.settings.include_heading);
+        content
+            .plan_command(
+                &ctx,
+                &serde_json::json!({"kind":"set_include_heading","enabled":true}),
+            )
+            .unwrap();
+        let mut restored = CaricatureContent::default();
+        restored.load_state(content.save_state()).unwrap();
+        assert!(restored.settings.include_heading);
+        let mut previous = serde_json::to_value(ArtworkMetadata {
+            job_id: "old".into(),
+            slot: 0,
+            created_at_unix: 0,
+            input: GenerationInput::News,
+            source_urls: vec!["https://example.com/news".into()],
+            news_summary: Some("以前のニュース".into()),
+            settings: GenerationSettings::default(),
+        })
+        .unwrap();
+        previous["settings"]
+            .as_object_mut()
+            .unwrap()
+            .remove("include_heading");
+        let decoded: ArtworkMetadata = serde_json::from_value(previous).unwrap();
+        assert_eq!(decoded.news_summary.as_deref(), Some("以前のニュース"));
+        assert!(!decoded.settings.include_heading);
+        restored
+            .plan_command(
+                &ctx,
+                &serde_json::json!({"kind":"set_include_heading","enabled":false}),
+            )
+            .unwrap();
+        assert!(!restored.settings.include_heading);
+    }
+    #[test]
     fn custom_generation_ignores_missing_topic_and_history_send_keeps_latest() {
         use crate::plugin_jobs::{JobOutcome, JobToken, PluginDevice, PluginJob, RefreshTargets};
         let mut content = CaricatureContent::default();
@@ -1437,6 +1885,8 @@ mod tests {
                 news_summary: None,
                 settings: job.request.settings.clone(),
             },
+            original_sha256: None,
+            original_codec: None,
             eink_png: test_canonical_png(),
             lcd_rgb565be: vec![1; WIDTH_LCD * HEIGHT_LCD * 2],
         };
@@ -1459,11 +1909,16 @@ mod tests {
             serde_json::to_value(CaricatureSuccess::Published {
                 job,
                 publication: Box::new(pubn),
+                template_warning: Some("news.txt: using last valid template".into()),
             })
             .unwrap(),
         );
         let plan = content.work_completed(&ctx, &common_job, &outcome).unwrap();
         assert!(matches!(plan.refresh, RefreshTargets::Selected));
+        assert_eq!(
+            content.state.generation_error.as_deref(),
+            Some("news.txt: using last valid template")
+        );
         assert_eq!(content.current_frame(&device).unwrap(), art.lcd_rgb565be);
         let send = content
             .plan_command(
@@ -1500,5 +1955,326 @@ mod tests {
         assert_eq!(content.current_frame(&device).unwrap(), other.lcd_rgb565be);
         content.session_reset("pico", 1);
         assert_eq!(content.current_frame(&device).unwrap(), error_lcd());
+    }
+
+    fn browse_art(id: &str, color: u8) -> Artwork {
+        Artwork {
+            id: id.into(),
+            metadata: ArtworkMetadata {
+                job_id: id.into(),
+                slot: 0,
+                created_at_unix: 0,
+                input: GenerationInput::News,
+                source_urls: vec![],
+                news_summary: None,
+                settings: GenerationSettings::default(),
+            },
+            original_sha256: None,
+            original_codec: None,
+            eink_png: test_canonical_png(),
+            lcd_rgb565be: vec![color; WIDTH_LCD * HEIGHT_LCD * 2],
+        }
+    }
+
+    fn browse_ctx(device_id: &str, mode: Mode) -> PluginContext {
+        PluginContext {
+            token: crate::SessionToken {
+                device_id: device_id.into(),
+                incarnation: 1,
+                session_epoch: 1,
+            },
+            settings_revision: 1,
+            mode,
+        }
+    }
+
+    fn browse_content() -> CaricatureContent {
+        let mut content = CaricatureContent::default();
+        for (index, id) in ["one", "two", "three"].iter().enumerate() {
+            let art = browse_art(id, index as u8 + 1);
+            content.history.push(HistoryEntry {
+                artwork_id: art.id.clone(),
+                metadata: art.metadata.clone(),
+                publish_seq: index as u64 + 1,
+                published_at_unix: index as i64,
+            });
+            content.set_latest(art).unwrap();
+        }
+        content
+    }
+
+    fn complete_browse(content: &mut CaricatureContent, device_id: &str, id: &str) {
+        use crate::plugin_jobs::{CommandContext, JobOutcome, JobToken, PluginDevice, PluginJob};
+        let device = browse_ctx(device_id, Mode::Sub);
+        let ctx = CommandContext {
+            now_unix: 0,
+            now_mono_ms: 0,
+            today_jst: "1970-01-01".into(),
+            settings: crate::settings::PluginSettings::default(),
+            devices: vec![PluginDevice {
+                context: device,
+                selected: Some(ID.into()),
+                online: true,
+                capabilities: BTreeSet::from(["lcd".into()]),
+            }],
+        };
+        let job = PluginJob {
+            token: JobToken {
+                plugin: ID.into(),
+                slot: browse_slot(device_id),
+                generation: 1,
+            },
+            payload: serde_json::to_value(CaricatureWork::ShowHistory {
+                artwork_id: id.into(),
+                device_id: device_id.into(),
+                incarnation: 1,
+            })
+            .unwrap(),
+            timeout_seconds: 30,
+            created_unix: 0,
+        };
+        let outcome = JobOutcome::Succeeded(
+            serde_json::to_value(CaricatureSuccess::HistoryFrame {
+                artwork: Box::new(browse_art(
+                    id,
+                    match id {
+                        "one" => 1,
+                        "two" => 2,
+                        _ => 3,
+                    },
+                )),
+                device_id: device_id.into(),
+                incarnation: 1,
+            })
+            .unwrap(),
+        );
+        content.work_completed(&ctx, &job, &outcome).unwrap();
+    }
+
+    #[test]
+    fn buttons_browse_by_id_stop_at_ends_and_confirm_per_device() {
+        let mut content = browse_content();
+        let normal_a = browse_ctx("a", Mode::Normal);
+        let sub_a = browse_ctx("a", Mode::Sub);
+        let normal_b = browse_ctx("b", Mode::Normal);
+        assert!(matches!(
+            content.plan(&normal_a, ButtonAction::Sub).unwrap().event,
+            Some(Event::EnterSub { .. })
+        ));
+        assert!(content
+            .plan(&sub_a, ButtonAction::Up)
+            .unwrap()
+            .event
+            .is_some());
+        assert_eq!(content.browsing["a"].cursor_id, "two");
+        assert_eq!(
+            content
+                .button_work(&sub_a, ButtonAction::Up)
+                .unwrap()
+                .jobs
+                .len(),
+            1
+        );
+        complete_browse(&mut content, "a", "two");
+        assert_eq!(content.current_frame(&sub_a).unwrap()[0], 2);
+        content.plan(&normal_b, ButtonAction::Sub).unwrap();
+        assert_eq!(content.current_frame(&normal_b).unwrap()[0], 3);
+        content.plan(&sub_a, ButtonAction::Up).unwrap();
+        complete_browse(&mut content, "a", "one");
+        assert!(content
+            .plan(&sub_a, ButtonAction::Up)
+            .unwrap()
+            .event
+            .is_none());
+        assert_eq!(content.browsing["a"].cursor_id, "one");
+        content.plan(&sub_a, ButtonAction::Down).unwrap();
+        complete_browse(&mut content, "a", "two");
+        content.plan(&sub_a, ButtonAction::Sub).unwrap();
+        assert_eq!(content.current_frame(&normal_a).unwrap()[0], 2);
+        assert_eq!(content.current_frame(&normal_b).unwrap()[0], 3);
+        assert_eq!(content.latest().unwrap().id, "three");
+        content.set_latest(browse_art("four", 4)).unwrap();
+        assert_eq!(content.current_frame(&normal_a).unwrap()[0], 4);
+    }
+
+    #[test]
+    fn cancel_restores_entry_image_despite_publication_and_stale_result() {
+        let mut content = browse_content();
+        let normal = browse_ctx("a", Mode::Normal);
+        let sub = browse_ctx("a", Mode::Sub);
+        content.plan(&normal, ButtonAction::Sub).unwrap();
+        content.plan(&sub, ButtonAction::Up).unwrap();
+        let four = browse_art("four", 4);
+        content.history.push(HistoryEntry {
+            artwork_id: four.id.clone(),
+            metadata: four.metadata.clone(),
+            publish_seq: 4,
+            published_at_unix: 4,
+        });
+        content.set_latest(four).unwrap();
+        assert_eq!(content.browsing["a"].cursor_id, "two");
+        complete_browse(&mut content, "a", "two");
+        content.plan(&sub, ButtonAction::Down).unwrap();
+        assert_eq!(content.browsing["a"].cursor_id, "three");
+        content.plan(&sub, ButtonAction::Down).unwrap();
+        assert_eq!(content.browsing["a"].cursor_id, "four");
+        assert!(content
+            .plan(&sub, ButtonAction::Down)
+            .unwrap()
+            .event
+            .is_none());
+        content.plan(&sub, ButtonAction::Power).unwrap();
+        complete_browse(&mut content, "a", "one");
+        assert_eq!(content.current_frame(&normal).unwrap()[0], 3);
+        assert_eq!(content.latest().unwrap().id, "four");
+        content.session_reset("a", 1);
+        assert_eq!(content.current_frame(&normal).unwrap()[0], 4);
+    }
+
+    #[test]
+    fn empty_and_single_history_and_reconnect_are_bounded() {
+        let mut content = CaricatureContent::default();
+        let normal = browse_ctx("a", Mode::Normal);
+        let sub = browse_ctx("a", Mode::Sub);
+        assert!(matches!(
+            content.plan(&normal, ButtonAction::Sub),
+            Err(ContentError::Unavailable)
+        ));
+        let one = browse_art("one", 1);
+        content.set_latest(one.clone()).unwrap();
+        content.history.push(HistoryEntry {
+            artwork_id: one.id.clone(),
+            metadata: one.metadata,
+            publish_seq: 1,
+            published_at_unix: 1,
+        });
+        content.plan(&normal, ButtonAction::Sub).unwrap();
+        assert!(content
+            .plan(&sub, ButtonAction::Up)
+            .unwrap()
+            .event
+            .is_none());
+        assert!(content
+            .plan(&sub, ButtonAction::Down)
+            .unwrap()
+            .event
+            .is_none());
+        content.session_reset("a", 1);
+        assert!(matches!(
+            content.plan(&sub, ButtonAction::Up),
+            Err(ContentError::Unavailable)
+        ));
+        assert!(content.position(&sub).is_none());
+        assert_eq!(content.current_frame(&normal).unwrap()[0], 1);
+    }
+
+    #[test]
+    fn confirm_uses_visible_image_while_archive_read_is_pending() {
+        let mut content = browse_content();
+        let normal = browse_ctx("a", Mode::Normal);
+        let sub = browse_ctx("a", Mode::Sub);
+        content.plan(&normal, ButtonAction::Sub).unwrap();
+        content.plan(&sub, ButtonAction::Up).unwrap();
+        assert_eq!(content.browsing["a"].cursor_id, "two");
+        assert_eq!(content.current_frame(&sub).unwrap()[0], 3);
+        content.plan(&sub, ButtonAction::Sub).unwrap();
+        complete_browse(&mut content, "a", "two");
+        assert_eq!(content.current_frame(&normal).unwrap()[0], 3);
+    }
+
+    #[test]
+    fn fast_button_presses_ignore_superseded_archive_result() {
+        let mut content = browse_content();
+        let normal = browse_ctx("a", Mode::Normal);
+        let sub = browse_ctx("a", Mode::Sub);
+        content.plan(&normal, ButtonAction::Sub).unwrap();
+        content.plan(&sub, ButtonAction::Up).unwrap();
+        content.plan(&sub, ButtonAction::Up).unwrap();
+        assert_eq!(content.browsing["a"].cursor_id, "one");
+        complete_browse(&mut content, "a", "two");
+        assert_eq!(content.current_frame(&sub).unwrap()[0], 3);
+        complete_browse(&mut content, "a", "one");
+        assert_eq!(content.current_frame(&sub).unwrap()[0], 1);
+    }
+
+    #[test]
+    fn cancel_restores_web_selected_entry_not_shared_latest() {
+        let mut content = browse_content();
+        let normal = browse_ctx("a", Mode::Normal);
+        let sub = browse_ctx("a", Mode::Sub);
+        content
+            .temporary
+            .insert("a".into(), (1, browse_art("two", 2)));
+        assert_eq!(content.current_frame(&normal).unwrap()[0], 2);
+        content.plan(&normal, ButtonAction::Sub).unwrap();
+        content.plan(&sub, ButtonAction::Up).unwrap();
+        complete_browse(&mut content, "a", "one");
+        content.plan(&sub, ButtonAction::Power).unwrap();
+        assert_eq!(content.current_frame(&normal).unwrap()[0], 2);
+        assert_eq!(content.latest().unwrap().id, "three");
+    }
+
+    #[test]
+    fn physical_button_path_submits_archive_work_and_confirms_display() {
+        use crate::application::App;
+        use crate::plugin_jobs::JobOutcome;
+        let temp = tempfile::tempdir().unwrap();
+        let mut app =
+            App::open_with_plugin_root(&temp.path().join("state.db"), temp.path()).unwrap();
+        app.replace_test_content(ID, Box::new(browse_content()));
+        let token = app.hello("a", BTreeSet::from(["lcd".into()]), 1).unwrap();
+        app.button(&token, ButtonAction::Next).unwrap();
+        assert_eq!(app.selection_for(&token).unwrap().0.as_deref(), Some(ID));
+        app.button(&token, ButtonAction::Sub).unwrap();
+        app.button(&token, ButtonAction::Up).unwrap();
+        let jobs = app.claim_plugin_work().unwrap();
+        assert_eq!(jobs.len(), 1);
+        let CaricatureWork::ShowHistory { artwork_id, .. } =
+            serde_json::from_value(jobs[0].payload.clone()).unwrap()
+        else {
+            panic!("button did not request archive work");
+        };
+        assert_eq!(artwork_id, "two");
+        let outcome = JobOutcome::Succeeded(
+            serde_json::to_value(CaricatureSuccess::HistoryFrame {
+                artwork: Box::new(browse_art("two", 2)),
+                device_id: "a".into(),
+                incarnation: token.incarnation,
+            })
+            .unwrap(),
+        );
+        app.complete_plugin_work(jobs[0].token.clone(), outcome)
+            .unwrap();
+        assert_eq!(app.plugin_position(&token).unwrap().dataset_id, "two");
+        let displayed = app
+            .pending_effects()
+            .into_iter()
+            .find_map(|(_, effect)| match effect {
+                crate::Effect::SendFrame {
+                    token: frame,
+                    asset_handle,
+                } if app.frame_is_current(&frame) => app.frame_asset(&asset_handle),
+                _ => None,
+            })
+            .expect("completed history work must queue its image in Sub mode");
+        assert_eq!(&displayed[0..2], &[2, 2]);
+        assert_eq!(
+            &displayed[(69 * 160 + 3) * 2..(69 * 160 + 3) * 2 + 2],
+            &[255, 255]
+        );
+        app.button(&token, ButtonAction::Sub).unwrap();
+        assert_eq!(app.plugin_position(&token).unwrap().dataset_id, "two");
+        let confirmed = app
+            .pending_effects()
+            .into_iter()
+            .find_map(|(_, effect)| match effect {
+                crate::Effect::SendFrame {
+                    token: frame,
+                    asset_handle,
+                } if app.frame_is_current(&frame) => app.frame_asset(&asset_handle),
+                _ => None,
+            })
+            .expect("confirm must queue an undecorated normal image");
+        assert_eq!(confirmed.as_ref(), &browse_art("two", 2).lcd_rgb565be);
     }
 }

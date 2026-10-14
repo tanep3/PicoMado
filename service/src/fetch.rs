@@ -518,10 +518,9 @@ mod tests {
             .next_back()
             .unwrap();
         assert!(app.frame_is_current(&frame));
-        assert_eq!(
-            &*app.frame_asset(&handle).unwrap(),
-            &render_error_lcd(&LOCATIONS[0])
-        );
+        let mut expected = render_error_lcd(&LOCATIONS[0]);
+        crate::display_badge::draw_sub_rgb565be(&mut expected);
+        assert_eq!(&*app.frame_asset(&handle).unwrap(), &expected);
         assert!(app
             .plan_plugin_fetches(3759, "2026-10-12")
             .unwrap()

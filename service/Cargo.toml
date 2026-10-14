@@ -6,6 +6,10 @@ edition = "2021"
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = []
+caricature-retention-delete = []
+
 [dependencies]
 sha2 = "0.10.9"
 libc = "0.2.189"
@@ -14,7 +18,7 @@ crc32fast = "1.5.2"
 flate2 = "1.1"
 futures-util = "0.3.34"
 base64 = "0.22.1"
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "rustls-tls"] }
 serde = { version = "1.0.229", features = ["derive"] }

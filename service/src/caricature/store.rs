@@ -8,7 +8,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use super::{ensure_unused_source, recent_source_keys, Artwork, CaricatureError, PublishedSource};
+use super::hash::sha256_hex;
+use super::{
+    ensure_unused_source, recent_source_keys, Artwork, CaricatureError, OriginalCodec,
+    PublishedSource,
+};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Publication {
@@ -67,6 +71,34 @@ impl ArtworkStore {
             return Err(CaricatureError::InvalidSource);
         }
         Ok(self.root.join("archive").join(format!("{id}.json")))
+    }
+
+    fn original_path(&self, artwork: &Artwork) -> Result<PathBuf, CaricatureError> {
+        let extension = match artwork.original_codec {
+            Some(OriginalCodec::HalfWebpQ90) => "original.webp",
+            None => "original.png",
+        };
+        Ok(self.artwork_path(&artwork.id)?.with_extension(extension))
+    }
+
+    /// Legacy artwork has no original. A missing sidecar on new artwork leaves
+    /// its saved display variants usable, but cannot produce a new resolution.
+    pub fn original(&self, artwork: &Artwork) -> Result<Option<Vec<u8>>, CaricatureError> {
+        let Some(expected) = &artwork.original_sha256 else {
+            return Ok(None);
+        };
+        let bytes = match fs::read(self.original_path(artwork)?) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(CaricatureError::Io),
+        };
+        if sha256_hex(&bytes) != *expected {
+            return Err(CaricatureError::InvalidSource);
+        }
+        if artwork.original_codec == Some(OriginalCodec::HalfWebpQ90) {
+            super::originals::validate_half_webp(&bytes, None)?;
+        }
+        Ok(Some(bytes))
     }
 
     pub fn artwork(&self, id: &str) -> Result<Option<Artwork>, CaricatureError> {
@@ -170,7 +202,37 @@ impl ArtworkStore {
     /// Atomic latest switch occurs only after immutable bytes are reread and
     /// validated. A failure keeps the old latest and all older history intact.
     pub fn publish(&self, artwork: Artwork, now_unix: i64) -> Result<Publication, CaricatureError> {
+        self.publish_inner(artwork, None, now_unix)
+    }
+
+    pub fn publish_with_original(
+        &self,
+        artwork: Artwork,
+        original: &[u8],
+        now_unix: i64,
+    ) -> Result<Publication, CaricatureError> {
+        self.publish_inner(artwork, Some(original), now_unix)
+    }
+
+    fn publish_inner(
+        &self,
+        artwork: Artwork,
+        original: Option<&[u8]>,
+        now_unix: i64,
+    ) -> Result<Publication, CaricatureError> {
         artwork.validate()?;
+        match (&artwork.original_sha256, original, artwork.original_codec) {
+            (Some(expected), Some(bytes), Some(OriginalCodec::HalfWebpQ90))
+                if sha256_hex(bytes) == *expected
+                    && super::originals::validate_half_webp(bytes, None).is_ok() => {}
+            (Some(expected), Some(bytes), None)
+                if bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+                    && (1..=20_000_000).contains(&bytes.len())
+                    && sha256_hex(bytes) == *expected
+                    && image::load_from_memory(bytes).is_ok() => {}
+            (None, None, None) => {}
+            _ => return Err(CaricatureError::InvalidSource),
+        }
         if let Some(latest) = self.latest()? {
             if latest.artwork.id == artwork.id {
                 self.reconcile_latest()?;
@@ -224,6 +286,19 @@ impl ArtworkStore {
             }
         } else {
             write_new_sync(&png_path, &artwork.eink_png)?;
+        }
+        if let Some(original) = original {
+            let original_path = self.original_path(&artwork)?;
+            if original_path.exists() {
+                if fs::read(&original_path).map_err(|_| CaricatureError::Io)? != original {
+                    return Err(CaricatureError::InvalidSource);
+                }
+            } else {
+                write_new_sync(&original_path, original)?;
+            }
+            if self.original(&artwork)?.as_deref() != Some(original) {
+                return Err(CaricatureError::InvalidSource);
+            }
         }
         if self.artwork(&artwork.id)?.as_ref() != Some(&artwork) {
             return Err(CaricatureError::InvalidSource);
@@ -329,6 +404,8 @@ mod tests {
                 news_summary: None,
                 settings: GenerationSettings::default(),
             },
+            original_sha256: None,
+            original_codec: None,
             eink_png: png,
             lcd_rgb565be: vec![0; WIDTH_LCD * HEIGHT_LCD * 2],
         }
@@ -352,6 +429,43 @@ mod tests {
             Err(CaricatureError::InvalidSource)
         );
         assert_eq!(store.latest().unwrap().unwrap().artwork.id, "second");
+    }
+    #[test]
+    fn original_sidecar_is_immutable_and_legacy_schema_stays_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ArtworkStore::new(dir.path().to_path_buf());
+        let legacy = store.publish(art("legacy", 0), 0).unwrap();
+        assert_eq!(store.original(&legacy.artwork).unwrap(), None);
+        let json = fs::read(dir.path().join("archive/legacy.json")).unwrap();
+        assert!(!String::from_utf8_lossy(&json).contains("original_sha256"));
+        assert_eq!(
+            serde_json::from_slice::<Artwork>(&json).unwrap(),
+            legacy.artwork
+        );
+
+        let source = crate::caricature::test_canonical_png();
+        let mut newer = art("newer", 86_400);
+        newer.original_sha256 = Some(sha256_hex(&source));
+        assert_eq!(
+            store.publish(newer.clone(), 86_400),
+            Err(CaricatureError::InvalidSource)
+        );
+        assert_eq!(store.latest().unwrap().unwrap().artwork.id, "legacy");
+        let published = store
+            .publish_with_original(newer.clone(), &source, 86_400)
+            .unwrap();
+        assert_eq!(
+            store.original(&published.artwork).unwrap(),
+            Some(source.clone())
+        );
+        assert_eq!(store.history().unwrap().len(), 2);
+        assert_eq!(
+            store.publish_with_original(newer, &legacy.artwork.eink_png[..10], 86_401),
+            Err(CaricatureError::InvalidSource)
+        );
+        fs::remove_file(dir.path().join("archive/newer.original.png")).unwrap();
+        assert_eq!(store.original(&published.artwork).unwrap(), None);
+        assert!(store.artwork("newer").unwrap().is_some());
     }
     #[cfg(unix)]
     #[test]

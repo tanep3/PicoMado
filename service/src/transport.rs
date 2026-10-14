@@ -2685,10 +2685,9 @@ mod tests {
         for _ in 0..8 {
             first = receiver.accept(read_wire(&mut ws).await).unwrap().or(first);
         }
-        assert_eq!(
-            first.unwrap().1,
-            crate::weather::render_lcd(&set, &set.days[0]).unwrap()
-        );
+        let mut expected = crate::weather::render_lcd(&set, &set.days[0]).unwrap();
+        crate::display_badge::draw_sub_rgb565be(&mut expected);
+        assert_eq!(first.unwrap().1, expected);
         let mut updated = set.clone();
         updated.id = "new".into();
         updated.days[0].max_c = Some(28);
@@ -3019,7 +3018,10 @@ mod tests {
             (id.as_str(), date.as_str(), index),
             ("set-two", "20261012032000", 3)
         );
-        assert_eq!(frame.unwrap(), latest);
+        let mut normal_pixels = frame.unwrap();
+        assert_ne!(normal_pixels, latest, "SUB badge must disappear on exit");
+        crate::display_badge::draw_sub_rgb565be(&mut normal_pixels);
+        assert_eq!(normal_pixels, latest);
         drop(ws);
         server.abort();
         let _ = server.await;

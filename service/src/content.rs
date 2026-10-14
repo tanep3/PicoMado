@@ -9,6 +9,7 @@ use crate::plugin_jobs::{
 use crate::settings::{FetchPolicy, PluginSettings};
 use crate::{Event, Mode, SessionToken};
 use serde_json::Value;
+use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonAction {
@@ -64,6 +65,14 @@ pub struct PluginPlan {
 }
 
 pub trait ContentPlugin: Send + Sync {
+    /// Archive IDs that remain in a plugin's live display or browse state.
+    fn retention_references(&self) -> BTreeSet<String> {
+        BTreeSet::new()
+    }
+    /// Remove a non-displayed archive entry from persisted plugin state.
+    fn retire_artwork(&mut self, _id: &str) -> Result<(), ContentError> {
+        Err(ContentError::Unsupported)
+    }
     /// Public shared content/settings/history; never include credentials.
     fn web_state(&self) -> Value {
         Value::Null
@@ -131,6 +140,11 @@ pub trait ContentPlugin: Send + Sync {
         ctx: &PluginContext,
         action: ButtonAction,
     ) -> Result<PluginPlan, ContentError>;
+    /// Optional archive work requested by a button plan. The host commits it
+    /// after accepting the button event; implementations keep IO in workers.
+    fn button_work(&self, _ctx: &PluginContext, _action: ButtonAction) -> Option<PluginWorkPlan> {
+        None
+    }
     fn session_reset(&mut self, device_id: &str, incarnation: u64);
     fn delete_device(&mut self, device_id: &str);
     fn save_state(&self) -> Value {
