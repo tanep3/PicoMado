@@ -26,7 +26,12 @@ static enum { SOCKS_METHOD,SOCKS_AUTH,SOCKS_CONNECT } socks_step;
 static uint8_t rx[RX_CAP];
 static pm_rx_flow rx_flow;
 #define rx_used rx_flow.used
-static uint8_t app_rx[RX_CAP];
+// A legacy numeric-array chunk is <18KiB. Stream a WS body through this
+// bounded application workspace; never require a whole concatenated WS body.
+#define APP_CAP 18006u
+_Static_assert(APP_CAP>4096u*4u+1024u,"legacy chunk workspace");
+static uint8_t app_rx[APP_CAP];
+static size_t ws_remaining;
 static size_t app_used,last_payload_length;
 static bool ws_continuation;
 static bool socket_dead;
@@ -130,7 +135,7 @@ static void close_unlocked(void) {
         if(tcp_close(old)!=ERR_OK)tcp_abort(old);
     }
     stage=PM_NET_DOWN;socks_step=SOCKS_METHOD;
-    pm_rx_flow_reset(&rx_flow); app_used=0; last_payload_length=0; ws_continuation=false; socket_dead=false;
+    pm_rx_flow_reset(&rx_flow); app_used=0; last_payload_length=0; ws_continuation=false; ws_remaining=0; socket_dead=false;
 }
 static void begin_unlocked(const pm_profile *p) {
     close_unlocked(); profile=p;
@@ -262,6 +267,13 @@ again:
             app_used-=n+4;memmove(app_rx,app_rx+n+4,app_used);return true;
         }
     }
+    if(ws_remaining){
+        size_t n=rx_used;if(n>ws_remaining)n=ws_remaining;
+        if(n>sizeof app_rx-app_used)n=sizeof app_rx-app_used;
+        if(!n)return false;
+        memcpy(app_rx+app_used,rx,n);app_used+=n;ws_remaining-=n;consume(n);
+        goto again;
+    }
     if(rx_used<2)return false;
     unsigned opcode=rx[0]&15;
     bool fin=(rx[0]&0x80)!=0;
@@ -273,7 +285,7 @@ again:
         length=0;for(unsigned i=2;i<10;i++)length=length<<8|rx[i];h=10;
     }
     if(length>RX_CAP-10 || length+ h >RX_CAP) {stage=PM_NET_FAILED;return false;}
-    if(rx_used<h+length)return false;
+    if((opcode==8 || opcode==9) && rx_used<h+length)return false;
     if(opcode==8){stage=PM_NET_FAILED;return false;}
     if(opcode==9){
         // Server ping is not an application message. Reply with a masked pong.
@@ -286,12 +298,11 @@ again:
         send_raw(pong,p);consume(h+(size_t)length);return false;
     }
     if((opcode!=2 && opcode!=0) || (opcode==0 && !ws_continuation) ||
-       (opcode==2 && ws_continuation) || length>sizeof app_rx-app_used) {
+       (opcode==2 && ws_continuation)) {
         stage=PM_NET_FAILED;return false;
     }
     ws_continuation=!fin;
-    memcpy(app_rx+app_used,rx+h,(size_t)length);app_used+=(size_t)length;
-    consume(h+(size_t)length);
+    consume(h);ws_remaining=(size_t)length;
     goto again;
 }
 
@@ -303,3 +314,10 @@ void pm_net_poll(void){cyw43_arch_poll();cyw43_arch_lwip_begin();poll_unlocked()
 pm_net_stage pm_net_state(void){cyw43_arch_lwip_begin();pm_net_stage result=state_unlocked();cyw43_arch_lwip_end();return result;}
 bool pm_net_send(uint8_t kind,const char *json){cyw43_arch_lwip_begin();bool ok=send_unlocked(kind,json);cyw43_arch_lwip_end();return ok;}
 bool pm_net_take(uint8_t *kind,char *json,size_t cap){cyw43_arch_lwip_begin();bool ok=take_unlocked(kind,json,cap);cyw43_arch_lwip_end();return ok;}
+
+// Optional video telemetry must not turn send-buffer pressure into a retry.
+bool pm_net_send_optional(uint8_t kind,const char *json){
+    cyw43_arch_lwip_begin();
+    bool room=stage==PM_NET_READY && pcb && strlen(json)+14<=tcp_sndbuf(pcb);
+    bool ok=room && send_unlocked(kind,json);cyw43_arch_lwip_end();return ok;
+}

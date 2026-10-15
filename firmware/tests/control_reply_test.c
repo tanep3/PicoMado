@@ -13,6 +13,9 @@ static void setup(void){
  incarnation=session_epoch=display_epoch=1;owner_epoch=42;sub_mode=false;
  pending_standby=pending_sub_cancel=pending_render_ack=have_display=await_selection=false;
  checking_frame=true;frame_receipts=frame_renders=0;pm_reset(&assembly);
+#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD && (!defined(PM_TEST_OLD_FIRMWARE) || !PM_TEST_OLD_FIRMWARE)
+ pm_video_reset(&video);receiving_stream=false;
+#endif
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
  drawing=panel_standby=false;panel_result=false;
 #endif
@@ -69,6 +72,46 @@ static void native_reception(void){
  puts("native chunks: binary NUL/pixel bytes, mixed legacy, stale tokens, control interleave, invalid header PASS");
 }
 #endif
+#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD && (!defined(PM_TEST_OLD_FIRMWARE) || !PM_TEST_OLD_FIRMWARE)
+static void stream_start(unsigned id,unsigned sequence){
+ uint8_t zeros[PM_IMAGE_BYTES]={0};char token[400];token_json(token,sizeof token,id,1,1);
+ snprintf(json,sizeof json,"{\"type\":\"frame_start\",\"data\":{%s,\"mode\":\"normal\",\"width\":%u,\"height\":%u,\"format\":\"%s\",\"byte_len\":%u,\"crc32\":%lu,\"stream\":{\"fps\":6,\"sequence\":%u,\"generation\":1}}}",token,PM_W,PM_H,PM_PIXEL_FORMAT_NAME,PM_IMAGE_BYTES,(unsigned long)pm_crc32(zeros,sizeof zeros),sequence);
+ process(12,json);
+}
+static void stream_finish(unsigned id){
+ for(unsigned at=0;at<PM_IMAGE_BYTES;at+=256){unsigned n=PM_IMAGE_BYTES-at;if(n>256)n=256;native_chunk(id,1,1,at,n);}
+}
+static void video_reception(void){
+ setup();checking_frame=false;clock_ms=5000000;stream_status_count=0;last_video_status_us=0;
+ unsigned id=++serial;stream_start(id,1);assert(video.active&&receiving_stream);
+ assert(video.first_us==(uint64_t)clock_ms*1000 && video.first_us>UINT32_MAX);
+#if PM_TRACE_ENABLE
+ assert(pm_trace_clock()==time_us_64());
+#else
+ assert(pm_trace_clock()==0); // Disabled diagnostics are not a functional clock.
+#endif
+ stream_finish(id);assert(video.ready&&!frame_receipts&&!frame_renders&&!pending_render_ack);
+ poll_video();assert(video.rendered==1&&!video.ready&&!frame_receipts&&!frame_renders);
+ assert(video.last_draw_us==time_us_64()&&stream_status_count==1);
+ uint64_t first=video.last_draw_us,deadline=video.next_us;
+ id=++serial;stream_start(id,2);stream_finish(id);poll_video();
+ assert(video.ready&&video.rendered==1&&video.next_us==deadline);
+ clock_ms=(uint32_t)((deadline-1)/1000);poll_video();assert(video.ready&&video.rendered==1);
+ clock_ms=(uint32_t)((deadline+999)/1000);poll_video();
+ assert(!video.ready&&video.rendered==2&&video.last_draw_us>=deadline);
+ assert(video.max_gap_us==video.last_draw_us-first&&!frame_receipts&&!frame_renders);
+ uint64_t elapsed;clock_ms+=1100;poll_video();
+ assert(video.rendered==2&&stream_status_count==2);
+ assert(number(stream_status_last,"elapsed_ms",&elapsed)&&elapsed==(time_us_64()-video.first_us)/1000&&elapsed>=1000);
+ // A completed but undisplayed image cannot win against a local selection.
+ video.ready=true;button(3,false);assert(await_selection);poll_video();assert(!video.ready&&video.rendered==2);
+ reply(10,2,1,1,"normal",false);poll_video();assert(!video.active);
+ checking_frame=true;id=++serial;start(id,2,1,"normal");finish_image(id,2,1,0);
+ assert(frame_receipts==1&&frame_renders==1&&!video.active);
+ printf("production video clock trace=%u: >32-bit clock, second-frame deadline, elapsed/max-gap stats PASS\n",PM_TRACE_ENABLE);
+ puts("production video parser: no per-frame ACK, local input suppression, static ACK restoration PASS");
+}
+#endif
 #if defined(PM_TEST_OLD_FIRMWARE) && PM_TEST_OLD_FIRMWARE
 int main(void){
  for(unsigned kind=10;kind<=17;kind+=7){
@@ -81,6 +124,9 @@ int main(void){
 #else
 int main(void){
  native_reception();
+#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
+ video_reception();
+#endif
  // Both response types, legacy/current contexts, before/after start and mid-image.
  for(unsigned kind=10;kind<=17;kind+=7)for(unsigned legacy=0;legacy<2;legacy++)for(unsigned order=0;order<3;order++){
   setup();unsigned id=++serial;

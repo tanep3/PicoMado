@@ -18,7 +18,7 @@ build trace -DPM_TRACE_ENABLE=1 -Itests/trace_stubs -Itests/app_stubs -Itests/st
 run trace
 build app -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 \
     '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
-    -Itests/app_stubs tests/app_timing_test.c src/core.c src/trace.c
+    -Itests/app_stubs tests/app_timing_test.c src/core.c src/video.c src/trace.c
 run app
 for mode in drop-during-retry usb-snapshot sdk-error error-log; do run app "$mode"; done
 build net -DPM_TRACE_ENABLE=1 -Itests/net_stubs -Itests/app_stubs -I. \
@@ -26,7 +26,7 @@ build net -DPM_TRACE_ENABLE=1 -Itests/net_stubs -Itests/app_stubs -I. \
 run net
 build lcd-bus -DPM_TRACE_ENABLE=1 -DPM_NORMAL_BUILD=1 -DPM_LCD_FRAME_CS_HOLD=1 \
     -DPM_LCD_CONTROL_SPI_BAUD=20000000 -DPM_TEST_NORMAL_SPI_BAUD=20000000 \
-    -Itests/stubs tests/lcd_bus_test.c src/lcd.c src/core.c src/trace.c
+    -Itests/stubs tests/lcd_bus_test.c src/lcd.c src/core.c src/video.c src/trace.c
 run lcd-bus
 build backlight -DPM_NORMAL_BUILD=1 -DPM_LCD_FRAME_CS_HOLD=1 \
     -DPM_LCD_CONTROL_SPI_BAUD=20000000 -Itests/stubs \
@@ -64,7 +64,7 @@ run eink-absent
 for device in E-ink_0 E-ink_1; do
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 \
         '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
-        -I"devices/$device" -Isrc -Itests/app_stubs tests/eink_app_test.c src/core.c \
+        -I"devices/$device" -Isrc -Itests/app_stubs tests/eink_app_test.c src/core.c src/video.c \
         -o "$work/eink-app-$device"
     run "eink-app-$device"
 done
@@ -76,7 +76,16 @@ printf 'PASS eink-legacy-order\n'
 for device in sample-a E-ink_0 E-ink_1; do
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 \
         '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
-        -I"devices/$device" -Isrc -Itests/app_stubs tests/control_reply_test.c src/core.c src/trace.c \
+        -I"devices/$device" -Isrc -Itests/app_stubs tests/control_reply_test.c src/core.c src/video.c src/trace.c \
         -o "$work/control-$device"
     run "control-$device"
 done
+
+# Exercise the same production LCD parser and functional deadlines without diagnostics.
+build control-trace-off -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=0 \
+    '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
+    -Itests/app_stubs tests/control_reply_test.c src/core.c src/video.c src/trace.c
+run control-trace-off
+
+build video tests/video_test.c src/video.c src/core.c
+run video

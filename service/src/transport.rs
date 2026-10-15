@@ -42,6 +42,7 @@ fn wire_label(message: &WireMessage) -> &'static str {
         WireMessage::RenderedAck { .. } => "rendered_ack",
         WireMessage::InputAccepted { .. } => "input_accepted",
         WireMessage::PluginPosition { .. } => "plugin_position",
+        WireMessage::StreamStatus { .. } => "stream_status",
         WireMessage::SettingsStored { .. } => "settings_stored",
         WireMessage::Settings { .. } => "settings",
         WireMessage::Error { .. } => "error",
@@ -73,7 +74,9 @@ impl AckDiagnostics {
 }
 
 pub async fn upgrade(State(app): State<SharedApp>, ws: WebSocketUpgrade) -> Response {
-    ws.max_message_size(MAX_CHUNK_BYTES)
+    ws.write_buffer_size(0)
+        .max_write_buffer_size(crate::lcd_stream::WEBSOCKET_WRITE_BUFFER_BYTES)
+        .max_message_size(MAX_CHUNK_BYTES)
         .max_frame_size(MAX_CHUNK_BYTES)
         .on_upgrade(move |socket| serve_socket(socket, app))
 }
@@ -291,6 +294,33 @@ fn process_inner(
             }
             Ok(None)
         }
+        WireMessage::StreamStatus {
+            token: frame,
+            generation,
+            received_frames,
+            rendered_frames,
+            dropped_frames,
+            elapsed_ms,
+            max_gap_us,
+        } => {
+            if !guard.supports_lcd_push(token)
+                || frame.device_id != token.device_id
+                || frame.incarnation != token.incarnation
+                || frame.session_epoch != token.session_epoch
+                || !guard.frame_ack_within_known_generations(&frame)
+                || rendered_frames > received_frames
+                || dropped_frames > received_frames
+                || rendered_frames
+                    .checked_add(dropped_frames)
+                    .is_none_or(|n| n > received_frames)
+            {
+                return Err("invalid_stream_status");
+            }
+            let accepted = guard.lcd_stream_status(&frame, generation);
+            eprintln!("picomado stream_status id={} frame_id={} generation={} received_frames={} rendered_frames={} dropped_frames={} elapsed_ms={} max_gap_us={} accepted={}",
+                token.device_id,frame.frame_id,generation,received_frames,rendered_frames,dropped_frames,elapsed_ms,max_gap_us,accepted);
+            Ok(None)
+        }
         WireMessage::RenderedAck { token: frame } => {
             if frame.device_id != token.device_id
                 || frame.incarnation != token.incarnation
@@ -469,6 +499,7 @@ fn enqueue_outbox(
                     return Err(());
                 };
                 let start = WireMessage::FrameStart {
+                    stream: None,
                     mode: Some(mode.into()),
                     token: frame.clone(),
                     width,
@@ -565,13 +596,21 @@ where
         Err(_) => return "application_unavailable",
     };
     let mut awaiting_render: Option<(u64, tokio::time::Instant)> = None;
+    let mut video_rx: Option<
+        tokio::sync::watch::Receiver<Option<std::sync::Arc<crate::lcd_stream::VideoFrame>>>,
+    > = None;
+    let mut video_active: Option<crate::lcd_stream::VideoTransfer> = None;
+    let mut video_pending = false;
     let mut refresh = false;
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let end_reason = loop {
         tokio::select! {
             biased;
             command=rx.recv()=>match command {
-                Some(WriterCommand::Bind(token))=>{current=Some(token);refresh=true;},
+                Some(WriterCommand::Bind(token))=>{
+                    video_rx=app.lock().ok().and_then(|mut a|a.subscribe_lcd_video(&token));
+                    current=Some(token);refresh=true;video_pending=true;
+                },
                 Some(WriterCommand::Reply(message))=>{
                     let kind=wire_label(&message);
                     let reply_context=match &message {
@@ -591,6 +630,9 @@ where
                 },
                 Some(WriterCommand::Stop)=>break "requested_stop",
                 None=>break "command_channel_closed",
+            },
+            result=async {match &mut video_rx {Some(r)=>r.changed().await, None=>std::future::pending().await}},if video_rx.is_some()=>{
+                if result.is_ok(){video_pending=true;}else{video_rx=None;}
             },
             result=changes.changed()=>{
                 if result.is_err(){break "application_unavailable";}
@@ -623,7 +665,36 @@ where
                     }
                 }
             }
-            _=tokio::task::yield_now(),if current.as_ref().is_some_and(|t|queue.bytes(&t.device_id)>0)=>{
+            _=std::future::ready(()),if video_active.is_none() && video_pending && current.as_ref().is_some_and(|t|queue.bytes(&t.device_id)==0)=>{
+                video_pending=false;
+                let latest=video_rx.as_mut().and_then(|r|r.borrow_and_update().clone());
+                if let Some(frame)=latest {
+                    if app.lock().is_ok_and(|a|a.lcd_video_is_current(&frame)) {
+                        // A new video supersedes the initial static placeholder;
+                        // no application ACK may hold streaming or its connection.
+                        awaiting_render=None;
+                        eprintln!("picomado stream_frame_start id={} frame_id={} sequence={} fps={}",frame.token.device_id,frame.token.frame_id,frame.sequence,frame.fps);
+                        video_active=Some(crate::lcd_stream::VideoTransfer::new(frame));
+                    }
+                }
+            },
+            _=tokio::task::yield_now(),if video_active.is_some()=>{
+                let token=current.as_ref().expect("bound stream");
+                if !app.lock().is_ok_and(|a|a.session_is_current(token)) {break "session_not_current";}
+                let active=video_active.as_mut().expect("active stream");
+                // Once started, finish all chunks. Selection controls can be
+                // interleaved only at complete application/WS message boundaries.
+                let packet=match active.next_packet(){Ok(Some(p))=>p,Ok(None)=>{
+                    eprintln!("picomado stream_frame_sent id={} frame_id={} elapsed_us={}",active.frame.token.device_id,active.frame.token.frame_id,active.started.elapsed().as_micros());
+                    video_active=None;continue;
+                },Err(_)=>break "stream_encode_failed"};
+                let deadline=(tokio::time::Instant::now()+FRAGMENT_STALL_TIMEOUT)
+                    .min(tokio::time::Instant::from_std(active.started)+Duration::from_secs(5));
+                match tokio::time::timeout_at(deadline,sink.send(Message::Binary(packet.into()))).await {
+                    Ok(Ok(()))=>{},_=>break "stream_write_stall",
+                }
+            },
+            _=tokio::task::yield_now(),if video_active.is_none() && current.as_ref().is_some_and(|t|queue.bytes(&t.device_id)>0)=>{
                 let token=current.as_ref().expect("bound");
                 let Some(packet)=queue.pop_for(&token.device_id) else {continue;};
                 let valid={let Ok(guard)=app.lock() else {break "application_unavailable";};
@@ -883,6 +954,106 @@ mod tests {
     use std::sync::Arc;
     use std::task::{Context, Poll};
     use tokio_tungstenite::tungstenite::Message as ClientMessage;
+
+    #[tokio::test]
+    async fn real_websocket_lcd_video_continues_without_any_frame_ack() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+            &temp.path().join("state.db"),
+        )));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_app = app.clone();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, web::router(server_app))
+                .await
+                .unwrap()
+        });
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/device"))
+            .await
+            .unwrap();
+        ws.send(ClientMessage::Binary(
+            encode(&WireMessage::Hello {
+                device_id: "push".into(),
+                screen_owner_epoch: 1,
+                capabilities: vec![
+                    "lcd".into(),
+                    crate::protocol::FRAME_BYTES_CAPABILITY.into(),
+                    crate::protocol::LCD_PUSH_CAPABILITY.into(),
+                ],
+            })
+            .unwrap()
+            .into(),
+        ))
+        .await
+        .unwrap();
+        let session = match read_wire(&mut ws).await {
+            WireMessage::Welcome {
+                incarnation,
+                session_epoch,
+            } => SessionToken {
+                device_id: "push".into(),
+                incarnation,
+                session_epoch,
+            },
+            m => panic!("{m:?}"),
+        };
+        assert!(matches!(
+            read_wire(&mut ws).await,
+            WireMessage::Settings { .. }
+        ));
+        let before = app.lock().unwrap().pending_effects().len();
+        let mut last = 0;
+        for sequence in 1..=6 {
+            app.lock()
+                .unwrap()
+                .queue_lcd_video(&session, 6, sequence, 1, vec![sequence as u8; 25600])
+                .unwrap();
+            let mut assembler = FrameAssembler::default();
+            let (token, pixels) = tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    let message = read_wire(&mut ws).await;
+                    if matches!(
+                        message,
+                        WireMessage::FrameStart {
+                            stream: Some(_),
+                            ..
+                        } | WireMessage::FrameChunk { .. }
+                    ) {
+                        if let Some(frame) = assembler.accept(message).unwrap() {
+                            break frame;
+                        }
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert!(token.frame_id > last);
+            last = token.frame_id;
+            // The composition adds configured overlays; transport must preserve
+            // the complete immutable frame, whose CRC FrameAssembler checked.
+            assert_eq!(pixels.len(), 25600);
+        }
+        assert!(app.lock().unwrap().pending_effects().len() <= before);
+        ws.send(ClientMessage::Binary(
+            encode(&WireMessage::Next {
+                incarnation: session.incarnation,
+                session_epoch: session.session_epoch,
+            })
+            .unwrap()
+            .into(),
+        ))
+        .await
+        .unwrap();
+        loop {
+            if matches!(read_wire(&mut ws).await, WireMessage::InputAccepted { .. }) {
+                break;
+            }
+        }
+        ws.close(None).await.unwrap();
+        server.abort();
+        let _ = server.await;
+    }
 
     #[test]
     fn lcd_and_eink_dispatch_use_independent_dimensions_format_crc_and_bytes() {
@@ -2242,6 +2413,148 @@ mod tests {
         fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), ()>> {
             Poll::Ready(Ok(()))
         }
+    }
+
+    #[tokio::test]
+    async fn video_blocked_writer_finishes_started_frame_then_latest_and_does_not_block_peer() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+            &temp.path().join("state.db"),
+        )));
+        let caps = std::collections::BTreeSet::from([
+            "lcd".into(),
+            crate::protocol::FRAME_BYTES_CAPABILITY.into(),
+            crate::protocol::LCD_PUSH_CAPABILITY.into(),
+        ]);
+        let slow = app
+            .lock()
+            .unwrap()
+            .hello("slow-push", caps.clone(), 1)
+            .unwrap();
+        let fast = app.lock().unwrap().hello("fast-push", caps, 1).unwrap();
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let count = Arc::new(AtomicUsize::new(0));
+        let open = Arc::new(AtomicBool::new(false));
+        let wake = Arc::new(futures_util::task::AtomicWaker::new());
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
+        let task = tokio::spawn(writer_loop(
+            GateSink {
+                inner: MockSink {
+                    count: count.clone(),
+                    limit: usize::MAX,
+                    recorded: Some(recorded.clone()),
+                },
+                at: 2,
+                open: open.clone(),
+                wake: wake.clone(),
+            },
+            rx,
+            app.clone(),
+        ));
+        tx.send(WriterCommand::Bind(slow.clone())).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while count.load(Ordering::SeqCst) < 1 {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap();
+        app.lock()
+            .unwrap()
+            .queue_lcd_video(&slow, 30, 1, 1, vec![1; 25600])
+            .unwrap();
+        // Settings plus FrameStart have been sent. First chunk is blocked.
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while count.load(Ordering::SeqCst) < 2 {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap();
+        for n in 2..=100 {
+            app.lock()
+                .unwrap()
+                .queue_lcd_video(&slow, 30, n, 1, vec![n as u8; 25600])
+                .unwrap();
+        }
+        let fast_recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let fast_count = Arc::new(AtomicUsize::new(0));
+        let (fast_tx, fast_rx) = tokio::sync::mpsc::channel(32);
+        let fast_task = tokio::spawn(writer_loop(
+            MockSink {
+                count: fast_count.clone(),
+                limit: usize::MAX,
+                recorded: Some(fast_recorded.clone()),
+            },
+            fast_rx,
+            app.clone(),
+        ));
+        fast_tx
+            .send(WriterCommand::Bind(fast.clone()))
+            .await
+            .unwrap();
+        app.lock()
+            .unwrap()
+            .queue_lcd_video(&fast, 6, 1, 1, vec![7; 25600])
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while fast_count.load(Ordering::SeqCst) < 9 {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        tx.send(WriterCommand::Reply(WireMessage::InputAccepted {
+            input_context: None,
+            selected: None,
+            display_epoch: 1,
+        }))
+        .await
+        .unwrap();
+        open.store(true, Ordering::SeqCst);
+        wake.wake();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while count.load(Ordering::SeqCst) < 18 {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap();
+        tx.send(WriterCommand::Stop).await.unwrap();
+        fast_tx.send(WriterCommand::Stop).await.unwrap();
+        assert_eq!(task.await.unwrap(), "requested_stop");
+        assert_eq!(fast_task.await.unwrap(), "requested_stop");
+        let mut assembler = FrameAssembler::default();
+        let mut sequences = Vec::new();
+        let mut completed = 0;
+        let mut replies = 0;
+        for packet in recorded.lock().unwrap().iter() {
+            if let Message::Binary(bytes) = packet {
+                for message in Decoder::default().push(bytes).unwrap() {
+                    if let WireMessage::FrameStart {
+                        stream: Some(ref metadata),
+                        ..
+                    } = message
+                    {
+                        sequences.push(metadata.sequence);
+                    }
+                    if matches!(message, WireMessage::InputAccepted { .. }) {
+                        replies += 1;
+                    }
+                    if matches!(
+                        message,
+                        WireMessage::FrameStart { .. } | WireMessage::FrameChunk { .. }
+                    ) && assembler.accept(message).unwrap().is_some()
+                    {
+                        completed += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(sequences, vec![1, 100]);
+        assert_eq!(completed, 2);
+        assert_eq!(replies, 1);
     }
 
     #[tokio::test]

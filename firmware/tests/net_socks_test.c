@@ -134,6 +134,25 @@ int main(void){
     puts("TCP output trace: actual error and duration retained; queue acceptance != wire arrival PASS");
 #endif
     background_receive_ownership();
+    unsigned saved_room=send_room;send_room=0;
+    assert(!pm_net_send_optional(19,"{}") && pm_net_state()==PM_NET_READY);
+    send_room=saved_room;
+    // A single WS body can exceed APP_CAP while individual legacy messages fit.
+    uint8_t large[28000];char first[15001],second[11001],decoded[16000];uint8_t kind;
+    memset(first,'a',15000);first[15000]=0;memset(second,'b',11000);second[11000]=0;
+    size_t body=15006+11006,k=0;large[k++]=0x82;large[k++]=126;large[k++]=(uint8_t)(body>>8);large[k++]=(uint8_t)body;
+    const char *parts[]={first,second};size_t sizes[]={15000,11000};
+    for(unsigned part=0;part<2;part++){
+        uint32_t n=(uint32_t)sizes[part]+2;
+        for(unsigned b=0;b<4;b++)large[k++]=(uint8_t)(n>>(24-8*b));
+        large[k++]=1;large[k++]=13;memcpy(large+k,parts[part],sizes[part]);k+=sizes[part];
+    }
+    feed(large,3000);assert(!pm_net_take(&kind,decoded,sizeof decoded));
+    feed(large+3000,k-3000);
+    assert(pm_net_take(&kind,decoded,sizeof decoded)&&kind==13&&!strcmp(decoded,first));
+    assert(pm_net_take(&kind,decoded,sizeof decoded)&&kind==13&&!strcmp(decoded,second));
+    assert(!pm_net_take(&kind,decoded,sizeof decoded)&&pm_net_state()==PM_NET_READY);
+    puts("streaming WS decoder: concatenated >APP_CAP body and partial TCP preserve both legacy messages PASS");
     puts("production SOCKS5: split METHOD v5 / AUTH v1 / CONNECT v5 / WebSocket accepted");
     write_result=-1;assert(!pm_net_send(5,"{}") && stage==PM_NET_FAILED);write_result=0;
     stage=PM_NET_READY;send_room=0;assert(!pm_net_send(5,"{}") && stage==PM_NET_FAILED);send_room=sizeof sent;

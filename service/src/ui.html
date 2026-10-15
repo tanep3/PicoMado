@@ -54,6 +54,10 @@
     textarea{min-height:140px;resize:vertical;font:inherit;color:inherit;background:#111c26;border:1px solid #344654;border-radius:8px;padding:10px}
     progress{width:100%;accent-color:#68c7bc}
     .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}
+    .conversion-row{flex-wrap:nowrap;white-space:nowrap;overflow-x:auto}
+    .conversion-row>*{flex:0 0 auto}
+    .conversion-actions{display:inline-flex;align-items:center;gap:10px;flex-wrap:nowrap}
+    @media(max-width:700px){.conversion-row{flex-wrap:wrap;white-space:normal;overflow:visible;gap:8px 12px}.conversion-row>span{white-space:nowrap}.conversion-actions{gap:8px}.conversion-actions .button{min-width:64px;min-height:44px}}
     .caricature-panel{max-width:1100px}.caricature-panel .content-preview{width:min(100%,750px);height:auto;max-height:none;border:1px solid #415363}
     .caricature-settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}.prompt-text{margin:7px 0 0;color:#a9b8c8;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem}
     .advanced{margin-top:20px;padding-top:15px;border-top:1px solid #344250}.advanced>summary{cursor:pointer;color:#b7c7d5;font-size:.88rem;font-weight:700}.advanced>div{padding-top:10px}
@@ -193,27 +197,19 @@
     function renderPlugin(id){
       document.getElementById('page-title').textContent=labels[id]||id;
       document.getElementById('page-lead').textContent='このプラグインの共通設定を管理します。';
-      if(id==='caricature'){renderManaged(id);return}
+      if(['youtube','caricature'].includes(id)){renderManaged(id);return}
       const s=section('プラグイン設定','設定の変更は次のジョブから反映します。','plugin-card');
       const breadcrumb=el('div',undefined,'plugin-breadcrumb'),home=el('a','← ホームへ戻る');home.href='/';breadcrumb.append(home);s.prepend(breadcrumb);
       const form=el('form'),fields=el('div',undefined,'field-grid');let inputs=[];
-      if(id==='youtube'){
-        const wrap=el('label',undefined,'field');wrap.append(el('span','既定 FPS'));
-        const select=el('select');for(const fps of [6,12,18,24,30]){const option=el('option',`${fps} fps`);option.value=fps;select.append(option)}
-        select.value=current.plugins.youtube_default_fps;wrap.append(select);fields.append(wrap);inputs=[select];
-      }else{
-        const key=id==='weather'?'weather_fetch':'radar_fetch',value=current.plugins[key];
-        inputs=[field(fields,'timeout_seconds','取得 timeout (秒)',value.timeout_seconds),field(fields,'retries','追加再試行 (回)',value.retries)];
-      }
+      const key=id==='weather'?'weather_fetch':'radar_fetch',value=current.plugins[key];
+      inputs=[field(fields,'timeout_seconds','取得 timeout (秒)',value.timeout_seconds),field(fields,'retries','追加再試行 (回)',value.retries)];
       const save=button('共通設定を保存','primary');save.type='submit';form.append(fields,save);
       form.onsubmit=async event=>{event.preventDefault();if(!form.reportValidity())return;save.disabled=true;
         const value=structuredClone(current.plugins);
-        if(id==='youtube')value.youtube_default_fps=Number(inputs[0].value);
-        else{const key=id==='weather'?'weather_fetch':'radar_fetch';inputs.forEach(i=>value[key][i.dataset.key]=Number(i.value))}
+        inputs.forEach(i=>value[key][i.dataset.key]=Number(i.value));
         const ok=await run(()=>api('/api/plugin-settings','PUT',{expected_revision:current.plugins_revision,settings:value}),'共通設定を保存しました');if(!ok)save.disabled=false;
       };
       s.append(form);
-      if(id==='youtube')renderManaged(id);
       if(id==='weather'){
         const perDevice=section('端末別の地域と気温代表地点','地域は端末ごとに保存されます。共通設定には影響しません。','plugin-card');
         const list=el('div',undefined,'location-list');perDevice.append(list);let count=0;
@@ -233,7 +229,9 @@
         if(!count)list.append(el('p','地域設定に対応する端末はありません。','empty'));
       }
     }
-    const managedViews={},drafts={youtube:{whole:true},caricature:{}};let protectionView={revision:0,protected_ids:[]};
+    function initialVideoFps(){try{const value=localStorage.getItem('picomado.youtube.fps');if(['6','12','18','24','30'].includes(value))return value}catch{}return '12'}
+    function rememberVideoFps(value){drafts.youtube.fps=value;try{localStorage.setItem('picomado.youtube.fps',value)}catch{}}
+    const managedViews={},drafts={youtube:{whole:true,fps:initialVideoFps()},caricature:{}};let protectionView={revision:0,protected_ids:[]};
     function bytesText(n){return `${((Number(n)||0)/1048576).toFixed(1)} MiB`}
     async function loadManaged(){
       const id=location.pathname.split('/').pop();
@@ -261,38 +259,42 @@
       input.value=value??'';input.required=required;wrap.append(input);parent.append(wrap);return input;
     }
     function jobsPanel(id,parent){
-      const jobs=managedViews[id]?.jobs||[],list=el('div',undefined,'subsection');list.append(el('p','処理状況','section-label'));
+      const jobs=(managedViews[id]?.jobs||[]).filter(job=>['queued','running','cancelling','failed'].includes(job.status));if(!jobs.length)return;
+      const list=el('div',undefined,'subsection');list.append(el('p','処理状況','section-label'));
       const names={queued:'実行待ち',running:'処理中',cancelling:'取消中',succeeded:'完了',failed:'失敗',cancelled:'取消完了'};
-      if(!jobs.length)list.append(el('p','処理中のジョブはありません。','plugin-note'));
       for(const job of jobs){const row=el('div',undefined,'summary-item');row.append(el('strong',names[job.status]||job.status));
         if(job.progress?.message)row.append(el('span',job.progress.message));
         if(job.progress?.percent!=null){const progress=el('progress');progress.max=100;progress.value=job.progress.percent;row.append(progress)}
         if(job.failure?.message)row.append(el('p',job.failure.message,'error'));list.append(row)}
       parent.append(list);
     }
-    async function deleteVideo(video){
-      const id=video.metadata.id,dialog=el('dialog');dialog.append(el('h2','動画の履歴とキャッシュを削除'));
-      dialog.append(el('p',`「${video.metadata.title}」を削除します。再生中なら停止し、この動画の処理中ジョブは取消完了を待ちます。`));
-      const label=el('label',undefined,'field');label.append(el('span',`確認のため動画 ID「${id}」を入力`));
-      const input=el('input');label.append(input);dialog.append(label);
-      const actions=el('div',undefined,'actions'),cancel=button('キャンセル'),confirm=button('削除する','danger');confirm.disabled=true;
+    async function deleteVideo(video,target={kind:'video'}){
+      const id=video.metadata.id,kind=target.kind,key=target.key,dialog=el('dialog');dialog.className='dialog-body';dialog.setAttribute('aria-label','動画削除の確認');
+      const label=kind==='source'?(target.full?'原本（全編・低解像度）':`取得済み素材 · ${(target.coverage.start_ms/1000).toFixed(1)}–${(target.coverage.end_ms/1000).toFixed(1)} 秒`):kind==='conversion'?`${target.fps} fps · ${(target.clip.start_ms/1000).toFixed(1)}–${(target.clip.end_ms/1000).toFixed(1)} 秒 · 160×80 · ${key.slice(0,8)}`:'動画の履歴と全キャッシュ';
+      dialog.append(el('h2',`${label}を削除`));
+      dialog.append(el('p',`「${video.metadata.title}」の${label}を削除します。${kind==='source'?'変換済みの動画と再生は保持します。':kind==='conversion'?'この版の再生中は停止します。原本と他の変換版は保持します。':'この動画の再生は停止します。'}この動画の処理中ジョブがあれば取消完了を待ちます。`));
+      const actions=el('div',undefined,'dialog-actions'),cancel=button('キャンセル'),confirm=button('削除する','danger');let deleting=false;
       actions.append(cancel,confirm);dialog.append(actions);document.body.append(dialog);
-      cancel.onclick=()=>dialog.close();input.oninput=()=>confirm.disabled=input.value!==id;
+      cancel.onclick=()=>{if(!deleting)dialog.close()};
+      dialog.oncancel=event=>{if(deleting)event.preventDefault()};
       dialog.onclose=()=>dialog.remove();confirm.onclick=async()=>{
-        if(input.value!==id)return;confirm.disabled=true;
+        if(deleting||!dialog.open)return;
+        deleting=true;confirm.disabled=cancel.disabled=true;
         try{
           let state=await api('/api/plugins/youtube');managedViews.youtube=state;
           if(state.data.job?.video_id===id&&['Working','Cancelling'].includes(state.data.job.status)){
-            if(state.data.job.status==='Working'&&!await managedCommand('youtube',{kind:'cancel'},'処理を取り消しています')){confirm.disabled=false;return}
+            if(state.data.job.status==='Working'&&!await managedCommand('youtube',{kind:'cancel'},'処理を取り消しています'))return;
             for(;;){state=await api('/api/plugins/youtube');managedViews.youtube=state;
-              if(!['Working','Cancelling'].includes(state.data.job?.status))break;
+              if(state.data.job?.video_id!==id||!['Working','Cancelling'].includes(state.data.job?.status))break;
               await new Promise(resolve=>setTimeout(resolve,300));}
           }
           state=await api('/api/plugins/youtube');managedViews.youtube=state;
-          if(state.data.active?.conversion.video_id===id&&!await managedCommand('youtube',{kind:'stop'},'再生を停止しました')){confirm.disabled=false;return}
+          const active=state.data.active?.conversion;
+          if(active?.video_id===id&&(kind==='video'||(kind==='conversion'&&active.key===key))&&!await managedCommand('youtube',{kind:'stop'},'再生を停止しました'))return;
           managedViews.youtube=await api('/api/plugins/youtube');
-          if(await managedCommand('youtube',{kind:'delete',video_id:id,confirmation:id},'削除処理を受け付けました'))dialog.close();else confirm.disabled=false;
-        }catch(error){say(error.message,true);confirm.disabled=false}
+          if(await managedCommand('youtube',{kind:'delete',video_id:id,confirmation:id,...(kind==='video'?{}:{target:kind,key})},'削除処理を受け付けました'))dialog.close();
+        }catch(error){say(error.message,true)}
+        finally{deleting=false;confirm.disabled=cancel.disabled=false}
       };dialog.showModal();cancel.focus();
     }
     function renderManaged(id){
@@ -307,14 +309,13 @@
         const form=el('form',undefined,'subsection'),fields=el('div',undefined,'field-grid');
         const url=textField(fields,'YouTube URL','url',drafts.youtube.url,true);url.oninput=()=>drafts.youtube.url=url.value;
         const fpsWrap=el('label',undefined,'field');fpsWrap.append(el('span','この動画の FPS'));const fps=el('select');
-        const def=el('option',`既定値 (${current.plugins.youtube_default_fps} fps)`);def.value='';fps.append(def);
-        for(const value of [6,12,18,24,30]){const opt=el('option',`${value} fps`);opt.value=value;fps.append(opt)}fps.value=drafts.youtube.fps||'';fps.onchange=()=>drafts.youtube.fps=fps.value;fpsWrap.append(fps);fields.append(fpsWrap);
-        const wholeWrap=el('label',undefined,'toggle'),whole=el('input');whole.type='checkbox';whole.checked=drafts.youtube.whole;wholeWrap.append(whole,el('span','全体を取得'));fields.append(wholeWrap);
-        const start=textField(fields,'開始（秒 / 分:秒）','text',drafts.youtube.start),end=textField(fields,'終了（空欄なら最後まで）','text',drafts.youtube.end);
+        for(const value of [6,12,18,24,30]){const opt=el('option',`${value} fps`);opt.value=value;fps.append(opt)}fps.required=true;fps.value=drafts.youtube.fps;fps.onchange=()=>rememberVideoFps(fps.value);fpsWrap.append(fps);fields.append(fpsWrap);
+        const wholeWrap=el('label',undefined,'toggle'),whole=el('input');whole.type='checkbox';whole.checked=drafts.youtube.whole;wholeWrap.append(whole,el('span','全編を再生'));fields.append(wholeWrap);
+        const start=textField(fields,'再生開始（秒 / 分:秒）','text',drafts.youtube.start),end=textField(fields,'再生終了（元動画の絶対位置・空欄なら最後まで）','text',drafts.youtube.end);
         start.oninput=()=>drafts.youtube.start=start.value;end.oninput=()=>drafts.youtube.end=end.value;
         function range(){start.disabled=end.disabled=whole.checked;drafts.youtube.whole=whole.checked}whole.onchange=range;range();
         const prepare=button('取得・変換して再生','primary');prepare.type='submit';form.append(fields,prepare);
-        form.onsubmit=event=>{event.preventDefault();if(form.reportValidity())managedCommand(id,{kind:'prepare',url:url.value,fps:fps.value?Number(fps.value):null,start:whole.checked?null:start.value,end:whole.checked?null:end.value})};panel.append(form);
+        form.onsubmit=event=>{event.preventDefault();if(form.reportValidity()){rememberVideoFps(fps.value);managedCommand(id,{kind:'prepare',url:url.value,fps:Number(fps.value),start:whole.checked?null:start.value,end:whole.checked?null:end.value})}};panel.append(form);
         const controls=el('div',undefined,'actions');for(const [label,kind]of[['処理を取消す','cancel'],['再生を停止','stop'],['容量を再計測','scan_usage']]){const control=button(label);control.onclick=()=>managedCommand(id,{kind});controls.append(control)}panel.append(controls);
         const history=section('動画履歴','取得・変換中や失敗時も、現在の動画の再生を維持します。','plugin-card');
         if(!data.videos?.length)history.append(el('p','動画履歴はまだありません。','empty'));
@@ -322,8 +323,13 @@
           if(video.metadata.thumbnail){const image=el('img');image.src=`/api/plugins/youtube/assets/${encodeURIComponent(video.metadata.thumbnail)}`;image.alt='';image.className='content-preview';row.append(image)}
           row.append(el('h3',video.metadata.title),el('p',video.metadata.channel||video.metadata.uploader||''));
           const source=el('a','YouTubeで開く');source.href=video.metadata.url;source.rel='noopener noreferrer';source.target='_blank';row.append(source);
-          for(const conversion of Object.values(video.conversions||{})){const item=el('div',undefined,'actions');item.append(el('span',`${conversion.fps} fps · ${(conversion.clip.start_ms/1000).toFixed(1)}–${(conversion.clip.end_ms/1000).toFixed(1)} 秒 · ${bytesText(conversion.bytes)}`));const play=button('再生');play.onclick=()=>managedCommand(id,{kind:'play',key:conversion.key});item.append(play);row.append(item)}
-          const remove=button('この動画を削除','danger');remove.onclick=()=>deleteVideo(video);row.append(remove);history.append(row);
+          for(const sourceCache of Object.values(video.sources||{})){const item=el('div',undefined,'actions');
+            const label=sourceCache.full?'原本（全編・低解像度）':`取得済み素材 · ${(sourceCache.coverage.start_ms/1000).toFixed(1)}–${(sourceCache.coverage.end_ms/1000).toFixed(1)} 秒`;
+            item.append(el('span',`${label} · ${bytesText(sourceCache.bytes)} · ${sourceCache.key.slice(0,8)}`));const remove=button('この原本を削除','danger');remove.onclick=()=>deleteVideo(video,{kind:'source',...sourceCache});item.append(remove);row.append(item)}
+          for(const conversion of Object.values(video.conversions||{})){const item=el('div',undefined,'actions conversion-row');
+            for(const value of [`${conversion.fps} fps`,`${(conversion.clip.start_ms/1000).toFixed(1)}–${(conversion.clip.end_ms/1000).toFixed(1)} 秒`,'160×80',bytesText(conversion.bytes),conversion.key.slice(0,8)])item.append(el('span',value));
+            const play=button('再生');play.onclick=()=>managedCommand(id,{kind:'play',key:conversion.key});const remove=button('削除','danger');remove.onclick=()=>deleteVideo(video,{kind:'conversion',...conversion});const actions=el('span',undefined,'conversion-actions');actions.append(play,remove);item.append(actions);row.append(item)}
+          history.append(row);
         }
 
       }
@@ -373,11 +379,12 @@
       if(id)renderPlugin(id);else renderHome();
     }
     Promise.all([api('/api/state'),api('/api/plugins/weather/options')]).then(([state,options])=>{current=state;weatherOptions=options;loadManaged().then(render).catch(error=>say(error.message,true))}).catch(error=>say(error.message||'読み込みに失敗しました',true));
-    setInterval(async()=>{
-      if(busy||deleteDialog.open||document.querySelector('dialog[open]'))return;
-      const active=document.activeElement;if(['INPUT','TEXTAREA','SELECT'].includes(active?.tagName))return;
-      try{await loadManaged();current=await api('/api/state');render()}catch{}
-    },2000);
+    function managedRefreshBlocked(){return busy||deleteDialog.open||document.querySelector('dialog[open]')||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)}
+    async function refreshManaged(){
+      if(managedRefreshBlocked())return;
+      try{await loadManaged();current=await api('/api/state');if(!managedRefreshBlocked())render()}catch{}
+    }
+    setInterval(refreshManaged,2000);
   </script>
 </body>
 </html>

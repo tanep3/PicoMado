@@ -22,6 +22,8 @@ pub struct MediaTools {
     pub ffmpeg: PathBuf,
     pub ffprobe: PathBuf,
     pub node: Option<PathBuf>,
+    pub max_source_bytes: u64,
+    pub min_free_bytes: u64,
 }
 impl MediaTools {
     pub fn new(root: PathBuf) -> Self {
@@ -31,7 +33,71 @@ impl MediaTools {
             ffmpeg: "ffmpeg".into(),
             ffprobe: "ffprobe".into(),
             node: None,
+            max_source_bytes: limit_env("PICOMADO_YOUTUBE_MAX_SOURCE_BYTES", 512 * 1024 * 1024),
+            min_free_bytes: limit_env("PICOMADO_YOUTUBE_MIN_FREE_BYTES", 1024 * 1024 * 1024),
         }
+    }
+}
+
+// Invalid/zero overrides retain the conservative defaults; no existing media
+// is evicted. Limits apply to new work, not already published caches.
+fn limit_env(name: &str, default: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(default)
+}
+fn free_bytes(root: &Path) -> Result<u64, YoutubeError> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let path = CString::new(root.as_os_str().as_bytes()).map_err(|_| YoutubeError::InvalidFrame)?;
+    let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    if unsafe { libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) } != 0 {
+        return Err(storage(std::io::Error::last_os_error()));
+    }
+    let stat = unsafe { stat.assume_init() };
+    Ok(stat.f_bavail.saturating_mul(stat.f_frsize))
+}
+struct StorageGuard<'a> {
+    root: &'a Path,
+    max_source_bytes: Option<u64>,
+    min_free_bytes: u64,
+}
+impl StorageGuard<'_> {
+    fn check(&self) -> Result<(), YoutubeError> {
+        if let Some(limit) = self.max_source_bytes {
+            let mut bytes = 0u64;
+            for entry in fs::read_dir(self.root).map_err(storage)? {
+                let entry = entry.map_err(storage)?;
+                if entry.file_name().to_string_lossy().starts_with("source.") {
+                    let meta = entry.metadata().map_err(storage)?;
+                    if meta.is_file() {
+                        bytes = bytes.saturating_add(meta.len());
+                    }
+                }
+            }
+            if bytes > limit {
+                eprintln!(
+                    "youtube_capacity source_bytes={} max_source_bytes={}",
+                    bytes, limit
+                );
+                return Err(YoutubeError::Storage(
+                    "原本の取得容量が上限を超えました".into(),
+                ));
+            }
+        }
+        let available = free_bytes(self.root)?;
+        if available < self.min_free_bytes {
+            eprintln!(
+                "youtube_capacity free_bytes={} min_free_bytes={}",
+                available, self.min_free_bytes
+            );
+            return Err(YoutubeError::Storage(
+                "空き容量の確保のため処理を停止しました".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -125,29 +191,40 @@ fn video_dir(root: &Path, id: &str) -> Result<PathBuf, YoutubeError> {
     Ok(path)
 }
 fn source_path(root: &Path, source: &SourceCache) -> Result<PathBuf, YoutubeError> {
-    check_cache_ids(&source.video_id, &source.key)?;
-    if source.extension.len() > 8 || !source.extension.bytes().all(|b| b.is_ascii_alphanumeric()) {
+    source_leaf_path(root, &source.video_id, &source.key, &source.extension)
+}
+fn source_leaf_path(
+    root: &Path,
+    id: &str,
+    key: &str,
+    extension: &str,
+) -> Result<PathBuf, YoutubeError> {
+    check_cache_ids(id, key)?;
+    if extension.len() > 8 || !extension.bytes().all(|b| b.is_ascii_alphanumeric()) {
         return Err(YoutubeError::InvalidFrame);
     }
-    let parent = video_dir(root, &source.video_id)?.join("sources");
+    let parent = video_dir(root, id)?.join("sources");
     if parent
         .symlink_metadata()
         .is_ok_and(|m| m.file_type().is_symlink())
     {
         return Err(YoutubeError::InvalidFrame);
     }
-    Ok(parent.join(format!("{}.{}", source.key, source.extension)))
+    Ok(parent.join(format!("{key}.{extension}")))
 }
 fn converted_path(root: &Path, item: &ConversionCache) -> Result<PathBuf, YoutubeError> {
-    check_cache_ids(&item.video_id, &item.key)?;
-    let parent = video_dir(root, &item.video_id)?.join("converted");
+    converted_leaf_path(root, &item.video_id, &item.key)
+}
+fn converted_leaf_path(root: &Path, id: &str, key: &str) -> Result<PathBuf, YoutubeError> {
+    check_cache_ids(id, key)?;
+    let parent = video_dir(root, id)?.join("converted");
     if parent
         .symlink_metadata()
         .is_ok_and(|m| m.file_type().is_symlink())
     {
         return Err(YoutubeError::InvalidFrame);
     }
-    Ok(parent.join(&item.key))
+    Ok(parent.join(key))
 }
 fn frame_name(index: u64) -> String {
     format!("frame{:08}.jpg", index + 1)
@@ -260,14 +337,29 @@ fn tail_text(path: &Path, limit: u64) -> Result<String, YoutubeError> {
 }
 
 fn run_command(
-    mut command: Command,
+    command: Command,
     work: &Path,
     label: &str,
     timeout: Duration,
     cancel: &Cancellation,
     progress: Option<(&UnboundedSender<Progress>, &PrepareJob, u64)>,
 ) -> Result<Vec<u8>, YoutubeError> {
+    run_guarded_command(command, work, label, timeout, cancel, progress, None)
+}
+
+fn run_guarded_command(
+    mut command: Command,
+    work: &Path,
+    label: &str,
+    timeout: Duration,
+    cancel: &Cancellation,
+    progress: Option<(&UnboundedSender<Progress>, &PrepareJob, u64)>,
+    guard: Option<&StorageGuard<'_>>,
+) -> Result<Vec<u8>, YoutubeError> {
     cancel.check()?;
+    if let Some(guard) = guard {
+        guard.check()?;
+    }
     let out_path = work.join("stdout.log");
     let err_path = work.join("stderr.log");
     let stdout = File::create(&out_path).map_err(storage)?;
@@ -281,7 +373,8 @@ fn run_command(
     let began = Instant::now();
     let mut last_percent = 0;
     let status = loop {
-        if cancel.is_cancelled() || began.elapsed() > timeout {
+        let capacity_error = guard.and_then(|g| g.check().err());
+        if cancel.is_cancelled() || began.elapsed() > timeout || capacity_error.is_some() {
             process_group_signal(child.id(), libc::SIGTERM);
             for _ in 0..10 {
                 if child.try_wait().map_err(storage)?.is_some() {
@@ -293,6 +386,8 @@ fn run_command(
             let _ = child.wait();
             return if cancel.is_cancelled() {
                 Err(YoutubeError::Cancelled)
+            } else if let Some(error) = capacity_error {
+                Err(error)
             } else {
                 Err(YoutubeError::Tool(format!(
                     "{label} の処理期限を超えました"
@@ -327,7 +422,15 @@ fn run_command(
     cancel.check()?;
     let err = tail_text(&err_path, 8192)?;
     if !status.success() {
+        eprintln!(
+            "youtube_tool stage={} exit_code={}",
+            label,
+            status.code().unwrap_or(-1)
+        );
         return Err(tool_error(label, &err));
+    }
+    if let Some(guard) = guard {
+        guard.check()?;
     }
     let size = fs::metadata(&out_path).map_err(storage)?.len();
     if size > 8_000_000 {
@@ -533,6 +636,15 @@ fn probe(
     } else {
         &stream["duration"]
     };
+    fn numeric_ms(value: &Value) -> Option<i64> {
+        let value = value.as_f64().or_else(|| value.as_str()?.parse().ok())?;
+        (value.is_finite() && value.abs() < i64::MAX as f64 / 1000.0)
+            .then_some((value * 1000.0).round() as i64)
+    }
+    eprintln!("youtube_probe generation={} fps={} width={} height={} stream_start_ms={:?} stream_duration_ms={:?} format_start_ms={:?} format_duration_ms={:?} selected_duration_ms={}",
+        job.generation, job.fps.value(), width, height, numeric_ms(&stream["start_time"]),
+        numeric_ms(&stream["duration"]), numeric_ms(&info["format"]["start_time"]),
+        numeric_ms(&info["format"]["duration"]), duration_ms(duration)?);
     Ok(Probe {
         width,
         height,
@@ -548,48 +660,24 @@ fn download(
     metadata_duration: u64,
     progress: &UnboundedSender<Progress>,
 ) -> Result<SourceCache, YoutubeError> {
-    let full = clip.is_full(metadata_duration);
-    if !full {
-        let mut command = Command::new(&tools.ffmpeg);
-        command.args(["-hide_banner", "-protocols"]);
-        let protocols = run_command(
-            command,
-            work,
-            "ffmpeg",
-            Duration::from_secs(30),
-            &job.cancel,
-            None,
-        )?;
-        if !String::from_utf8_lossy(&protocols)
-            .lines()
-            .any(|s| s.trim() == "https")
-        {
-            return Err(YoutubeError::Tool(
-                "指定区間の取得に必要なffmpegのHTTPS機能がありません".into(),
-            ));
-        }
-    }
+    // Always acquire the complete low-resolution source. The user's clip is
+    // applied locally by convert; its end remains an absolute video position.
+    let full = true;
+    let origin = 0u64;
+    let covered_end = metadata_duration;
+    let guard = StorageGuard {
+        root: work,
+        max_source_bytes: Some(tools.max_source_bytes),
+        min_free_bytes: tools.min_free_bytes,
+    };
+    guard.check()?;
     send(
         progress,
         job,
         JobStage::Download,
         0,
-        if full {
-            "全編を取得しています"
-        } else {
-            "指定区間を取得しています"
-        },
+        "原本全体を低解像度で取得しています",
     );
-    let origin = if full {
-        0
-    } else {
-        clip.start_ms.saturating_sub(1000)
-    };
-    let covered_end = if full {
-        metadata_duration
-    } else {
-        clip.end_ms.saturating_add(1000).min(metadata_duration)
-    };
     let mut attempt = 0;
     loop {
         let mut command = yt_base(tools);
@@ -609,24 +697,20 @@ fn download(
         command
             .args(["-S", "res:240,vcodec:h264", "-o"])
             .arg(work.join("source.%(ext)s"));
-        if !full {
-            command
-                .arg("--download-sections")
-                .arg(format!("*{}-{}", format_ms(origin), format_ms(covered_end)))
-                .args([
-                    "--force-keyframes-at-cuts",
-                    "--downloader-args",
-                    "ffmpeg_o:-threads 2",
-                ]);
-        }
+        command
+            .arg("--max-filesize")
+            .arg(tools.max_source_bytes.to_string());
+        eprintln!("youtube_download generation={} fps={} attempt={} clip_start_ms={} clip_end_ms={} origin_ms={} expected_end_ms={} max_source_bytes={} min_free_bytes={}",
+            job.generation, job.fps.value(), attempt, clip.start_ms, clip.end_ms, origin, covered_end, tools.max_source_bytes, tools.min_free_bytes);
         command.arg(&job.url.canonical);
-        match run_command(
+        match run_guarded_command(
             command,
             work,
             "yt-dlp",
             Duration::from_secs(7200),
             &job.cancel,
             None,
+            Some(&guard),
         ) {
             Ok(_) => break,
             Err(YoutubeError::Tool(msg)) if attempt == 0 && msg.contains("HTTP 403") => {
@@ -685,21 +769,26 @@ fn download(
         return Err(YoutubeError::InvalidMetadata);
     }
     let actual_end = origin.saturating_add(measured.duration_ms);
-    let tolerance = if clip.end_ms == metadata_duration {
-        1000
-    } else {
-        100
-    };
-    if actual_end.saturating_add(tolerance) < clip.end_ms {
+    let tolerance = 1000u64;
+    eprintln!("youtube_coverage generation={} fps={} origin_ms={} material_duration_ms={} actual_end_ms={} expected_end_ms={} tolerance_ms={} shortfall_ms={}",
+        job.generation, job.fps.value(), origin, measured.duration_ms, actual_end, covered_end, tolerance,
+        covered_end.saturating_sub(actual_end.saturating_add(tolerance)));
+    if actual_end.saturating_add(tolerance) < covered_end {
         return Err(YoutubeError::Tool(
-            "取得区間が指定終了位置まで届いていません".into(),
+            "取得した原本が動画の終了位置まで届いていません".into(),
         ));
     }
+    guard.check()?;
     let key = source_key(&job.url.id, origin, covered_end, full);
     let folder = video_dir(&tools.root, &job.url.id)?.join("sources");
     fs::create_dir_all(&folder).map_err(storage)?;
     let target = folder.join(format!("{key}.{extension}"));
     job.cancel.check()?;
+    if target.symlink_metadata().is_ok() {
+        return Err(YoutubeError::Storage(
+            "同じ原本ファイルが既にあります。既存データは保持しました".into(),
+        ));
+    }
     fs::rename(source_file, &target).map_err(storage)?;
     let bytes = fs::metadata(target).map_err(storage)?.len();
     if bytes == 0 {
@@ -845,13 +934,19 @@ fn convert(
             "pipe:1",
         ])
         .arg(stage.join("frame%08d.jpg"));
-    run_command(
+    let guard = StorageGuard {
+        root: work,
+        max_source_bytes: None,
+        min_free_bytes: tools.min_free_bytes,
+    };
+    run_guarded_command(
         command,
         work,
         "ffmpeg",
         Duration::from_secs(7200),
         &job.cancel,
         Some((progress, job, expected)),
+        Some(&guard),
     )?;
     send(
         progress,
@@ -1054,7 +1149,13 @@ pub async fn run_cached_prepare(
 pub async fn run_delete(root: PathBuf, job: DeleteJob) -> Result<(), YoutubeError> {
     tokio::task::spawn_blocking(move || {
         let root = safe_root(&root)?;
-        let folder = video_dir(&root, &job.video_id)?;
+        let folder = match &job.target {
+            DeleteTarget::Video => video_dir(&root, &job.video_id)?,
+            DeleteTarget::Source { key, extension } => {
+                source_leaf_path(&root, &job.video_id, key, extension)?
+            }
+            DeleteTarget::Conversion { key } => converted_leaf_path(&root, &job.video_id, key)?,
+        };
         if !folder.exists() {
             return Ok(());
         }
@@ -1062,7 +1163,18 @@ pub async fn run_delete(root: PathBuf, job: DeleteJob) -> Result<(), YoutubeErro
         fs::create_dir_all(&trash_parent).map_err(storage)?;
         let trash = trash_parent.join(format!("delete-{}-{}", job.video_id, std::process::id()));
         fs::rename(&folder, &trash).map_err(storage)?;
-        if let Err(error) = fs::remove_dir_all(&trash) {
+        // rename never follows a source/variant symlink; remove only this leaf.
+        let result = if trash
+            .symlink_metadata()
+            .map_err(storage)?
+            .file_type()
+            .is_dir()
+        {
+            fs::remove_dir_all(&trash)
+        } else {
+            fs::remove_file(&trash)
+        };
+        if let Err(error) = result {
             let _ = fs::rename(&trash, &folder);
             return Err(storage(error));
         }
@@ -1211,4 +1323,62 @@ pub async fn scan_usage(root: PathBuf) -> Result<Usage, YoutubeError> {
 /// replaces the last known capacity with zero or a partial result.
 pub async fn scan_usage_or_last(root: PathBuf, previous: Usage) -> Usage {
     scan_usage(root).await.unwrap_or(previous)
+}
+
+#[cfg(test)]
+mod capacity_tests {
+    use super::*;
+    #[test]
+    fn limits_reject_only_new_work_and_keep_other_material() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("source.mp4"), b"12345").unwrap();
+        fs::write(temp.path().join("keep.mp4"), b"original").unwrap();
+        let guard = StorageGuard {
+            root: temp.path(),
+            max_source_bytes: Some(4),
+            min_free_bytes: 1,
+        };
+        assert!(matches!(guard.check(), Err(YoutubeError::Storage(_))));
+        assert_eq!(fs::read(temp.path().join("keep.mp4")).unwrap(), b"original");
+        let guard = StorageGuard {
+            root: temp.path(),
+            max_source_bytes: Some(5),
+            min_free_bytes: 1,
+        };
+        assert!(guard.check().is_ok());
+        let guard = StorageGuard {
+            root: temp.path(),
+            max_source_bytes: None,
+            min_free_bytes: u64::MAX,
+        };
+        assert!(matches!(guard.check(), Err(YoutubeError::Storage(_))));
+    }
+    #[test]
+    fn capacity_monitor_stops_local_child_before_publishing() {
+        let temp = tempfile::tempdir().unwrap();
+        let guard = StorageGuard {
+            root: temp.path(),
+            max_source_bytes: Some(1024),
+            min_free_bytes: 1,
+        };
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("head -c 2048 /dev/zero > source.mp4; sleep 20")
+            .current_dir(temp.path());
+        let began = Instant::now();
+        assert!(matches!(
+            run_guarded_command(
+                command,
+                temp.path(),
+                "fixture",
+                Duration::from_secs(5),
+                &Cancellation::default(),
+                None,
+                Some(&guard)
+            ),
+            Err(YoutubeError::Storage(_))
+        ));
+        assert!(began.elapsed() < Duration::from_secs(4));
+    }
 }

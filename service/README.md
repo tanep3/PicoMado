@@ -1,5 +1,7 @@
 # PicoMado service library
 
+2026-10-15 checkpoint: negotiated LCD push video, complete low-resolution YouTube sources, explicit per-conversion FPS, individual source/variant deletion, and responsive dark Web controls are implemented. See [media/UI verification](youtube-media-verification-2026-10-15.md) and [LCD firmware verification](../firmware/lcd-push-verification-2026-10-15.md). Earlier sections below retain their dated checkpoint limits; the new LCD functional-clock firmware candidate remains unflashed.
+
 The crate contains a pure transition engine, settings model, SQLite application boundary, Web/API/UI shell, versioned control and image protocol, WebSocket adapter, bounded queue model, cached JMA weather and rain-radar renderers, plugin fetch cycle, and replaceable effect runner. Importing the library never starts a listener or background worker. `picomado-server` reads its dedicated user-service configuration, while `temporary_lan_host` supports an explicit trial; both bind only `192.168.0.120:16153`. No PicoMado API key or Web login is added.
 
 ## Current behavior

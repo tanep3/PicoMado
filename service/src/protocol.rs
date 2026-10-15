@@ -16,6 +16,14 @@ pub const IMAGE_FRAGMENT_BYTES: usize = 4096;
 pub const LCD_FRAME_BYTES: usize = 160 * 80 * 2;
 pub const FRAME_BYTES_CAPABILITY: &str = "frame-bytes-v1";
 pub const FRAME_BYTES_KIND: u8 = 18;
+pub const LCD_PUSH_CAPABILITY: &str = "lcd-push-v1";
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StreamFrame {
+    pub fps: u32,
+    pub sequence: u64,
+    pub generation: u64,
+}
 
 fn valid_frame_contract(width: u16, height: u16, format: &str, byte_len: u32) -> bool {
     (width == 160 && height == 80 && format == "rgb565be" && byte_len as usize == LCD_FRAME_BYTES)
@@ -85,6 +93,9 @@ pub enum WireMessage {
         /// Optional for legacy frames; a new frame carries its logical mode.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mode: Option<String>,
+        /// Present only for capability-negotiated LCD push video.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stream: Option<StreamFrame>,
         width: u16,
         height: u16,
         format: String,
@@ -107,6 +118,15 @@ pub enum WireMessage {
     Down {
         incarnation: u64,
         session_epoch: u64,
+    },
+    StreamStatus {
+        token: FrameToken,
+        generation: u64,
+        received_frames: u64,
+        rendered_frames: u64,
+        dropped_frames: u64,
+        elapsed_ms: u64,
+        max_gap_us: u64,
     },
     PluginPosition {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -138,6 +158,7 @@ impl WireMessage {
             Self::Up { .. } => 15,
             Self::Down { .. } => 16,
             Self::PluginPosition { .. } => 17,
+            Self::StreamStatus { .. } => 19,
         }
     }
 }
@@ -403,7 +424,7 @@ impl Decoder {
                 self.buffer.clear();
                 return Err(ProtocolError::UnsupportedVersion);
             }
-            if !(1..=FRAME_BYTES_KIND).contains(&frame[1]) {
+            if !(1..=19).contains(&frame[1]) {
                 self.buffer.clear();
                 return Err(ProtocolError::UnknownKind);
             }
@@ -476,6 +497,7 @@ mod tests {
             };
             let pixels: Vec<u8> = (0..length).map(|i| (i % 256) as u8).collect();
             let start = WireMessage::FrameStart {
+                stream: None,
                 token: token.clone(),
                 mode: Some("normal".into()),
                 width,
@@ -613,6 +635,7 @@ mod tests {
         };
         let bytes = vec![0x5a; LCD_FRAME_BYTES];
         let start = WireMessage::FrameStart {
+            stream: None,
             mode: None,
             token: token.clone(),
             width: 160,
@@ -663,6 +686,7 @@ mod tests {
         }
         assert!(matches!(
             encode(&WireMessage::FrameStart {
+                stream: None,
                 mode: None,
                 token,
                 width: 1,
@@ -699,6 +723,7 @@ mod tests {
         let mut terminal = GatedFrameReceiver::new(screen);
         let pixels = vec![7; LCD_FRAME_BYTES];
         let start = WireMessage::FrameStart {
+            stream: None,
             mode: None,
             token: token.clone(),
             width: 160,
@@ -759,6 +784,7 @@ mod tests {
         };
         let pixels = vec![0x5a; LCD_FRAME_BYTES];
         let start = WireMessage::FrameStart {
+            stream: None,
             mode: None,
             token: token.clone(),
             width: 160,
@@ -816,6 +842,7 @@ mod tests {
         let mut fresh_receiver = GatedFrameReceiver::new(fresh_screen);
         fresh_receiver
             .accept(WireMessage::FrameStart {
+                stream: None,
                 mode: None,
                 token: fresh.clone(),
                 width: 160,

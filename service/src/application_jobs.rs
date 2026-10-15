@@ -384,7 +384,6 @@ impl App {
                 || device.owner != Owner::Remote
                 || !matches!(device.mode, Mode::Normal | Mode::Sub)
                 || (!device.capabilities.contains("lcd") && !device.capabilities.contains("eink"))
-                || !self.streaming_ready(device)
             {
                 continue;
             }
@@ -404,6 +403,10 @@ impl App {
             else {
                 continue;
             };
+            let push = self.supports_lcd_push(&ctx.token) && spec.fps <= crate::lcd_stream::MAX_FPS;
+            if !push && !self.streaming_ready(device) {
+                continue;
+            }
             let target = PlaybackTarget {
                 token: crate::display_token(id, device),
             };
@@ -481,6 +484,19 @@ impl App {
         offer: &PlaybackOffer,
         pixels: Vec<u8>,
     ) -> Result<usize, AppError> {
+        let sequence = self
+            .monotonic_millis()
+            .saturating_sub(offer.spec.started_mono_ms)
+            .saturating_mul(offer.spec.fps as u64)
+            / 1000;
+        self.accept_playback_pixels_at(offer, pixels, sequence)
+    }
+    pub fn accept_playback_pixels_at(
+        &mut self,
+        offer: &PlaybackOffer,
+        pixels: Vec<u8>,
+        sequence: u64,
+    ) -> Result<usize, AppError> {
         if pixels.len() != crate::protocol::LCD_FRAME_BYTES {
             return Err(AppError::Invalid("invalid playback frame"));
         }
@@ -490,7 +506,6 @@ impl App {
                 continue;
             };
             if !crate::frame_display_current(device, &target.token)
-                || !self.streaming_ready(device)
                 || device.selected.as_deref() != Some(&offer.plugin)
             {
                 continue;
@@ -509,7 +524,20 @@ impl App {
             {
                 continue;
             }
-            self.queue_streaming_frame(&ctx.token, &offer.plugin, pixels.clone())?;
+            if self.supports_lcd_push(&ctx.token) && offer.spec.fps <= crate::lcd_stream::MAX_FPS {
+                self.queue_lcd_video(
+                    &ctx.token,
+                    offer.spec.fps,
+                    sequence,
+                    offer.spec.generation,
+                    pixels.clone(),
+                )?;
+            } else {
+                if !self.streaming_ready(device) {
+                    continue;
+                }
+                self.queue_streaming_frame(&ctx.token, &offer.plugin, pixels.clone())?;
+            }
             delivered += 1;
         }
         Ok(delivered)
@@ -597,6 +625,76 @@ mod tests {
             Ok(PluginWorkPlan::default())
         }
     }
+    #[test]
+    fn negotiated_video_skips_ack_and_persistence_but_old_lcd_and_eink_keep_credit() {
+        for (cap, push) in [("lcd", true), ("lcd", false), ("eink", false)] {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("state.db");
+            let mut app = App::open(&path).unwrap();
+            app.contents
+                .insert("youtube".into(), Box::new(FakeContent::default()));
+            let mut caps = std::collections::BTreeSet::from([
+                cap.into(),
+                crate::protocol::FRAME_BYTES_CAPABILITY.into(),
+            ]);
+            if push {
+                caps.insert(crate::protocol::LCD_PUSH_CAPABILITY.into());
+            }
+            let session = app.hello("desk", caps, 1).unwrap();
+            assert_eq!(app.supports_lcd_push(&session), push);
+            let conn = Connection::open(&path).unwrap();
+            let body = || {
+                conn.query_row("SELECT body FROM app_state WHERE id=1", [], |row| {
+                    row.get::<_, String>(0)
+                })
+                .unwrap()
+            };
+            let before = body();
+            let effects = app.pending_effects().len();
+            let offer = app.playback_offers().remove(0);
+            assert_eq!(
+                app.accept_playback_pixels_at(&offer, vec![1; 25600], 1)
+                    .unwrap(),
+                1
+            );
+            if !push {
+                assert!(app.playback_offers().is_empty());
+                continue;
+            }
+            for sequence in 2..=100 {
+                let offer = app.playback_offers().remove(0);
+                assert_eq!(
+                    app.accept_playback_pixels_at(&offer, vec![2; 25600], sequence)
+                        .unwrap(),
+                    1
+                );
+            }
+            assert_eq!(body(), before, "video must not persist per frame");
+            assert_eq!(app.pending_effects().len(), effects);
+            let mut rx = app.subscribe_lcd_video(&session).unwrap();
+            let frame = rx.borrow_and_update().clone().unwrap();
+            assert_eq!(frame.sequence, 100);
+            assert!(!app.lcd_stream_status(&frame.token, 2));
+            let mut future = frame.token.clone();
+            future.frame_id += 1;
+            assert!(!app.lcd_stream_status(&future, 1));
+            assert!(app.lcd_stream_status(&frame.token, 1));
+            assert_eq!(body(), before, "status is observational");
+            app.terminal_event(Event::Next {
+                token: session.clone(),
+            })
+            .unwrap();
+            assert!(rx.borrow().is_none());
+            assert!(!app.lcd_video_is_current(&frame));
+            assert!(!app.lcd_stream_status(&frame.token, 1));
+            assert_eq!(
+                app.accept_playback_pixels_at(&offer, vec![2; 25600], 101)
+                    .unwrap(),
+                0
+            );
+        }
+    }
+
     #[test]
     fn durable_generation_rejects_replaced_results_and_preserves_revision() {
         let temp = tempfile::tempdir().unwrap();

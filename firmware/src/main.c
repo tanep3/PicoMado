@@ -12,6 +12,7 @@
 #include "core.h"
 #include "display.h"
 #include "net.h"
+#include "video.h"
 
 #if defined(PM_NORMAL_BUILD) && PM_NORMAL_BUILD
 // Release selection is a build property. Keep the private device config intact.
@@ -58,9 +59,15 @@ static pm_token last_rendered;
 static pm_token pending_render_token;
 static bool pending_render_ack;
 static pm_assembly assembly;
-static char json[20000];
+static char json[18000];
+_Static_assert(sizeof json>4u*PM_FRAGMENT_BYTES+1024u,"legacy JSON chunk capacity");
+#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
+static pm_video video;
+static bool receiving_stream;
+static uint64_t receiving_sequence,last_video_status_us;
+#endif
 // Outbound messages are serialized on the main loop, including the TCP copy.
-static char outbound_json[512];
+static char outbound_json[768];
 static uint8_t fragment[PM_FRAGMENT_BYTES];
 
 static uint32_t now_ms(void){return to_ms_since_boot(get_absolute_time());}
@@ -278,11 +285,47 @@ static bool send_pending_render_ack(void){
     if(!pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch))return true;
     return send_ack(9,"rendered_ack",t);
 }
+#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
+// Functional deadlines must advance even when diagnostic tracing is disabled.
+static uint64_t video_now_us(void){return time_us_64();}
+static bool video_mode(void){return video.active;}
+static void poll_video(void){
+    if(state!=ACTIVE || !video.active)return;
+    if(await_selection || pending_standby){video.ready=false;return;}
+    if(!pm_token_current(video.context,incarnation,session_epoch,display_epoch,owner_epoch)){
+        pm_video_reset(&video);return;
+    }
+    uint64_t now=video_now_us();uint8_t *pixels=pm_video_begin_draw(&video,now);
+    if(pixels){
+        pm_trace_frame_context(video.token.frame_id);
+        bool ok=pm_display_frame(pixels,PM_IMAGE_BYTES);pm_trace_frame_context(0);
+        if(!ok){pm_video_reset(&video);retry();return;}
+        pm_video_finish_draw(&video,video_now_us());have_display=true;last_rendered=video.last_rendered;
+    }
+    now=video_now_us();
+    if(!video.rendered || now-last_video_status_us<1000000u)return;
+    pm_token t=video.last_rendered;
+    int n=snprintf(outbound_json,sizeof outbound_json,
+        "{\"type\":\"stream_status\",\"data\":{\"token\":{\"device_id\":\"%s\","
+        "\"incarnation\":%llu,\"session_epoch\":%llu,\"display_epoch\":%llu,\"screen_owner_epoch\":%llu,\"frame_id\":%llu},"
+        "\"generation\":%llu,\"received_frames\":%llu,\"rendered_frames\":%llu,\"dropped_frames\":%llu,\"elapsed_ms\":%llu,\"max_gap_us\":%llu}}",
+        PM_DEVICE_ID,(unsigned long long)t.incarnation,(unsigned long long)t.session_epoch,
+        (unsigned long long)t.display_epoch,(unsigned long long)t.screen_owner_epoch,(unsigned long long)t.frame_id,
+        (unsigned long long)video.generation,(unsigned long long)video.received,(unsigned long long)video.rendered,
+        (unsigned long long)video.dropped,(unsigned long long)((now-video.first_us)/1000),(unsigned long long)video.max_gap_us);
+    if(n>0 && (size_t)n<sizeof outbound_json)pm_net_send_optional(19,outbound_json);
+    last_video_status_us=now;
+}
+#else
+static bool video_mode(void){return false;}
+static void poll_video(void){}
+#endif
 static bool send_hello(void){
     int n=snprintf(outbound_json,sizeof outbound_json,
         "{\"type\":\"hello\",\"data\":{\"device_id\":\"%s\","
-        "\"capabilities\":[\"%s\",\"buttons%u\",\"frame-bytes-v1\"],\"screen_owner_epoch\":%llu}}",
-        PM_DEVICE_ID,pm_display_capability(),PM_BUTTON_COUNT,(unsigned long long)owner_epoch);
+        "\"capabilities\":[\"%s\",\"buttons%u\",\"frame-bytes-v1\"%s],\"screen_owner_epoch\":%llu}}",
+        PM_DEVICE_ID,pm_display_capability(),PM_BUTTON_COUNT,
+        PM_DISPLAY_TYPE==PM_DISPLAY_LCD?",\"lcd-push-v1\"":"",(unsigned long long)owner_epoch);
     return n>0 && (size_t)n<sizeof outbound_json && pm_net_send(1,outbound_json);
 }
 static void heartbeat(void){
@@ -341,6 +384,11 @@ static void receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t
     if(!complete)return;
     pm_trace_event(PM_TRACE_CRC_OK,t.frame_id,0,PM_IMAGE_BYTES);
     if(!pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch))return;
+#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
+    if(receiving_stream){
+        pm_video_offer(&video,t,receiving_sequence,assembly.pixels,PM_IMAGE_BYTES);return;
+    }
+#endif
     if(!send_ack(8,"receipt_ack",t)){retry();return;}
     if(!have_display || !pm_token_equal(last_rendered,t)) {
 #if PM_DIAGNOSTIC_BOOT
@@ -456,6 +504,16 @@ static void process(uint8_t kind,const char *j){
            !string_equals(j,"format",PM_PIXEL_FORMAT_NAME) ||
            !pm_start(&assembly,t,w,h,PM_PIXEL_FORMAT_NAME,len,crc))pm_reset(&assembly);
         else {
+#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
+            receiving_stream=false;
+            if(strstr(j,"\"stream\"")){
+                uint64_t fps,sequence,generation;
+                if(!number(j,"fps",&fps) || fps<1 || fps>30 || !number(j,"sequence",&sequence)
+                    || !number(j,"generation",&generation)){pm_reset(&assembly);return;}
+                receiving_stream=true;receiving_sequence=sequence;
+                pm_video_prepare(&video,t,(uint32_t)fps,generation,video_now_us());
+            }else pm_video_reset(&video);
+#endif
             display_epoch=t.display_epoch;await_selection=false;
             // Web changes can leave SUB without a physical button response.
             // Only a validated current frame may replace the cached mode.
@@ -621,7 +679,8 @@ int main(void){
             uint8_t kind;
             // Bound cooperative receive work so image decoding cannot starve
             // network polling or physical input under continuous playback.
-            for(unsigned messages=0;messages<2 && pm_net_take(&kind,json,sizeof json);messages++){
+            unsigned budget=video_mode()?8u:2u;
+            for(unsigned messages=0;messages<budget && pm_net_take(&kind,json,sizeof json);messages++){
                 if(kind==18)process_frame_bytes((const uint8_t *)json,pm_net_payload_length());
                 else process(kind,json);
                 if(state==ACTIVE)pm_net_poll();
@@ -629,6 +688,7 @@ int main(void){
             // Welcome/settings handling may also advance timers and draw.
             now=now_ms();
             if(!send_pending_render_ack()){retry();continue;}
+            poll_video();
             if(state==ACTIVE && pending_standby && now-started_ms>2000)standby();
             if(state==ACTIVE && now-last_heartbeat_ms>=settings.heartbeat_s*1000u){
                 heartbeat();last_heartbeat_ms=now;
@@ -643,6 +703,6 @@ int main(void){
             }
         }
         pm_trace_slow(PM_TRACE_SLOW_LOOP,loop_started,(uint32_t)state);
-        pm_trace_flush();sleep_ms(5);
+        pm_trace_flush();sleep_ms(state==ACTIVE && video_mode()?1u:5u);
     }
 }

@@ -150,6 +150,10 @@ YouTube は視聴端末間の動画・位置を共有し、プラグインを離
 
 ### 既存 YouTube 処理と外部ツールの境界
 
+2026-10-15 実装では、新規素材は低解像度の全原本を取得し、ローカル ffmpeg で絶対位置の区間と必須FPSを適用する。原本と変換版の索引・ファイルを分離し、変換版は動画ID・開始・終了・FPS・変換版による条件キーで識別する。原本／単一変換版の削除は対象動画の排他とジョブ世代を通し、原本削除はJPEG再生に影響させず、現在再生中の変換版だけ停止を要する。容量監視は新規処理を停止し、既存素材を自動削除しない。詳細は[YouTube要件](requirements/plugins/youtube.md)と[検証記録](../service/youtube-media-verification-2026-10-15.md)を参照する。
+
+LCD動画は `lcd`・`frame-bytes-v1`・`lcd-push-v1` を申告する接続だけACK非依存の最新画像配信を選ぶ。送信中の画像は不変のまま完送し、待機画像は最新1枚へ置換する。共有再生時計、端末ごとのwriter、制御応答を分離し、動画フレームと1秒ごとの観測統計をSQLite/outboxへ書かない。静止画・旧LCD・E-inkは従来のACK契約を維持する。これは上記の初期検討値から進んだ実装で、実測値と留保は[LCD検証記録](../firmware/lcd-push-verification-2026-10-15.md)に記す。
+
 既存機の [Web プレーヤー資料](../../PicoW_Youtube_Player/docs/WEB_PLAYER.md)、`server/media.py`、`server/library.py`、`server/web.py`、`server/playback.py` を読み取りで確認した。YouTube と風刺画の[機能抽出・互換チェック](legacy-compatibility-checklist.md)を参照する。既存 Python は `yt-dlp` と `ffmpeg`／`ffprobe` を子プロセスとして呼び、SQLite とファイルキャッシュを使う。既存資料には全編／範囲指定、FPS 選択、履歴・容量・手動削除、取得中の現再生維持、完成データ公開、HTTP 403 時の限定再試行などの工夫が記録されている。この読み取りだけで全機能互換や新 Rust プラグインでの成立を検証済みとはしない。U-01・U-09 で元ソースと実機を照合する。
 
 | 道具 | 設計候補と根拠 | 再作成する境界 |

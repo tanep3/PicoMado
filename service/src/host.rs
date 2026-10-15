@@ -33,6 +33,28 @@ where
     let (stop_tx, stop_rx) = watch::channel(false);
     let web_app = app.clone();
     let server = async move {
+        use axum::serve::ListenerExt;
+        use std::os::fd::AsRawFd;
+        let listener = listener.tap_io(|stream| {
+            let size = crate::lcd_stream::SOCKET_SEND_BUFFER_BYTES as libc::c_int;
+            // SO_SNDBUF is doubled by Linux (metadata included), so this
+            // bounds kernel storage to 64KiB rather than auto-growing it.
+            let result = unsafe {
+                libc::setsockopt(
+                    stream.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    libc::SO_SNDBUF,
+                    (&size as *const libc::c_int).cast(),
+                    std::mem::size_of_val(&size) as libc::socklen_t,
+                )
+            };
+            if result != 0 {
+                eprintln!("picomado socket_send_limit_failed");
+                unsafe {
+                    libc::shutdown(stream.as_raw_fd(), libc::SHUT_RDWR);
+                }
+            }
+        });
         axum::serve(listener, web::router(web_app))
             .with_graceful_shutdown(wait_shutdown(stop_rx))
             .await

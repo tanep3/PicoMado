@@ -43,6 +43,8 @@ enum YoutubeWork {
     },
     Delete {
         video_id: String,
+        #[serde(default)]
+        target: yt::DeleteTarget,
     },
     ValidateSelected {
         conversion: Option<yt::ConversionCache>,
@@ -176,23 +178,19 @@ impl ContentPlugin for YoutubeManaged {
         let now = ctx.now_unix.saturating_mul(1000);
         match kind {
             "prepare" => {
-                self.inner
-                    .set_default_fps(ctx.settings.youtube_default_fps)
-                    .map_err(input_error)?;
                 let url = command["url"]
                     .as_str()
                     .ok_or(ContentError::InvalidSource)?
                     .into();
-                let fps = command
-                    .get("fps")
-                    .filter(|v| !v.is_null())
-                    .map(|v| {
-                        v.as_u64()
-                            .filter(|n| *n <= u8::MAX as u64)
-                            .map(|n| n as u8)
-                            .ok_or(ContentError::InvalidSource)
-                    })
-                    .transpose()?;
+                // Every new conversion request must carry its chosen FPS.
+                // Saved settings remain readable for legacy snapshots; missing
+                // or null values from old clients fail before scheduling work.
+                let fps = Some(
+                    command["fps"]
+                        .as_u64()
+                        .filter(|n| *n <= u8::MAX as u64)
+                        .ok_or(ContentError::InvalidSource)? as u8,
+                );
                 let start = command
                     .get("start")
                     .and_then(Value::as_str)
@@ -257,14 +255,45 @@ impl ContentPlugin for YoutubeManaged {
                 let confirmation = command["confirmation"]
                     .as_str()
                     .ok_or(ContentError::InvalidSource)?;
+                let scope = command
+                    .get("target")
+                    .map(|v| v.as_str().ok_or(ContentError::InvalidSource))
+                    .transpose()?;
+                if scope.is_none() && command.get("key").is_some() {
+                    return Err(ContentError::InvalidSource);
+                }
+                let target = match scope.unwrap_or("video") {
+                    "video" => yt::DeleteTarget::Video,
+                    "source" => {
+                        let key = command["key"].as_str().ok_or(ContentError::InvalidSource)?;
+                        let source = self
+                            .inner
+                            .videos
+                            .get(id)
+                            .and_then(|v| v.sources.get(key))
+                            .ok_or(ContentError::InvalidSource)?;
+                        yt::DeleteTarget::Source {
+                            key: key.into(),
+                            extension: source.extension.clone(),
+                        }
+                    }
+                    "conversion" => yt::DeleteTarget::Conversion {
+                        key: command["key"]
+                            .as_str()
+                            .ok_or(ContentError::InvalidSource)?
+                            .into(),
+                    },
+                    _ => return Err(ContentError::InvalidSource),
+                };
                 let job = self
                     .inner
-                    .request_delete(id, confirmation)
+                    .request_delete_target(id, confirmation, target)
                     .map_err(input_error)?;
                 plan.jobs.push(request(
                     &format!("delete_{}", job.video_id),
                     YoutubeWork::Delete {
                         video_id: job.video_id,
+                        target: job.target,
                     },
                 )?);
             }
@@ -354,15 +383,23 @@ impl ContentPlugin for YoutubeManaged {
                     plan.refresh = RefreshTargets::Selected;
                 }
             }
-            YoutubeWork::Delete { video_id } => {
+            YoutubeWork::Delete { video_id, target } => {
                 let result = match outcome {
                     JobOutcome::Succeeded(_) => Ok(()),
                     JobOutcome::Cancelled => Err(yt::YoutubeError::Cancelled),
                     JobOutcome::Failed(f) => Err(yt::YoutubeError::Storage(f.message.clone())),
                 };
-                self.inner
-                    .complete_delete(yt::DeleteJob { video_id }, result)
-                    .map_err(input_error)?;
+                // The common job already records failure/cancellation. Persist
+                // release of the deletion lock even when the filesystem effect
+                // failed, so a deliberate retry remains possible.
+                if matches!(
+                    self.inner
+                        .complete_delete(yt::DeleteJob { video_id, target }, result),
+                    Err(yt::YoutubeError::Stale)
+                ) {
+                    return Err(ContentError::Stale);
+                }
+                self.usage = None;
             }
             YoutubeWork::ValidateSelected { .. } => {
                 self.validated = true;
@@ -506,8 +543,10 @@ impl PluginJobExecutor for YoutubeExecutor {
                         Err(error) => fail(error),
                     }
                 }
-                YoutubeWork::Delete { video_id } => {
-                    match yt::run_delete(context.paths.cache, yt::DeleteJob { video_id }).await {
+                YoutubeWork::Delete { video_id, target } => {
+                    match yt::run_delete(context.paths.cache, yt::DeleteJob { video_id, target })
+                        .await
+                    {
                         Ok(()) => JobOutcome::Succeeded(Value::Null),
                         Err(e) => fail(e),
                     }
@@ -616,7 +655,10 @@ mod tests {
             devices: vec![],
         };
         let request = content
-            .plan_command(&ctx, &json!({"kind":"prepare","url":metadata().url}))
+            .plan_command(
+                &ctx,
+                &json!({"kind":"prepare","url":metadata().url,"fps":6}),
+            )
             .unwrap()
             .jobs
             .remove(0);
@@ -652,6 +694,96 @@ mod tests {
             yt::JobStatus::Cancelled
         );
     }
+    #[test]
+    fn conversion_requires_explicit_valid_fps_and_keeps_it() {
+        let ctx = CommandContext {
+            now_unix: 1,
+            now_mono_ms: 1,
+            today_jst: "2026-10-15".into(),
+            settings: Default::default(),
+            devices: vec![],
+        };
+        for fps in [Value::Null, json!(0), json!(7), json!(256), json!("12")] {
+            let mut content = YoutubeManaged::default();
+            assert!(content
+                .plan_command(
+                    &ctx,
+                    &json!({"kind":"prepare","url":metadata().url,"fps":fps})
+                )
+                .is_err());
+            assert!(content.inner.job.is_none());
+        }
+        let mut content = YoutubeManaged::default();
+        assert!(content
+            .plan_command(&ctx, &json!({"kind":"prepare","url":metadata().url}))
+            .is_err());
+        let plan = content
+            .plan_command(
+                &ctx,
+                &json!({"kind":"prepare","url":metadata().url,"fps":12}),
+            )
+            .unwrap();
+        assert_eq!(plan.jobs[0].payload["fps"], 12);
+        let old: YoutubeWork =
+            serde_json::from_value(json!({"kind":"delete","video_id":"abcdefghijk"})).unwrap();
+        assert!(matches!(
+            old,
+            YoutubeWork::Delete {
+                target: yt::DeleteTarget::Video,
+                ..
+            }
+        ));
+    }
+    #[test]
+    fn failed_scoped_delete_releases_persisted_lock_for_retry() {
+        let ctx = CommandContext {
+            now_unix: 1,
+            now_mono_ms: 1,
+            today_jst: "2026-10-15".into(),
+            settings: Default::default(),
+            devices: vec![],
+        };
+        let mut content = YoutubeManaged::default();
+        let c = conversion();
+        content.inner.videos.insert(
+            c.video_id.clone(),
+            yt::VideoRecord {
+                metadata: metadata(),
+                sources: Default::default(),
+                conversions: [(c.key.clone(), c.clone())].into(),
+            },
+        );
+        for target in [Value::Null, json!({}), json!("unknown")] {
+            assert!(content.plan_command(&ctx,&json!({"kind":"delete","video_id":c.video_id,"confirmation":c.video_id,"target":target,"key":c.key})).is_err());
+            assert!(content.inner.deleting.is_empty());
+        }
+        assert!(content.plan_command(&ctx,&json!({"kind":"delete","video_id":c.video_id,"confirmation":c.video_id,"key":c.key})).is_err());
+        let command = json!({"kind":"delete","video_id":c.video_id,"confirmation":c.video_id,"target":"conversion","key":c.key});
+        let request = content.plan_command(&ctx, &command).unwrap().jobs.remove(0);
+        assert_eq!(request.payload["target"]["key"], c.key);
+        let job = PluginJob {
+            token: JobToken {
+                plugin: "youtube".into(),
+                slot: request.slot,
+                generation: 1,
+            },
+            payload: request.payload,
+            timeout_seconds: 30,
+            created_unix: 1,
+        };
+        content
+            .work_completed(
+                &ctx,
+                &job,
+                &JobOutcome::Failed(JobFailure::new("fixture", "test failure")),
+            )
+            .unwrap();
+        let mut restored = YoutubeManaged::default();
+        restored.load_state(content.save_state()).unwrap();
+        assert!(restored.inner.deleting.is_empty());
+        assert_eq!(restored.inner.videos[&c.video_id].conversions.len(), 1);
+        restored.plan_command(&ctx, &command).unwrap();
+    }
     #[tokio::test]
     async fn managed_api_preserves_revision_and_server_deletion_guard() {
         use axum::{
@@ -676,7 +808,7 @@ mod tests {
         let response = router
             .clone()
             .oneshot(send(
-                json!({"expected_revision":1,"command":{"kind":"prepare","url":metadata().url}}),
+                json!({"expected_revision":1,"command":{"kind":"prepare","url":metadata().url,"fps":6}}),
             ))
             .await
             .unwrap();

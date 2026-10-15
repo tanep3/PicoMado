@@ -45,6 +45,7 @@ bool pm_net_send(uint8_t kind,const char *j){
     if(kind==1){assert(strstr(j,"\"eink\""));assert(strstr(j,PM_BUTTON_COUNT==2?"buttons2":"buttons0"));}
     return true;
 }
+bool pm_net_send_optional(uint8_t kind,const char *j){return pm_net_send(kind,j);}
 size_t pm_net_payload_length(void){return 0;}
 bool pm_net_take(uint8_t *k,char *j,size_t n){(void)k;(void)j;(void)n;return false;}
 void cyw43_arch_enable_sta_mode(void){}

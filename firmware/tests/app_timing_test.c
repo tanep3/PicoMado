@@ -22,16 +22,17 @@ static unsigned joins,erases,server_begins,hello_count,heartbeat_count,loops;
 static bool sta_on,server_ready,welcome_available;
 static bool usb_connected;
 static bool drop_during_retry;
+uint64_t time_us_64(void){return (uint64_t)clock_ms*1000;}
 #if PM_TRACE_ENABLE
 static bool trace_output;static char trace_text[32768];static size_t trace_used;
-uint64_t time_us_64(void){return (uint64_t)clock_ms*1000;}
 size_t pm_trace_usb_write(const char *p,size_t n){
     if(!trace_output)return 0;
     assert(trace_used+n<sizeof trace_text);
     memcpy(trace_text+trace_used,p,n);trace_used+=n;trace_text[trace_used]=0;return n;
 }
 #endif
-static unsigned wake_trial,wake_loops,frame_receipts,frame_renders;
+static unsigned wake_trial,wake_loops,frame_receipts,frame_renders,stream_status_count;
+static char stream_status_last[768];
 static bool checking_frame;
 static const unsigned ignored_wake_buttons[]={0,1,3};
 static const char *last_lcd_one,*last_lcd_two;
@@ -99,8 +100,10 @@ bool pm_net_send(uint8_t kind,const char *j){
     if(kind==5)heartbeat_count++;
     if(kind==8){frame_receipts++;clock_ms++;}
     if(kind==9){frame_renders++;clock_ms++;}
+    if(kind==19){stream_status_count++;snprintf(stream_status_last,sizeof stream_status_last,"%s",j);}
     return true;
 }
+bool pm_net_send_optional(uint8_t kind,const char *j){return pm_net_send(kind,j);}
 size_t pm_net_payload_length(void){return 0;}
 bool pm_net_take(uint8_t *kind,char *j,size_t n){
     if(!welcome_available)return false;

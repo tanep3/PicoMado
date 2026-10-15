@@ -848,17 +848,49 @@ impl YoutubeContent {
         video_id: &str,
         confirmation: &str,
     ) -> Result<DeleteJob, YoutubeError> {
+        self.request_delete_target(video_id, confirmation, DeleteTarget::Video)
+    }
+    pub fn request_delete_target(
+        &mut self,
+        video_id: &str,
+        confirmation: &str,
+        target: DeleteTarget,
+    ) -> Result<DeleteJob, YoutubeError> {
         if !valid_id(video_id) || confirmation != video_id {
             return Err(YoutubeError::ConfirmationRequired);
         }
-        if !self.videos.contains_key(video_id) {
-            return Err(YoutubeError::MissingVideo);
+        let record = self
+            .videos
+            .get(video_id)
+            .ok_or(YoutubeError::MissingVideo)?;
+        match &target {
+            DeleteTarget::Video => {}
+            DeleteTarget::Source { key, extension } => {
+                check_cache_ids(video_id, key)?;
+                if !record
+                    .sources
+                    .get(key)
+                    .is_some_and(|s| &s.extension == extension)
+                {
+                    return Err(YoutubeError::MissingCache);
+                }
+            }
+            DeleteTarget::Conversion { key } => {
+                check_cache_ids(video_id, key)?;
+                if !record.conversions.contains_key(key) {
+                    return Err(YoutubeError::MissingCache);
+                }
+            }
         }
         if self.deleting.contains(video_id)
-            || self
-                .playback
-                .as_ref()
-                .is_some_and(|p| p.conversion.video_id == video_id)
+            || self.playback.as_ref().is_some_and(|p| {
+                p.conversion.video_id == video_id
+                    && match &target {
+                        DeleteTarget::Video => true,
+                        DeleteTarget::Conversion { key } => &p.conversion.key == key,
+                        DeleteTarget::Source { .. } => false,
+                    }
+            })
             || self.job.as_ref().is_some_and(|j| {
                 j.video_id == video_id
                     && matches!(j.status, JobStatus::Working | JobStatus::Cancelling)
@@ -869,6 +901,7 @@ impl YoutubeContent {
         self.deleting.insert(video_id.to_owned());
         Ok(DeleteJob {
             video_id: video_id.to_owned(),
+            target,
         })
     }
     pub fn complete_delete(
@@ -880,14 +913,43 @@ impl YoutubeContent {
             return Err(YoutubeError::Stale);
         }
         result?;
-        self.videos.remove(&job.video_id);
+        match job.target {
+            DeleteTarget::Video => {
+                self.videos.remove(&job.video_id);
+            }
+            DeleteTarget::Source { key, .. } => {
+                if let Some(record) = self.videos.get_mut(&job.video_id) {
+                    record.sources.remove(&key);
+                }
+            }
+            DeleteTarget::Conversion { key } => {
+                if let Some(record) = self.videos.get_mut(&job.video_id) {
+                    record.conversions.remove(&key);
+                }
+            }
+        }
         Ok(())
     }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DeleteTarget {
+    #[default]
+    Video,
+    Source {
+        key: String,
+        extension: String,
+    },
+    Conversion {
+        key: String,
+    },
 }
 
 #[derive(Clone, Debug)]
 pub struct DeleteJob {
     pub video_id: String,
+    pub target: DeleteTarget,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

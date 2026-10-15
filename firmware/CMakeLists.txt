@@ -84,7 +84,7 @@ if(PM_PREPARE_UNBOUND_PANEL)
   file(WRITE "${PM_DEVICE_DIR}/config.h" "${PM_PANEL_CONFIG}")
 endif()
 
-add_library(picomado_core STATIC src/core.c)
+add_library(picomado_core STATIC src/core.c src/video.c)
 target_include_directories(picomado_core PUBLIC ${PM_DEVICE_DIR} ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_definitions(picomado_core PUBLIC ${PM_SAMPLE_DEFINE})
 

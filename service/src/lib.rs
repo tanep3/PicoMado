@@ -7,6 +7,7 @@ mod display_badge;
 pub mod eink;
 pub mod fetch;
 pub mod host;
+pub mod lcd_stream;
 mod lcd_text;
 pub mod playback;
 mod plugin_adapters;

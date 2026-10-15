@@ -614,3 +614,327 @@ async fn metadata_history_survives_failed_download() {
     assert_eq!(content.job.as_ref().unwrap().status, JobStatus::Failed);
     assert_eq!(content.history()[0].metadata.title, "Known title");
 }
+
+#[tokio::test]
+async fn complete_source_local_absolute_cuts_and_fps_reuse() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+    let temp = tempfile::tempdir().unwrap();
+    let fixture = temp.path().join("original.mp4");
+    // A small, complete 822-second original; no external request is made.
+    assert!(Command::new("ffmpeg")
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:s=160x80:r=1:d=822",
+            "-an",
+            "-c:v",
+            "mpeg4",
+            "-y"
+        ])
+        .arg(&fixture)
+        .status()
+        .unwrap()
+        .success());
+    let stub = temp.path().join("local-download");
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, shutil, sys
+a=sys.argv[1:]
+assert '--download-sections' not in a
+if '--dump-single-json' in a:
+ print(json.dumps({{'id':'abcdefghijk','duration':822,'title':'Local full source'}}))
+else:
+ assert '--max-filesize' in a
+ shutil.copyfile({:?}, a[a.index('-o')+1].replace('%(ext)s','mp4'))
+"#,
+        fixture.to_str().unwrap()
+    );
+    std::fs::write(&stub, script).unwrap();
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut tools = MediaTools::new(temp.path().join("cache"));
+    tools.yt_dlp = stub;
+    let mut content = YoutubeContent::default();
+    let mut input = request("abcdefghijk");
+    input.fps = Some(12);
+    input.start = Some("00:00:36".into());
+    let first = content.request_prepare(input, 1).unwrap();
+    let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+    let ready = run_prepare(tools.clone(), first.clone(), tx, 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        ready.conversion.clip,
+        Clip {
+            start_ms: 36000,
+            end_ms: 822000
+        }
+    );
+    assert_eq!(ready.conversion.frames, (822 - 36) * 12);
+    let original = ready.source.as_ref().unwrap().clone();
+    assert!(original.full);
+    assert_eq!(original.origin_ms, 0);
+    assert_eq!(
+        original.coverage,
+        Clip {
+            start_ms: 0,
+            end_ms: 822000
+        }
+    );
+    assert!(content.complete_prepare(first.generation, Ok(ready), 1, 1));
+    // Disable the downloader: another range and another FPS must reuse source.
+    tools.yt_dlp = temp.path().join("must-not-download");
+    let mut input = request("abcdefghijk");
+    input.fps = Some(12);
+    input.start = Some("00:00:12".into());
+    input.end = Some("00:03:04".into());
+    let second = content.request_prepare(input, 2).unwrap();
+    let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+    let ready = run_cached_prepare(tools.clone(), second.clone(), tx, 2)
+        .await
+        .unwrap();
+    assert_eq!(
+        ready.conversion.clip,
+        Clip {
+            start_ms: 12000,
+            end_ms: 184000
+        }
+    );
+    assert_eq!(ready.conversion.frames, 172 * 12);
+    assert_eq!(ready.source.as_ref().unwrap().key, original.key);
+    assert!(content.complete_prepare(second.generation, Ok(ready), 2, 2));
+    let third = content.request_fps(18, 3).unwrap();
+    let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+    let ready = run_cached_prepare(tools.clone(), third, tx, 3)
+        .await
+        .unwrap();
+    assert_eq!(ready.conversion.frames, 172 * 18);
+    assert_eq!(ready.source.unwrap().key, original.key);
+    assert_eq!(
+        std::fs::read_dir(tools.root.join("work")).unwrap().count(),
+        0
+    );
+    assert_eq!(
+        std::fs::read_dir(tools.root.join("videos/abcdefghijk/sources"))
+            .unwrap()
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn individual_deletion_preserves_original_other_fps_and_same_fps_ranges() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("cache");
+    let id = "abcdefghijk";
+    let mut content = YoutubeContent::default();
+    let mut record = VideoRecord {
+        metadata: sample_meta(id),
+        sources: BTreeMap::new(),
+        conversions: BTreeMap::new(),
+    };
+    for (start, full) in [(0, true), (100, false)] {
+        let key = source_key(id, start, 2000, full);
+        record.sources.insert(
+            key.clone(),
+            SourceCache {
+                key,
+                video_id: id.into(),
+                coverage: Clip {
+                    start_ms: start,
+                    end_ms: 2000,
+                },
+                full,
+                extension: "mp4".into(),
+                bytes: 3,
+                origin_ms: start,
+                duration_ms: 2000 - start,
+            },
+        );
+    }
+    for (fps, start) in [(12, 0), (12, 100), (18, 0)] {
+        let clip = Clip {
+            start_ms: start,
+            end_ms: 2000,
+        };
+        let fps = Fps::new(fps).unwrap();
+        let key = conversion_key(id, clip, fps);
+        record.conversions.insert(
+            key.clone(),
+            ConversionCache {
+                key,
+                video_id: id.into(),
+                clip,
+                fps,
+                frames: 1,
+                bytes: 4,
+                created_unix_ms: 1,
+            },
+        );
+    }
+    let base = root.join("videos").join(id);
+    std::fs::create_dir_all(base.join("sources")).unwrap();
+    for src in record.sources.values() {
+        std::fs::write(
+            base.join("sources").join(format!("{}.mp4", src.key)),
+            b"src",
+        )
+        .unwrap();
+    }
+    for c in record.conversions.values() {
+        let dir = base.join("converted").join(&c.key);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("frame00000001.jpg"), b"jpeg").unwrap();
+    }
+    std::fs::write(base.join("thumbnail.jpg"), b"thumb").unwrap();
+    let original = record.sources.values().find(|s| s.full).unwrap().clone();
+    let selected = record
+        .conversions
+        .values()
+        .find(|c| c.fps.value() == 12 && c.clip.start_ms == 0)
+        .unwrap()
+        .clone();
+    content.videos.insert(id.into(), record.clone());
+    let delete = content
+        .request_delete_target(
+            id,
+            id,
+            DeleteTarget::Source {
+                key: original.key.clone(),
+                extension: original.extension.clone(),
+            },
+        )
+        .unwrap();
+    let effect = run_delete(root.clone(), delete.clone()).await;
+    content.complete_delete(delete, effect).unwrap();
+    assert!(!base
+        .join("sources")
+        .join(format!("{}.mp4", original.key))
+        .exists());
+    assert_eq!(content.videos[id].conversions.len(), 3);
+    assert_eq!(content.videos[id].sources.len(), 1);
+    for c in record.conversions.values() {
+        assert!(base.join("converted").join(&c.key).exists());
+    }
+    let delete = content
+        .request_delete_target(
+            id,
+            id,
+            DeleteTarget::Conversion {
+                key: selected.key.clone(),
+            },
+        )
+        .unwrap();
+    let effect = run_delete(root.clone(), delete.clone()).await;
+    content.complete_delete(delete, effect).unwrap();
+    assert!(!base.join("converted").join(&selected.key).exists());
+    assert_eq!(content.videos[id].conversions.len(), 2);
+    for c in content.videos[id].conversions.values() {
+        assert!(base.join("converted").join(&c.key).exists());
+    }
+    for src in content.videos[id].sources.values() {
+        assert_eq!(
+            std::fs::read(base.join("sources").join(format!("{}.mp4", src.key))).unwrap(),
+            b"src"
+        );
+    }
+    assert_eq!(std::fs::read(base.join("thumbnail.jpg")).unwrap(), b"thumb");
+    assert_eq!(std::fs::read_dir(root.join("work")).unwrap().count(), 0);
+}
+
+#[test]
+fn scoped_deletion_rejects_active_variant_and_working_source() {
+    let mut content = YoutubeContent::default();
+    let id = "abcdefghijk";
+    let prepare = content.request_prepare(request(id), 1).unwrap();
+    let mut result = sample_result(id, prepare.fps);
+    let src = SourceCache {
+        key: source_key(id, 0, 2000, true),
+        video_id: id.into(),
+        extension: "mp4".into(),
+        bytes: 1,
+        coverage: Clip {
+            start_ms: 0,
+            end_ms: 2000,
+        },
+        full: true,
+        origin_ms: 0,
+        duration_ms: 2000,
+    };
+    result.source = Some(src.clone());
+    let active = result.conversion.key.clone();
+    content.complete_prepare(prepare.generation, Ok(result), 1, 1);
+    assert!(matches!(
+        content.request_delete_target(id, id, DeleteTarget::Conversion { key: active }),
+        Err(YoutubeError::Busy)
+    ));
+    let target = DeleteTarget::Source {
+        key: src.key,
+        extension: src.extension,
+    };
+    // Saved JPEG playback has no dependency on the source.
+    let delete = content
+        .request_delete_target(id, id, target.clone())
+        .unwrap();
+    assert!(content.playback.is_some());
+    assert!(matches!(
+        content.request_prepare(request(id), 2),
+        Err(YoutubeError::Busy)
+    ));
+    content
+        .complete_delete(delete, Err(YoutubeError::Storage("test failure".into())))
+        .unwrap_err();
+    assert_eq!(content.videos[id].sources.len(), 1);
+    content.request_prepare(request(id), 3).unwrap();
+    assert!(matches!(
+        content.request_delete_target(id, id, target),
+        Err(YoutubeError::Busy)
+    ));
+}
+
+#[tokio::test]
+async fn source_capacity_failure_cleans_work_and_preserves_old_playback() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let stub = temp.path().join("oversized-download");
+    std::fs::write(
+        &stub,
+        r#"#!/usr/bin/env python3
+import json,sys,time
+a=sys.argv[1:]
+if '--dump-single-json' in a:
+ print(json.dumps({'id':'lmnopqrstuv','duration':2,'title':'Local fixture'}))
+else:
+ open(a[a.index('-o')+1].replace('%(ext)s','mp4'),'wb').write(b'x'*2048)
+ time.sleep(20)
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut content = YoutubeContent::default();
+    let initial = content.request_prepare(request("abcdefghijk"), 1).unwrap();
+    content.complete_prepare(
+        initial.generation,
+        Ok(sample_result("abcdefghijk", initial.fps)),
+        1,
+        1,
+    );
+    let old = content.playback.as_ref().unwrap().conversion.key.clone();
+    let mut tools = MediaTools::new(temp.path().join("cache"));
+    tools.yt_dlp = stub;
+    tools.max_source_bytes = 1024;
+    let job = content.request_prepare(request("lmnopqrstuv"), 2).unwrap();
+    let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+    let result = run_prepare(tools.clone(), job.clone(), tx, 2).await;
+    assert!(matches!(result, Err(YoutubeError::Storage(_))));
+    content.complete_prepare(job.generation, result, 2, 2);
+    assert_eq!(content.playback.as_ref().unwrap().conversion.key, old);
+    assert_eq!(
+        std::fs::read_dir(tools.root.join("work")).unwrap().count(),
+        0
+    );
+    assert!(!tools.root.join("videos/lmnopqrstuv/sources").exists());
+}

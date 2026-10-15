@@ -322,6 +322,7 @@ pub struct App {
     clock: Arc<dyn crate::fetch::Clock + Send + Sync>,
     /// Completed LCD pixels are transient; only validated handles enter the sender.
     frame_assets: BTreeMap<String, Arc<Vec<u8>>>,
+    video_slots: BTreeMap<String, crate::lcd_stream::VideoSlot>,
     contents: BTreeMap<String, Box<dyn ContentPlugin>>,
     dispatch: tokio::sync::watch::Sender<()>,
     work_signal: tokio::sync::watch::Sender<()>,
@@ -426,6 +427,7 @@ impl App {
             runtime,
             clock,
             frame_assets: BTreeMap::new(),
+            video_slots: BTreeMap::new(),
             contents,
             dispatch: tokio::sync::watch::channel(()).0,
             work_signal: tokio::sync::watch::channel(()).0,
@@ -471,6 +473,22 @@ impl App {
             .persistence_us
             .saturating_add(saving.elapsed().as_micros());
         self.runtime = next;
+        for (id, slot) in &mut self.video_slots {
+            let keep = self.runtime.world.devices.get(id).is_some_and(|d| {
+                session_current(d, &slot.session)
+                    && d.owner == Owner::Remote
+                    && matches!(d.mode, Mode::Normal | Mode::Sub)
+            });
+            let stale = !keep
+                || slot
+                    .latest
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|f| !frame_current(&self.runtime.world.devices[id], &f.token));
+            if stale {
+                slot.clear();
+            }
+        }
         self.frame_assets.retain(|handle, _| {
             self.runtime.outbox.values().any(|effect|
             matches!(effect, Effect::SendFrame { asset_handle, .. } if asset_handle == handle))
@@ -1228,6 +1246,136 @@ impl App {
 
     pub fn frame_asset(&self, handle: &str) -> Option<Arc<Vec<u8>>> {
         self.frame_assets.get(handle).cloned()
+    }
+
+    pub fn supports_lcd_push(&self, token: &SessionToken) -> bool {
+        self.runtime
+            .world
+            .devices
+            .get(&token.device_id)
+            .is_some_and(|d| {
+                session_current(d, token)
+                    && d.capabilities.contains("lcd")
+                    && d.capabilities
+                        .contains(crate::protocol::FRAME_BYTES_CAPABILITY)
+                    && d.capabilities
+                        .contains(crate::protocol::LCD_PUSH_CAPABILITY)
+            })
+    }
+
+    pub fn subscribe_lcd_video(
+        &mut self,
+        token: &SessionToken,
+    ) -> Option<tokio::sync::watch::Receiver<Option<Arc<crate::lcd_stream::VideoFrame>>>> {
+        if !self.supports_lcd_push(token) {
+            return None;
+        }
+        let slot = self
+            .video_slots
+            .entry(token.device_id.clone())
+            .or_insert_with(|| crate::lcd_stream::VideoSlot::new(token.clone()));
+        if slot.session != *token {
+            *slot = crate::lcd_stream::VideoSlot::new(token.clone());
+        }
+        Some(slot.latest.subscribe())
+    }
+
+    pub fn lcd_video_is_current(&self, frame: &crate::lcd_stream::VideoFrame) -> bool {
+        self.runtime
+            .world
+            .devices
+            .get(&frame.token.device_id)
+            .is_some_and(|d| {
+                frame_current(d, &frame.token)
+                    && self.supports_lcd_push(&crate::session_token(&frame.token.device_id, d))
+            })
+    }
+
+    pub(super) fn queue_lcd_video(
+        &mut self,
+        session: &SessionToken,
+        fps: u32,
+        sequence: u64,
+        generation: u64,
+        pixels: Vec<u8>,
+    ) -> Result<(), AppError> {
+        if !self.supports_lcd_push(session) || fps == 0 || fps > crate::lcd_stream::MAX_FPS {
+            return Err(AppError::Invalid("unsupported LCD stream"));
+        }
+        let d = self
+            .runtime
+            .world
+            .devices
+            .get(&session.device_id)
+            .ok_or(AppError::NotFound)?;
+        let mode = match d.mode {
+            Mode::Normal => "normal",
+            Mode::Sub => "sub",
+            _ => return Err(AppError::Conflict("not remote")),
+        };
+        let token = FrameToken {
+            device_id: session.device_id.clone(),
+            incarnation: d.incarnation,
+            session_epoch: d.session_epoch,
+            display_epoch: d.display_epoch,
+            screen_owner_epoch: d.screen_owner_epoch,
+            frame_id: self.runtime.world.next_frame_id,
+        };
+        self.runtime.world.next_frame_id = self
+            .runtime
+            .world
+            .next_frame_id
+            .checked_add(1)
+            .ok_or(AppError::Conflict("frame counter exhausted"))?;
+        let pixels = Arc::new(self.compose_lcd_frame(&session.device_id, pixels));
+        let slot = self
+            .video_slots
+            .entry(session.device_id.clone())
+            .or_insert_with(|| crate::lcd_stream::VideoSlot::new(session.clone()));
+        if slot.session != *session {
+            *slot = crate::lcd_stream::VideoSlot::new(session.clone());
+        }
+        slot.publish(crate::lcd_stream::VideoFrame {
+            token,
+            fps,
+            sequence,
+            generation,
+            mode,
+            pixels,
+        });
+        Ok(())
+    }
+
+    pub fn lcd_stream_status(&mut self, token: &FrameToken, generation: u64) -> bool {
+        let Some(d) = self.runtime.world.devices.get(&token.device_id) else {
+            return false;
+        };
+        if !frame_current(d, token) {
+            return false;
+        }
+        let Some(slot) = self.video_slots.get_mut(&token.device_id) else {
+            return false;
+        };
+        if slot.session.incarnation != token.incarnation
+            || slot.session.session_epoch != token.session_epoch
+            || slot.generation != generation
+            || token.frame_id < slot.first_issued
+            || token.frame_id > slot.last_issued
+            || token.frame_id < slot.last_reported
+        {
+            return false;
+        }
+        slot.last_reported = token.frame_id;
+        let d = self
+            .runtime
+            .world
+            .devices
+            .get_mut(&token.device_id)
+            .expect("checked");
+        d.last_received_frame = Some(token.frame_id);
+        d.last_rendered_frame = Some(token.frame_id);
+        // Observational counters are transient; never enter SQLite or grant sending credit.
+        true
     }
 
     pub fn frame_waiting_for_render(&self, token: &SessionToken, frame_id: u64) -> bool {

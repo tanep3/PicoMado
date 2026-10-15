@@ -50,7 +50,7 @@ pub async fn run_playback(
                         let id=target.token.device_id.clone();
                         let token=target.token.clone();
                         offer.targets=vec![target];
-                        if guard.accept_playback_pixels(&offer,pixels.clone())? > 0 {
+                        if guard.accept_playback_pixels_at(&offer,pixels.clone(),sequence)? > 0 {
                             sent.insert(id,(token,offer.plugin.clone(),offer.spec.generation,sequence));
                         }
                     }

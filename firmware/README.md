@@ -106,4 +106,10 @@ E-ink_1の通常表示を含むV4候補は`tools/build.sh --device E-ink_1 --unb
 
 LCD/E-ink_0/E-ink_1の共通通信は、能力frame-bytes-v1でraw pixel kind18を受け、制御/FrameStartと旧サーバの画像はJSONで扱います。旧YouTubeの背景受信方式を移植し、SDKロック内でtransportをコピーして描画前に解放します。3端末ともRenderedAckで最新再生位置へ進み、遅いE-inkの未描画画像を蓄積しません。
 
+### 2026-10-15 LCD動画の追加能力
+
+新しいLCDは `lcd-push-v1` を追加申告し、動画だけ描画ACKを送信許可に使わない最新画像方式へ進みます。静止画・旧LCD・E-inkのACK契約は維持します。組立中と描画用の領域を分け、1秒ごとの観測統計を任意送信します。実装・メモリ・6/18/24/12fpsの測定限界は [検証記録](lcd-push-verification-2026-10-15.md)を参照してください。
+
+コミットする最新ソースには、機能時計を診断トレースから独立させる修正が含まれます。現在のLCD実機は10:23 JST書込版で、時計修正候補はビルド・ホスト試験済みですが未書込です。ソース更新やコミットだけでは実機のファームは変わりません。個体の `config.h` と `board-id.txt`、bindingを含むmanifest/UF2は引き続きGit除外です。
+
 本番サーバは22:21:53 JSTに629afb3a版を反映、LCDは22:22:16 JSTにbb57f71e版のload/verifyを完了しました。動画は約26.3KB/frameですがACK待ち期限切れが再現し、実機受入は未完了です。旧playerのCYW43_NONE_PM方針も補完したc5c9fc74版を22:48:42 JSTにLCDへ転送・verify済みです。20分比較は約0.95fps/ACK待ち切れ13回で受入未完了。LCD宛送信経路がwlan0であることも確認し、有線比較の前提を訂正しました。E-ink向け候補は未転送です。最新SHA/サイズ、転送済み版との区別、有線化条件、残件は[検証記録](control-reply-verification-2026-10-14.md)を参照してください。E-ink_0も今回の更新対象です。
