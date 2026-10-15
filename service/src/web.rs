@@ -196,6 +196,7 @@ async fn plugin_command(
 async fn plugin_asset(
     State(app): State<SharedApp>,
     Path((plugin, id)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Response, ApiError> {
     let (paths, descriptor) = with_app(&app, |app| {
         app.plugin_asset(&plugin, &id).ok_or(AppError::NotFound)
@@ -246,6 +247,33 @@ async fn plugin_asset(
         "image/png" | "image/jpeg" | "application/octet-stream"
     ) {
         return Err(ApiError(AppError::Invalid("invalid asset format")));
+    }
+    if plugin == "youtube" && id.starts_with("thumbnail-") {
+        use sha2::{Digest, Sha256};
+        let etag = format!("\"{:x}\"", Sha256::digest(&bytes));
+        let cached_headers = [
+            (axum::http::header::CONTENT_TYPE, content_type),
+            (
+                axum::http::header::CACHE_CONTROL,
+                "private, max-age=300".into(),
+            ),
+            (axum::http::header::ETAG, etag.clone()),
+            (axum::http::header::X_CONTENT_TYPE_OPTIONS, "nosniff".into()),
+        ];
+        let matches = headers
+            .get(axum::http::header::IF_NONE_MATCH)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|values| {
+                values.split(',').any(|v| {
+                    v.trim() == etag
+                        || v.trim() == "*"
+                        || v.trim().strip_prefix("W/") == Some(etag.as_str())
+                })
+            });
+        if matches {
+            return Ok((StatusCode::NOT_MODIFIED, cached_headers).into_response());
+        }
+        return Ok((cached_headers, bytes).into_response());
     }
     Ok((
         [

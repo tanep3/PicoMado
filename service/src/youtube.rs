@@ -5,11 +5,13 @@
 //! A worker result is accepted only for the current job generation.
 
 mod media;
+mod thumbnail;
 pub use media::{
     read_frame, rgb565_from_jpeg, run_cached_prepare, run_delete, run_prepare, scan_usage,
     scan_usage_or_last, validate_conversion, validate_conversion_cancellable, ColorTransform,
     MediaTools, Usage,
 };
+pub use thumbnail::{run_thumbnail, ThumbnailFailure, ThumbnailSaved};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

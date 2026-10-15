@@ -18,6 +18,7 @@ pub struct YoutubeManaged {
     usage: Option<yt::Usage>,
     bootstrap_scheduled: bool,
     validated: bool,
+    thumbnail_pending: BTreeSet<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -26,6 +27,8 @@ struct YoutubeSnapshot {
     job: Option<yt::JobState>,
     deleting: BTreeSet<String>,
     usage: Option<yt::Usage>,
+    #[serde(default)]
+    thumbnail_pending: BTreeSet<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -48,6 +51,9 @@ enum YoutubeWork {
     },
     ValidateSelected {
         conversion: Option<yt::ConversionCache>,
+    },
+    Thumbnail {
+        video_id: String,
     },
     Usage,
 }
@@ -131,6 +137,7 @@ impl ContentPlugin for YoutubeManaged {
             job: self.inner.job.clone(),
             deleting: self.inner.deleting.clone(),
             usage: self.usage,
+            thumbnail_pending: self.thumbnail_pending.clone(),
         })
         .expect("serializable YouTube state")
     }
@@ -144,6 +151,7 @@ impl ContentPlugin for YoutubeManaged {
         self.inner.job = state.job;
         self.inner.deleting = state.deleting;
         self.usage = state.usage;
+        self.thumbnail_pending = state.thumbnail_pending;
         self.bootstrap_scheduled = false;
         self.validated = false;
         Ok(())
@@ -163,7 +171,7 @@ impl ContentPlugin for YoutubeManaged {
             thumbnail = thumbnail.saturating_add(video.metadata.thumbnail_bytes);
         }
         json!({"videos":videos,"active":self.inner.playback,"job":self.inner.job,"deleting":self.inner.deleting,
-            "position_ms":self.inner.position_ms(now),"cache_usage":self.usage,
+            "position_ms":self.inner.position_ms(now),"cache_usage":self.usage,"thumbnail_pending":self.thumbnail_pending,
             "known_bytes":{"source":source,"converted":converted,"thumbnail":thumbnail,"total":source.saturating_add(converted).saturating_add(thumbnail)}})
     }
     fn plan_command(
@@ -176,7 +184,66 @@ impl ContentPlugin for YoutubeManaged {
             .ok_or(ContentError::InvalidSource)?;
         let mut plan = PluginWorkPlan::default();
         let now = ctx.now_unix.saturating_mul(1000);
+        // A thumbnail writes only its own leaf, but preparation publishes a
+        // metadata snapshot. Serialize same-video changes to avoid stale fields.
+        let affected = match kind {
+            "prepare" => command["url"]
+                .as_str()
+                .and_then(|url| yt::VideoUrl::parse(url).ok())
+                .map(|url| url.id),
+            "play" => command["key"]
+                .as_str()
+                .and_then(|key| {
+                    self.inner
+                        .videos
+                        .values()
+                        .find(|v| v.conversions.contains_key(key))
+                })
+                .map(|v| v.metadata.id.clone()),
+            "set_fps" => self
+                .inner
+                .playback
+                .as_ref()
+                .map(|p| p.conversion.video_id.clone()),
+            "delete" => command["video_id"].as_str().map(str::to_owned),
+            _ => None,
+        };
+        if affected
+            .as_ref()
+            .is_some_and(|id| self.thumbnail_pending.contains(id))
+        {
+            return Err(ContentError::Unavailable);
+        }
         match kind {
+            "retry_thumbnail" => {
+                let id = command["video_id"]
+                    .as_str()
+                    .ok_or(ContentError::InvalidSource)?;
+                if !self.inner.videos.contains_key(id) {
+                    return Err(ContentError::InvalidSource);
+                }
+                if self.thumbnail_pending.contains(id)
+                    || self.inner.deleting.contains(id)
+                    || self.inner.job.as_ref().is_some_and(|j| {
+                        j.video_id == id
+                            && matches!(
+                                j.status,
+                                yt::JobStatus::Working | yt::JobStatus::Cancelling
+                            )
+                    })
+                {
+                    return Err(ContentError::Unavailable);
+                }
+                self.thumbnail_pending.insert(id.into());
+                let mut job = request(
+                    &format!("thumbnail_{id}"),
+                    YoutubeWork::Thumbnail {
+                        video_id: id.into(),
+                    },
+                )?;
+                job.timeout_seconds = 60;
+                plan.jobs.push(job);
+            }
             "prepare" => {
                 let url = command["url"]
                     .as_str()
@@ -414,6 +481,25 @@ impl ContentPlugin for YoutubeManaged {
                 }
                 plan.refresh = RefreshTargets::Selected;
             }
+            YoutubeWork::Thumbnail { video_id } => {
+                if !self.thumbnail_pending.remove(&video_id) {
+                    return Err(ContentError::Stale);
+                }
+                if let JobOutcome::Succeeded(value) = outcome {
+                    let saved: yt::ThumbnailSaved = decode(value.clone())?;
+                    if saved.asset_id != format!("thumbnail-{video_id}")
+                        || saved.bytes == 0
+                        || saved.bytes > 1_000_000
+                    {
+                        return Err(ContentError::InvalidSource);
+                    }
+                    if let Some(video) = self.inner.videos.get_mut(&video_id) {
+                        video.metadata.thumbnail = Some(saved.asset_id);
+                        video.metadata.thumbnail_bytes = saved.bytes;
+                    }
+                    self.usage = None;
+                }
+            }
             YoutubeWork::Usage => {
                 if let JobOutcome::Succeeded(value) = outcome {
                     self.usage = Some(decode(value.clone())?);
@@ -549,6 +635,25 @@ impl PluginJobExecutor for YoutubeExecutor {
                     {
                         Ok(()) => JobOutcome::Succeeded(Value::Null),
                         Err(e) => fail(e),
+                    }
+                }
+                YoutubeWork::Thumbnail { video_id } => {
+                    let cancellation = yt::Cancellation::default();
+                    let token = cancellation.clone();
+                    let future = yt::run_thumbnail(context.paths.cache, video_id, token);
+                    tokio::pin!(future);
+                    let mut cancel = context.cancel;
+                    let result = tokio::select! {
+                        result=&mut future=>result,
+                        changed=cancel.changed()=>{if changed.is_err()||*cancel.borrow(){cancellation.cancel();}future.await},
+                    };
+                    match result {
+                        Ok(saved) => JobOutcome::Succeeded(json!(saved)),
+                        Err(yt::ThumbnailFailure::Cancelled) => JobOutcome::Cancelled,
+                        Err(error) => JobOutcome::Failed(JobFailure::new(
+                            &format!("thumbnail_{}", error.code()),
+                            &error.message(),
+                        )),
                     }
                 }
                 YoutubeWork::Usage => match yt::scan_usage(context.paths.cache).await {
@@ -783,6 +888,191 @@ mod tests {
         assert!(restored.inner.deleting.is_empty());
         assert_eq!(restored.inner.videos[&c.video_id].conversions.len(), 1);
         restored.plan_command(&ctx, &command).unwrap();
+    }
+
+    #[test]
+    fn thumbnail_work_is_explicit_durable_and_updates_only_successful_image_fields() {
+        let ctx = CommandContext {
+            now_unix: 1,
+            now_mono_ms: 1,
+            today_jst: "2026-10-15".into(),
+            settings: Default::default(),
+            devices: vec![],
+        };
+        let mut content = YoutubeManaged::default();
+        let c = conversion();
+        let prepare = content
+            .inner
+            .request_prepare(
+                yt::PrepareRequest {
+                    url: metadata().url,
+                    fps: Some(6),
+                    start: None,
+                    end: None,
+                },
+                1,
+            )
+            .unwrap();
+        content.inner.complete_prepare(
+            prepare.generation,
+            Ok(yt::PrepareResult {
+                metadata: metadata(),
+                source: None,
+                conversion: c.clone(),
+                reused: false,
+            }),
+            1,
+            1,
+        );
+        let before = content.inner.save_state();
+        let command = json!({"kind":"retry_thumbnail","video_id":"abcdefghijk"});
+        let request = content.plan_command(&ctx, &command).unwrap().jobs.remove(0);
+        assert_eq!(
+            request.payload,
+            json!({"kind":"thumbnail","video_id":"abcdefghijk"})
+        );
+        assert!(content.plan_command(&ctx, &command).is_err());
+        assert!(content
+            .plan_command(&ctx, &json!({"kind":"play","key":c.key}))
+            .is_err());
+        assert!(content
+            .plan_command(
+                &ctx,
+                &json!({"kind":"delete","video_id":c.video_id,"confirmation":c.video_id})
+            )
+            .is_err());
+        let job = PluginJob {
+            token: JobToken {
+                plugin: "youtube".into(),
+                slot: request.slot,
+                generation: 1,
+            },
+            payload: request.payload,
+            timeout_seconds: 60,
+            created_unix: 1,
+        };
+        let mut restored = YoutubeManaged::default();
+        restored.load_state(content.save_state()).unwrap();
+        assert!(restored.thumbnail_pending.contains("abcdefghijk"));
+        content
+            .work_completed(
+                &ctx,
+                &job,
+                &JobOutcome::Failed(JobFailure::new("thumbnail_http", "HTTP 404")),
+            )
+            .unwrap();
+        assert!(content.thumbnail_pending.is_empty());
+        assert_eq!(
+            serde_json::to_value(content.inner.save_state()).unwrap(),
+            serde_json::to_value(&before).unwrap()
+        );
+        let request = content.plan_command(&ctx, &command).unwrap().jobs.remove(0);
+        let job = PluginJob {
+            token: JobToken {
+                plugin: "youtube".into(),
+                slot: request.slot,
+                generation: 2,
+            },
+            payload: request.payload,
+            timeout_seconds: 60,
+            created_unix: 1,
+        };
+        content
+            .work_completed(
+                &ctx,
+                &job,
+                &JobOutcome::Succeeded(json!(yt::ThumbnailSaved {
+                    asset_id: "thumbnail-abcdefghijk".into(),
+                    bytes: 100
+                })),
+            )
+            .unwrap();
+        let v = &content.inner.videos["abcdefghijk"];
+        assert_eq!(
+            v.metadata.thumbnail.as_deref(),
+            Some("thumbnail-abcdefghijk")
+        );
+        assert_eq!(v.metadata.thumbnail_bytes, 100);
+        assert_eq!(v.conversions.len(), 1);
+        assert_eq!(
+            content.inner.playback.as_ref().unwrap().conversion.key,
+            c.key
+        );
+        assert_eq!(
+            content.inner.playback.as_ref().unwrap().epoch,
+            before.playback_epoch
+        );
+        assert!(content.asset("thumbnail-abcdefghijk").is_some());
+        assert!(content
+            .asset("thumbnail-abcdefghijk-222222222222222222222222")
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn thumbnail_http_cache_revalidates_and_content_changes_get_a_new_etag() {
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+        };
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = crate::application::App::open(&temp.path().join("state.db")).unwrap();
+        let revision = app.plugin_web_view("youtube").unwrap().revision;
+        app.plugin_command(
+            "youtube",
+            revision,
+            json!({"kind":"prepare","url":metadata().url,"fps":6}),
+        )
+        .unwrap();
+        let job = app.claim_plugin_work().unwrap().remove(0);
+        let mut m = metadata();
+        m.thumbnail = Some("thumbnail-abcdefghijk".into());
+        m.thumbnail_bytes = 4;
+        app.complete_plugin_work(
+            job.token,
+            JobOutcome::Succeeded(
+                json!({"metadata":m,"source":null,"conversion":conversion(),"reused":false}),
+            ),
+        )
+        .unwrap();
+        let file = app
+            .plugin_paths("youtube")
+            .unwrap()
+            .cache
+            .join("videos/abcdefghijk/thumbnail.jpg");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, b"old").unwrap();
+        let router = crate::web::router(std::sync::Arc::new(std::sync::Mutex::new(app)));
+        let get = |etag: Option<&str>| {
+            let mut request =
+                Request::builder().uri("/api/plugins/youtube/assets/thumbnail-abcdefghijk");
+            if let Some(tag) = etag {
+                request = request.header("if-none-match", tag)
+            }
+            request.body(Body::empty()).unwrap()
+        };
+        let response = router.clone().oneshot(get(None)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["cache-control"], "private, max-age=300");
+        let tag = response.headers()["etag"].to_str().unwrap().to_owned();
+        assert_eq!(
+            response.into_body().collect().await.unwrap().to_bytes(),
+            "old"
+        );
+        let response = router.clone().oneshot(get(Some(&tag))).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+        assert!(response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .is_empty());
+        std::fs::write(&file, b"new").unwrap();
+        let response = router.oneshot(get(Some(&tag))).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_ne!(response.headers()["etag"].to_str().unwrap(), tag);
     }
     #[tokio::test]
     async fn managed_api_preserves_revision_and_server_deletion_guard() {

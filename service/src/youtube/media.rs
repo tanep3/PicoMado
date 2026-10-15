@@ -170,7 +170,7 @@ fn safe_root(root: &Path) -> Result<PathBuf, YoutubeError> {
     fs::create_dir_all(root).map_err(storage)?;
     root.canonicalize().map_err(storage)
 }
-fn video_dir(root: &Path, id: &str) -> Result<PathBuf, YoutubeError> {
+pub(super) fn video_dir(root: &Path, id: &str) -> Result<PathBuf, YoutubeError> {
     if !valid_id(id) {
         return Err(YoutubeError::InvalidUrl);
     }
@@ -519,9 +519,11 @@ fn metadata(
         .chars()
         .take(300)
         .collect();
-    let thumb = info["thumbnail"]
-        .as_str()
-        .and_then(|url| download_thumbnail(url, tools, &job.url.id).ok().flatten());
+    let thumb = info["thumbnail"].as_str().and_then(|url| {
+        download_thumbnail(url, tools, &job.url.id, &job.cancel)
+            .ok()
+            .flatten()
+    });
     let thumbnail_bytes = if thumb.is_some() {
         fs::metadata(video_dir(&tools.root, &job.url.id)?.join("thumbnail.jpg"))
             .map(|m| m.len())
@@ -546,45 +548,15 @@ fn download_thumbnail(
     url: &str,
     tools: &MediaTools,
     id: &str,
+    cancel: &Cancellation,
 ) -> Result<Option<String>, YoutubeError> {
-    let parsed = reqwest::Url::parse(url).map_err(|_| YoutubeError::InvalidUrl)?;
-    if parsed.scheme() != "https"
-        || !matches!(parsed.host_str(), Some("i.ytimg.com" | "img.youtube.com"))
-    {
-        return Ok(None);
+    match super::thumbnail::fetch_from(&tools.root, id, url, cancel) {
+        Ok(saved) => Ok(Some(saved.asset_id)),
+        Err(error) => {
+            eprintln!("youtube_thumbnail_result reason={}", error.code());
+            Err(YoutubeError::Tool(error.message()))
+        }
     }
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| YoutubeError::Tool(e.to_string()))?;
-    let response = client
-        .get(parsed)
-        .send()
-        .map_err(|e| YoutubeError::Tool(e.to_string()))?;
-    if !response.status().is_success() || response.content_length().is_some_and(|n| n > 1_000_000) {
-        return Ok(None);
-    }
-    let mut bytes = Vec::new();
-    response
-        .take(1_000_001)
-        .read_to_end(&mut bytes)
-        .map_err(storage)?;
-    if bytes.len() > 1_000_000 {
-        return Ok(None);
-    }
-    let image = image::load_from_memory_with_format(&bytes, ImageFormat::Jpeg)
-        .map_err(|_| YoutubeError::InvalidFrame)?;
-    let image = image.thumbnail(480, 270);
-    let folder = video_dir(&tools.root, id)?;
-    fs::create_dir_all(&folder).map_err(storage)?;
-    let staged = folder.join("thumbnail.tmp");
-    image
-        .save_with_format(&staged, ImageFormat::Jpeg)
-        .map_err(|_| YoutubeError::InvalidFrame)?;
-    fs::rename(staged, folder.join("thumbnail.jpg")).map_err(storage)?;
-    // The web layer resolves this public asset ID through its own route.
-    Ok(Some(format!("thumbnail-{id}")))
 }
 
 #[derive(Debug)]

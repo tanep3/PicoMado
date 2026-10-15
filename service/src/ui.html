@@ -233,6 +233,35 @@
     function rememberVideoFps(value){drafts.youtube.fps=value;try{localStorage.setItem('picomado.youtube.fps',value)}catch{}}
     const managedViews={},drafts={youtube:{whole:true,fps:initialVideoFps()},caricature:{}};let protectionView={revision:0,protected_ids:[]};
     function bytesText(n){return `${((Number(n)||0)/1048576).toFixed(1)} MiB`}
+    const thumbnailImages=new Map(),thumbnailImageErrors=new Set(),thumbnailRequests=new Set(),thumbnailVersions=new Map();
+    function renderYoutubeThumbnail(video,parent){
+      const id=video.metadata.id,asset=video.metadata.thumbnail,box=el('div',undefined,'thumbnail-section');let image;
+      const thumbnailJob=managedViews.youtube?.jobs?.find(job=>job.token?.slot===`thumbnail_${id}`);
+      if(thumbnailJob?.status==='succeeded')thumbnailVersions.set(id,thumbnailJob.token.generation);
+      if(asset){
+        const version=thumbnailVersions.get(id),src=`/api/plugins/youtube/assets/${encodeURIComponent(asset)}${version==null?'':`?v=${version}`}`;let cached=thumbnailImages.get(id);
+        if(!cached||cached.src!==src){image=el('img');image.src=src;image.alt='';image.className='content-preview';cached={src,image};thumbnailImages.set(id,cached);thumbnailImageErrors.delete(id)}
+        image=cached.image;image.style.display=thumbnailImageErrors.has(id)?'none':'';box.append(image);
+      }else{thumbnailImages.delete(id);thumbnailImageErrors.delete(id)}
+      const controls=el('div',undefined,'actions');let added=false;
+      function showRetry(){
+        if(added)return;added=true;
+        const slot=`thumbnail_${id}`,job=managedViews.youtube?.jobs?.find(job=>job.token?.slot===slot);
+        const waiting=thumbnailRequests.has(id)||(managedViews.youtube?.data?.thumbnail_pending||[]).includes(id);
+        const preparing=managedViews.youtube?.data?.job;const prepareBusy=preparing?.video_id===id&&['Working','Cancelling'].includes(preparing.status);
+        const retry=button(waiting?'取得中…':'サムネ再取得');retry.disabled=waiting||prepareBusy;controls.append(retry);
+        if(job?.status==='failed'&&job.failure?.message)controls.append(el('span',job.failure.message,'error'));
+        retry.onclick=async()=>{
+          if(retry.disabled||thumbnailRequests.has(id))return;
+          thumbnailRequests.add(id);retry.disabled=true;retry.textContent='取得中…';
+          try{await managedCommand('youtube',{kind:'retry_thumbnail',video_id:id},'サムネを取得しています')}
+          finally{thumbnailRequests.delete(id);retry.disabled=false;retry.textContent='サムネ再取得'}
+        };box.append(controls);
+      }
+      if(!asset||thumbnailImageErrors.has(id))showRetry();
+      if(image){image.onerror=()=>{thumbnailImageErrors.add(id);image.style.display='none';showRetry()};image.onload=()=>{thumbnailImageErrors.delete(id);image.style.display='';controls.remove()}}
+      parent.append(box);
+    }
     async function loadManaged(){
       const id=location.pathname.split('/').pop();
       if(['youtube','caricature'].includes(id))managedViews[id]=await api(`/api/plugins/${id}`);
@@ -259,7 +288,7 @@
       input.value=value??'';input.required=required;wrap.append(input);parent.append(wrap);return input;
     }
     function jobsPanel(id,parent){
-      const jobs=(managedViews[id]?.jobs||[]).filter(job=>['queued','running','cancelling','failed'].includes(job.status));if(!jobs.length)return;
+      const jobs=(managedViews[id]?.jobs||[]).filter(job=>['queued','running','cancelling','failed'].includes(job.status)&&!job.token?.slot?.startsWith('thumbnail_'));if(!jobs.length)return;
       const list=el('div',undefined,'subsection');list.append(el('p','処理状況','section-label'));
       const names={queued:'実行待ち',running:'処理中',cancelling:'取消中',succeeded:'完了',failed:'失敗',cancelled:'取消完了'};
       for(const job of jobs){const row=el('div',undefined,'summary-item');row.append(el('strong',names[job.status]||job.status));
@@ -319,8 +348,9 @@
         const controls=el('div',undefined,'actions');for(const [label,kind]of[['処理を取消す','cancel'],['再生を停止','stop'],['容量を再計測','scan_usage']]){const control=button(label);control.onclick=()=>managedCommand(id,{kind});controls.append(control)}panel.append(controls);
         const history=section('動画履歴','取得・変換中や失敗時も、現在の動画の再生を維持します。','plugin-card');
         if(!data.videos?.length)history.append(el('p','動画履歴はまだありません。','empty'));
+        const liveVideoIds=new Set((data.videos||[]).map(video=>video.metadata.id));for(const id of new Set([...thumbnailImages.keys(),...thumbnailVersions.keys()]))if(!liveVideoIds.has(id)){thumbnailImages.delete(id);thumbnailImageErrors.delete(id);thumbnailVersions.delete(id)}
         for(const video of data.videos||[]){const row=el('article',undefined,'device-card');
-          if(video.metadata.thumbnail){const image=el('img');image.src=`/api/plugins/youtube/assets/${encodeURIComponent(video.metadata.thumbnail)}`;image.alt='';image.className='content-preview';row.append(image)}
+          renderYoutubeThumbnail(video,row);
           row.append(el('h3',video.metadata.title),el('p',video.metadata.channel||video.metadata.uploader||''));
           const source=el('a','YouTubeで開く');source.href=video.metadata.url;source.rel='noopener noreferrer';source.target='_blank';row.append(source);
           for(const sourceCache of Object.values(video.sources||{})){const item=el('div',undefined,'actions');
