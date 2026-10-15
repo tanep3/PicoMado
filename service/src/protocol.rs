@@ -14,6 +14,8 @@ pub const MAX_CHUNK_BYTES: usize = 64 * 1024;
 /// Provisional image fragment payload. A 160×80 RGB565 image needs seven fragments.
 pub const IMAGE_FRAGMENT_BYTES: usize = 4096;
 pub const LCD_FRAME_BYTES: usize = 160 * 80 * 2;
+pub const FRAME_BYTES_CAPABILITY: &str = "frame-bytes-v1";
+pub const FRAME_BYTES_KIND: u8 = 18;
 
 fn valid_frame_contract(width: u16, height: u16, format: &str, byte_len: u32) -> bool {
     (width == 160 && height == 80 && format == "rgb565be" && byte_len as usize == LCD_FRAME_BYTES)
@@ -21,6 +23,14 @@ fn valid_frame_contract(width: u16, height: u16, format: &str, byte_len: u32) ->
             && height == 122
             && format == "mono1"
             && byte_len as usize == crate::eink::FRAME_BYTES)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputContext {
+    pub incarnation: u64,
+    pub session_epoch: u64,
+    pub display_epoch: u64,
+    pub mode: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +72,8 @@ pub enum WireMessage {
         token: FrameToken,
     },
     InputAccepted {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input_context: Option<InputContext>,
         selected: Option<String>,
         display_epoch: u64,
     },
@@ -97,6 +109,8 @@ pub enum WireMessage {
         session_epoch: u64,
     },
     PluginPosition {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input_context: Option<InputContext>,
         plugin: String,
         dataset_id: String,
         target_date: String,
@@ -275,6 +289,75 @@ pub fn encode(message: &WireMessage) -> Result<Vec<u8>, ProtocolError> {
     Ok(bytes)
 }
 
+/// Negotiated image bytes; controls and non-negotiating terminals keep JSON.
+pub fn encode_frame_bytes(message: &WireMessage) -> Result<Vec<u8>, ProtocolError> {
+    validate_image_message(message)?;
+    let WireMessage::FrameChunk {
+        token,
+        offset,
+        bytes: pixels,
+    } = message
+    else {
+        return Err(ProtocolError::KindMismatch);
+    };
+    let id = token.device_id.as_bytes();
+    if id.is_empty() || id.len() > 50 {
+        return Err(ProtocolError::InvalidLength);
+    }
+    let length = 2 + 1 + id.len() + 44 + pixels.len();
+    let mut bytes = Vec::with_capacity(length + 4);
+    bytes.extend_from_slice(&(length as u32).to_be_bytes());
+    bytes.extend_from_slice(&[VERSION, FRAME_BYTES_KIND, id.len() as u8]);
+    bytes.extend_from_slice(id);
+    for value in [
+        token.incarnation,
+        token.session_epoch,
+        token.display_epoch,
+        token.screen_owner_epoch,
+        token.frame_id,
+    ] {
+        bytes.extend_from_slice(&value.to_be_bytes());
+    }
+    bytes.extend_from_slice(&offset.to_be_bytes());
+    bytes.extend_from_slice(pixels);
+    Ok(bytes)
+}
+fn decode_frame_bytes(body: &[u8]) -> Result<WireMessage, ProtocolError> {
+    let id_len = usize::from(*body.first().ok_or(ProtocolError::InvalidLength)?);
+    let header = 1 + id_len + 44;
+    if id_len == 0
+        || id_len > 50
+        || body.len() <= header
+        || body.len() - header > IMAGE_FRAGMENT_BYTES
+    {
+        return Err(ProtocolError::InvalidLength);
+    }
+    let id = std::str::from_utf8(&body[1..1 + id_len])
+        .map_err(|_| ProtocolError::InvalidJson)?
+        .to_owned();
+    let fields = &body[1 + id_len..header];
+    let value = |index: usize| {
+        u64::from_be_bytes(
+            fields[index * 8..index * 8 + 8]
+                .try_into()
+                .expect("validated header"),
+        )
+    };
+    let token = FrameToken {
+        device_id: id,
+        incarnation: value(0),
+        session_epoch: value(1),
+        display_epoch: value(2),
+        screen_owner_epoch: value(3),
+        frame_id: value(4),
+    };
+    Ok(WireMessage::FrameChunk {
+        token,
+        offset: u32::from_be_bytes(fields[40..44].try_into().expect("validated offset")),
+        bytes: body[header..].to_vec(),
+    })
+}
+
 #[derive(Default)]
 pub struct Decoder {
     buffer: Vec<u8>,
@@ -304,7 +387,11 @@ impl Decoder {
                 self.buffer.clear();
                 return Err(ProtocolError::TooLarge);
             }
-            if self.buffer.len() >= 6 && self.buffer[5] != 13 && length > MAX_CONTROL_BYTES {
+            if self.buffer.len() >= 6
+                && self.buffer[5] != 13
+                && self.buffer[5] != FRAME_BYTES_KIND
+                && length > MAX_CONTROL_BYTES
+            {
                 self.buffer.clear();
                 return Err(ProtocolError::TooLarge);
             }
@@ -316,19 +403,26 @@ impl Decoder {
                 self.buffer.clear();
                 return Err(ProtocolError::UnsupportedVersion);
             }
-            if !(1..=17).contains(&frame[1]) {
+            if !(1..=FRAME_BYTES_KIND).contains(&frame[1]) {
                 self.buffer.clear();
                 return Err(ProtocolError::UnknownKind);
             }
             let kind = frame[1];
-            let message: WireMessage = match serde_json::from_slice(&frame[2..]) {
+            let decoded = if kind == FRAME_BYTES_KIND {
+                decode_frame_bytes(&frame[2..])
+            } else {
+                serde_json::from_slice(&frame[2..]).map_err(|_| ProtocolError::InvalidJson)
+            };
+            let message: WireMessage = match decoded {
                 Ok(message) => message,
-                Err(_) => {
+                Err(error) => {
                     self.buffer.clear();
-                    return Err(ProtocolError::InvalidJson);
+                    return Err(error);
                 }
             };
-            if message.kind() != kind {
+            if message.kind() != kind
+                && !(kind == FRAME_BYTES_KIND && matches!(message, WireMessage::FrameChunk { .. }))
+            {
                 self.buffer.clear();
                 return Err(ProtocolError::KindMismatch);
             }
@@ -366,6 +460,86 @@ fn validate_image_message(message: &WireMessage) -> Result<(), ProtocolError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn binary_image_chunks_preserve_tokens_pixels_crc_and_reduce_wire_size() {
+        for (width, height, format, length) in [
+            (160, 80, "rgb565be", LCD_FRAME_BYTES),
+            (250, 122, "mono1", crate::eink::FRAME_BYTES),
+        ] {
+            let token = FrameToken {
+                device_id: "desk".into(),
+                incarnation: 0x0102030405060708,
+                session_epoch: 0x1122334455667788,
+                display_epoch: 9,
+                screen_owner_epoch: 10,
+                frame_id: 11,
+            };
+            let pixels: Vec<u8> = (0..length).map(|i| (i % 256) as u8).collect();
+            let start = WireMessage::FrameStart {
+                token: token.clone(),
+                mode: Some("normal".into()),
+                width,
+                height,
+                format: format.into(),
+                byte_len: length as u32,
+                crc32: crc32fast::hash(&pixels),
+            };
+            let mut assembler = FrameAssembler::default();
+            assembler.accept(start.clone()).unwrap();
+            let mut binary_bytes = encode(&start).unwrap().len();
+            let mut json_bytes = binary_bytes;
+            let mut result = None;
+            for (index, chunk) in pixels.chunks(IMAGE_FRAGMENT_BYTES).enumerate() {
+                let message = WireMessage::FrameChunk {
+                    token: token.clone(),
+                    offset: (index * IMAGE_FRAGMENT_BYTES) as u32,
+                    bytes: chunk.to_vec(),
+                };
+                let encoded = encode_frame_bytes(&message).unwrap();
+                assert_eq!(encoded[5], FRAME_BYTES_KIND);
+                binary_bytes += encoded.len();
+                json_bytes += encode(&message).unwrap().len();
+                let mut decoder = Decoder::default();
+                let mut decoded = Vec::new();
+                for part in encoded.chunks(17) {
+                    decoded.extend(decoder.push(part).unwrap());
+                }
+                assert_eq!(decoded, vec![message]);
+                result = assembler.accept(decoded.remove(0)).unwrap().or(result);
+                for bad_id_length in [0, 255] {
+                    let mut invalid = encoded.clone();
+                    invalid[6] = bad_id_length;
+                    assert!(Decoder::default().push(&invalid).is_err());
+                }
+            }
+            assert_eq!(result.unwrap(), (token.clone(), pixels.clone()));
+            if length == LCD_FRAME_BYTES {
+                assert!(binary_bytes < 27000 && json_bytes > 85000);
+            }
+            assert!(binary_bytes * 3 < json_bytes);
+            let mut corrupt = FrameAssembler::default();
+            corrupt.accept(start).unwrap();
+            let mut bad = pixels;
+            bad[0] ^= 1;
+            let mut crc_failed = false;
+            for (index, chunk) in bad.chunks(IMAGE_FRAGMENT_BYTES).enumerate() {
+                let message = WireMessage::FrameChunk {
+                    token: token.clone(),
+                    offset: (index * IMAGE_FRAGMENT_BYTES) as u32,
+                    bytes: chunk.to_vec(),
+                };
+                let decoded = Decoder::default()
+                    .push(&encode_frame_bytes(&message).unwrap())
+                    .unwrap()
+                    .remove(0);
+                if corrupt.accept(decoded).is_err() {
+                    crc_failed = true;
+                }
+            }
+            assert!(crc_failed);
+        }
+    }
+
     use crate::{LocalScreen, ScreenKind};
 
     fn hello() -> WireMessage {

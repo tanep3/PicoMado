@@ -70,7 +70,7 @@ USBログはGPIO UARTではなくUSB CDC（個体serialで識別したttyACM）�
 
 `src/main.c`／`net.c`／`core.c` は共通で、CMake が LCD の `display.c`＋`lcd.c` または E-ink の `display_eink.c` を選びます。E-ink_0 は0ボタン、E-ink_1 は上GP20（物理26番）・下GP21（物理27番）・共通GND物理28番、内蔵pull-up・押下LOWです。表示のSPI1／4MHz、CS9・SCK10・MOSI11・DC8・RESET12・BUSY13は旧V4実装と公式設定を継承しています。配線・世代の根拠と未確認点は [E-ink 検証記録](eink-verification-2026-10-14.md) を参照してください。
 
-個体config.hはGit除外・0600です。HOME/AWAY等の10通信マクロはLCD個体の値をそのまま流用し、固定端末IPを追加していません。E-ink_1はモジュール未到着のため`PM_EINK_PANEL_CONNECTED=0`です。この状態でもWi-Fi／WebSocket／ボタン処理を続け、ReceiptAckは完全受信後に返します。表示していない画像にRenderedAckは返しません。到着したパネルがV4と確認できてからCONNECTED=1で再ビルドしてください。V3の実機受入は未実施です。
+個体config.hはGit除外・0600です。HOME/AWAY等の10通信マクロはLCD個体の値をそのまま流用し、固定端末IPを追加していません。E-ink_1の元個体configは初回準備時の`PM_EINK_PANEL_CONNECTED=0`を維持し、別の表示有効V4候補を用意しています。ユーザーが 2026-10-14 20:50 JST に V4 を確認しました。この状態でもWi-Fi／WebSocket／ボタン処理を続け、ReceiptAckは完全受信後に返します。表示していない画像にRenderedAckは返しません。Flash IDの確認・結合後、通常転送用にはCONNECTED=1で再ビルドしてください。実機描画・ボタン試験は未実施です。V3の実機受入は未実施です。
 
 表示はメインループから段階的に進み、BUSY待ちはsleepループを使いません。1 pollのRAM送信は最大128B、初期化から更新まで10秒の期限を設けます。待機要求では未開始の再描画を破棄し、進行中の物理更新だけを完了させて画像を保持します。sleep後の100msも非同期です。フレームの世代が変わった更新には描画ACKを返しません。
 
@@ -93,3 +93,17 @@ firmware/tools/build.sh --device E-ink_1 --unbound
 本番サーバは18:53:43 JSTに今回の修正版へ更新・再起動済み。既存削除feature／設定、旧サービスを維持しました。実Web保存で天気→全OFFロゴ→元の雨雲を試し、E-ink_0のframe889〜891とLCDのframe892〜894で両ACKを確認。同じセッションを維持し、終了後の両端末設定は試験前の雨雲のみONへ復元しました。サービス174成功、ファーム23実行PASS、fmt／clippy／Release成功。詳細は検証記録を参照してください。
 
 LCD同期版の実機書込み後、HOME再接続とframe904の両ACKを確認。更新LCDだけのWeb保存で天気905→全OFFロゴ906→元の雨雲907を同じsession129へ送り、両ACKを確認しました。設定は雨雲のみONへ復元。物理SUB押下後のWeb解除操作全体はユーザー目視確認待ちです。サーバ追加再起動・E-ink書込みは行っていません。
+
+## 受信中画像とボタン応答の保護（2026-10-14追加）
+
+新応答のinput_contextでセッション・表示世代・モードを確認し、同じ世代の受信画像を保持します。古い応答／別フレームの断片は現画像を消しません。旧形式とも互換ですが、位置応答の世代を使えるサーバを先に展開してください。最新LCDのb817e5a4版は新しいBOOTSEL連絡後、20:53:30 JSTにload／verify／起動済みです。実機ログ、回帰、SHA、write_stallの未確定点は[検証記録](control-reply-verification-2026-10-14.md)を参照してください。
+
+E-ink_1の通常表示を含むV4候補は`tools/build.sh --device E-ink_1 --unbound-panel`で作ります。成果物は`build/.unbound-panel/E-ink_1/E-ink_1.uf2`、表示無効版は従来の`.unbound`です。元configは変更せず、ビルド内の派生configだけ表示を有効にします。実物V4はユーザーが 2026-10-14 20:50 JST に V4 を確認済みですが、Flash ID未結合のため通常再ビルド前には転送できません。実機描画・ボタン試験は未実施、V3は未実装です。
+
++応答競合修正版LCDはHOME再接続とframe986の両ACK、Webの天気987→全OFFロゴ988→風刺画989の両ACKを確認しました。試験前の4機能ON／風刺画へ復元済み。物理SUB／連打と動画のwrite_stallの再現・受入はまだ未実施です。
++
+## 動画バイナリ転送・背景受信（2026-10-14 22時以降）
+
+LCD/E-ink_0/E-ink_1の共通通信は、能力frame-bytes-v1でraw pixel kind18を受け、制御/FrameStartと旧サーバの画像はJSONで扱います。旧YouTubeの背景受信方式を移植し、SDKロック内でtransportをコピーして描画前に解放します。3端末ともRenderedAckで最新再生位置へ進み、遅いE-inkの未描画画像を蓄積しません。
+
+本番サーバは22:21:53 JSTに629afb3a版を反映、LCDは22:22:16 JSTにbb57f71e版のload/verifyを完了しました。動画は約26.3KB/frameですがACK待ち期限切れが再現し、実機受入は未完了です。旧playerのCYW43_NONE_PM方針も補完したc5c9fc74版を22:48:42 JSTにLCDへ転送・verify済みです。20分比較は約0.95fps/ACK待ち切れ13回で受入未完了。LCD宛送信経路がwlan0であることも確認し、有線比較の前提を訂正しました。E-ink向け候補は未転送です。最新SHA/サイズ、転送済み版との区別、有線化条件、残件は[検証記録](control-reply-verification-2026-10-14.md)を参照してください。E-ink_0も今回の更新対象です。

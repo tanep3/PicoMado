@@ -6,6 +6,8 @@
 #include "lcd_transform.h"
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
+uint32_t save_and_disable_interrupts(void){return 0;}
+void restore_interrupts(uint32_t state){(void)state;}
 #if defined(PM_LCD_CAPTURE_ENABLE) && PM_LCD_CAPTURE_ENABLE
 #include "capture.h"
 uint64_t time_us_64(void) { static uint64_t tick; return ++tick; }

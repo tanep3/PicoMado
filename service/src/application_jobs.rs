@@ -375,7 +375,7 @@ impl App {
         Ok(())
     }
 
-    /// Plugin-chosen playback sources for online selected LCD viewers. Pixel
+    /// Plugin-chosen playback sources for online selected LCD and E-ink viewers. Pixel
     /// reads happen outside the lock; returned display tokens gate completion.
     pub fn playback_offers(&self) -> Vec<PlaybackOffer> {
         let mut offers: Vec<PlaybackOffer> = Vec::new();
@@ -424,13 +424,10 @@ impl App {
     }
 
     fn streaming_ready(&self, device: &Device) -> bool {
-        device.pending_frame_id.is_none_or(|id| {
-            if device.capabilities.contains("eink") && !device.capabilities.contains("lcd") {
-                device.last_rendered_frame == Some(id)
-            } else {
-                device.last_sent_frame == Some(id)
-            }
-        })
+        // Socket acceptance does not mean the terminal consumed/drew the image.
+        device
+            .pending_frame_id
+            .is_none_or(|id| device.last_rendered_frame == Some(id))
     }
     fn queue_streaming_frame(
         &mut self,
@@ -650,7 +647,7 @@ mod tests {
         assert_eq!(restored.managed_revisions["youtube"], 4);
     }
     #[test]
-    fn streaming_waits_for_complete_send_and_rejects_old_acks_and_read_tokens() {
+    fn streaming_waits_for_rendered_ack_and_rejects_old_acks_and_read_tokens() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = App::open(&temp.path().join("state.db")).unwrap();
         app.contents
@@ -678,6 +675,20 @@ mod tests {
             "must not replace fragments still being written"
         );
         app.complete_effect(effect).unwrap();
+        assert!(
+            app.playback_offers().is_empty(),
+            "socket completion is not terminal consumption"
+        );
+        assert!(app
+            .terminal_event(Event::ReceiptAck { token: old.clone() })
+            .unwrap());
+        assert!(
+            app.playback_offers().is_empty(),
+            "receipt alone does not release drawing credit"
+        );
+        assert!(app
+            .terminal_event(Event::RenderedAck { token: old.clone() })
+            .unwrap());
         let offer = app.playback_offers().remove(0);
         assert_eq!(
             app.accept_playback_pixels(&offer, vec![2; crate::protocol::LCD_FRAME_BYTES])
@@ -804,6 +815,7 @@ mod tests {
         struct Executor {
             entered: Arc<AtomicBool>,
             release: Arc<Notify>,
+            reads: Arc<std::sync::Mutex<Vec<u64>>>,
         }
         impl PluginJobExecutor for Executor {
             fn execute(
@@ -824,6 +836,7 @@ mod tests {
                 index: u64,
                 _: PluginPaths,
             ) -> BoxFuture<'static, Result<Vec<u8>, crate::plugin_jobs::JobFailure>> {
+                self.reads.lock().unwrap().push(index);
                 Box::pin(async move { Ok(vec![index as u8; crate::protocol::LCD_FRAME_BYTES]) })
             }
         }
@@ -847,18 +860,20 @@ mod tests {
             .insert("youtube".into(), Box::new(FakeContent::default()));
         state.contents.remove("caricature");
         let fast = state.hello("fast", ["lcd".into()].into(), 1).unwrap();
-        let _slow = state.hello("slow", ["lcd".into()].into(), 1).unwrap();
+        let slow = state.hello("slow", ["eink".into()].into(), 1).unwrap();
         state
             .plugin_command("youtube", 1, serde_json::json!({}))
             .unwrap();
         let app = Arc::new(std::sync::Mutex::new(state));
         let entered = Arc::new(AtomicBool::new(false));
         let release = Arc::new(Notify::new());
+        let reads = Arc::new(std::sync::Mutex::new(Vec::new()));
         let executors = std::collections::BTreeMap::from([(
             "youtube".into(),
             Arc::new(Executor {
                 entered: entered.clone(),
                 release: release.clone(),
+                reads: reads.clone(),
             }) as Arc<dyn PluginJobExecutor>,
         )]);
         let (stop, receiver) = watch::channel(false);
@@ -895,6 +910,16 @@ mod tests {
                         });
                         if let Some((effect, token)) = next {
                             guard.complete_effect(effect).unwrap();
+                            guard
+                                .terminal_event(Event::ReceiptAck {
+                                    token: token.clone(),
+                                })
+                                .unwrap();
+                            guard
+                                .terminal_event(Event::RenderedAck {
+                                    token: token.clone(),
+                                })
+                                .unwrap();
                             Some(token.frame_id)
                         } else {
                             None
@@ -921,6 +946,54 @@ mod tests {
         assert_eq!(
             slow_count, 1,
             "a non-sending terminal must retain one bounded pending image"
+        );
+        let last_fast_index = *reads.lock().unwrap().last().unwrap();
+        assert!(
+            last_fast_index >= 3,
+            "LCD advanced while E-ink retained its first frame"
+        );
+        let old_slow = {
+            let mut guard = app.lock().unwrap();
+            guard.heartbeat(&slow, 1).unwrap();
+            let (effect, frame) = guard
+                .pending_effects()
+                .into_iter()
+                .find_map(|(id, e)| {
+                    if let Effect::SendFrame { token, .. } = e {
+                        (token.device_id == "slow").then_some((id, token))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            guard.complete_effect(effect).unwrap();
+            assert!(guard
+                .terminal_event(Event::RenderedAck {
+                    token: frame.clone()
+                })
+                .unwrap());
+            frame
+        };
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let newer = app.lock().unwrap().pending_effects().into_iter().any(|(_,e)|
+                    matches!(e,Effect::SendFrame{token,..} if token.device_id=="slow" && token.frame_id>old_slow.frame_id));
+                if newer {break;}
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.unwrap();
+        assert!(
+            *reads.lock().unwrap().last().unwrap() >= last_fast_index,
+            "E-ink resumes at the shared current position, without replaying missed frames"
+        );
+        assert_eq!(
+            app.lock()
+                .unwrap()
+                .pending_effects()
+                .into_iter()
+                .filter(|(_, e)| matches!(e,Effect::SendFrame{token,..} if token.device_id=="slow"))
+                .count(),
+            1
         );
         let report = {
             let mut guard = app.lock().unwrap();

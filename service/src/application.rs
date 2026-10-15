@@ -1230,6 +1230,44 @@ impl App {
         self.frame_assets.get(handle).cloned()
     }
 
+    pub fn frame_waiting_for_render(&self, token: &SessionToken, frame_id: u64) -> bool {
+        self.runtime
+            .world
+            .devices
+            .get(&token.device_id)
+            .is_some_and(|device| {
+                session_current(device, token)
+                    && device.pending_frame_id == Some(frame_id)
+                    && device.last_rendered_frame != Some(frame_id)
+            })
+    }
+
+    pub fn binary_frames(&self, token: &SessionToken) -> bool {
+        self.runtime
+            .world
+            .devices
+            .get(&token.device_id)
+            .is_some_and(|device| {
+                session_current(device, token)
+                    && device
+                        .capabilities
+                        .contains(crate::protocol::FRAME_BYTES_CAPABILITY)
+            })
+    }
+
+    pub fn session_mode(&self, token: &SessionToken) -> Option<&'static str> {
+        let device = self.runtime.world.devices.get(&token.device_id)?;
+        if !session_current(device, token) {
+            return None;
+        }
+        Some(match device.mode {
+            Mode::Normal => "normal",
+            Mode::Sub => "sub",
+            Mode::Menu => "menu",
+            Mode::Standby => "standby",
+        })
+    }
+
     pub fn frame_mode(&self, token: &FrameToken) -> Option<&'static str> {
         let device = self.runtime.world.devices.get(&token.device_id)?;
         if !frame_current(device, token) {

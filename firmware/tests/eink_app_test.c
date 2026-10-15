@@ -45,9 +45,14 @@ bool pm_net_send(uint8_t kind,const char *j){
     if(kind==1){assert(strstr(j,"\"eink\""));assert(strstr(j,PM_BUTTON_COUNT==2?"buttons2":"buttons0"));}
     return true;
 }
+size_t pm_net_payload_length(void){return 0;}
 bool pm_net_take(uint8_t *k,char *j,size_t n){(void)k;(void)j;(void)n;return false;}
 void cyw43_arch_enable_sta_mode(void){}
 void cyw43_arch_disable_sta_mode(void){stops++;}
+static unsigned lwip_depth;
+void cyw43_arch_lwip_begin(void){assert(lwip_depth==0);lwip_depth=1;}
+void cyw43_arch_lwip_end(void){assert(lwip_depth==1);lwip_depth=0;}
+int cyw43_wifi_pm(cyw43_t *s,uint32_t value){assert(lwip_depth==1 && s==&cyw43_state && value==CYW43_NONE_PM);return 0;}
 void cyw43_arch_poll(void){}
 int cyw43_arch_wifi_connect_async(const char *s,const char *p,uint32_t a){assert(s&&p&&a==CYW43_AUTH_WPA2_AES_PSK);joins++;return 0;}
 int cyw43_wifi_link_status(cyw43_t *s,int i){(void)s;(void)i;return CYW43_LINK_UP;}

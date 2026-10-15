@@ -27,7 +27,7 @@ static uint8_t rx[RX_CAP];
 static pm_rx_flow rx_flow;
 #define rx_used rx_flow.used
 static uint8_t app_rx[RX_CAP];
-static size_t app_used;
+static size_t app_used,last_payload_length;
 static bool ws_continuation;
 static bool socket_dead;
 static char expected_accept[29];
@@ -71,6 +71,7 @@ static err_t recv_cb(void *arg, struct tcp_pcb *p, struct pbuf *buf, err_t e) {
     (void)arg;(void)p;
     if (!buf) { pm_logf("%s\n","net tcp_peer_closed");socket_dead=true;return ERR_OK; }
     if (e!=ERR_OK || buf->tot_len>RX_CAP-rx_used) {
+        pm_logf("net receive_failed sdk_result=%d used=%u incoming=%u\n",(int)e,(unsigned)rx_used,(unsigned)buf->tot_len);
         pbuf_free(buf); socket_dead=true; return ERR_OK;
     }
     size_t n=buf->tot_len, credit=0;
@@ -122,17 +123,17 @@ static err_t connected_cb(void *arg, struct tcp_pcb *p, err_t e) {
 bool pm_net_init(void) {
     return cyw43_arch_init()==0;
 }
-void pm_net_close(void) {
+static void close_unlocked(void) {
     if(pcb) {
         struct tcp_pcb *old=pcb; pcb=NULL;
         tcp_arg(old,NULL); tcp_recv(old,NULL); tcp_err(old,NULL);
         if(tcp_close(old)!=ERR_OK)tcp_abort(old);
     }
     stage=PM_NET_DOWN;socks_step=SOCKS_METHOD;
-    pm_rx_flow_reset(&rx_flow); app_used=0; ws_continuation=false; socket_dead=false;
+    pm_rx_flow_reset(&rx_flow); app_used=0; last_payload_length=0; ws_continuation=false; socket_dead=false;
 }
-void pm_net_begin(const pm_profile *p) {
-    pm_net_close(); profile=p;
+static void begin_unlocked(const pm_profile *p) {
+    close_unlocked(); profile=p;
     if(!p || !p->server_ip || !ipaddr_aton(p->server_ip,&server_addr)) { stage=PM_NET_FAILED;return; }
     if(p->socks && (!p->proxy_ip || !ipaddr_aton(p->proxy_ip,&proxy_addr) ||
                     !p->proxy_user || !p->proxy_password ||
@@ -186,11 +187,10 @@ static void process_socks(void) {
     if(result!=SOCKS5_OK){stage=PM_NET_FAILED;return;}
     consume(n);if(!upgrade())stage=PM_NET_FAILED;
 }
-void pm_net_poll(void) {
+static void poll_unlocked(void) {
     uint64_t started=pm_trace_clock();
-    cyw43_arch_poll();
     pm_trace_slow(PM_TRACE_SLOW_POLL,started,2);
-    if(socket_dead){pm_net_close();stage=PM_NET_FAILED;return;}
+    if(socket_dead){close_unlocked();stage=PM_NET_FAILED;return;}
     if(stage==PM_NET_SOCKS && rx_used)process_socks();
     if(stage==PM_NET_WS) {
         static const uint8_t end[]={"\r\n\r\n"};
@@ -225,9 +225,9 @@ void pm_net_poll(void) {
         if(rx_used>2048)stage=PM_NET_FAILED;
     }
 }
-pm_net_stage pm_net_state(void){return stage;}
+static pm_net_stage state_unlocked(void){return stage;}
 
-bool pm_net_send(uint8_t kind, const char *json) {
+static bool send_unlocked(uint8_t kind, const char *json) {
     if(stage!=PM_NET_READY || !pcb)return false;
     size_t n=strlen(json);if(n>1024)return false;
     uint8_t *packet=tx_packet;size_t k=0;
@@ -245,19 +245,20 @@ bool pm_net_send(uint8_t kind, const char *json) {
     return send_raw(packet,k);
 }
 
-bool pm_net_take(uint8_t *kind, char *json, size_t cap) {
+size_t pm_net_payload_length(void){return last_payload_length;}
+static bool take_unlocked(uint8_t *kind, char *json, size_t cap) {
 again:
     if(stage!=PM_NET_READY)return false;
     if(app_used>=4) {
         uint32_t n=(uint32_t)app_rx[0]<<24|(uint32_t)app_rx[1]<<16|
             (uint32_t)app_rx[2]<<8|app_rx[3];
-        if(n<2 || n>sizeof app_rx-4 || (n>4096 && app_used>=6 && app_rx[5]!=13)) {
+        if(n<2 || n>sizeof app_rx-4 || (n>4096 && app_used>=6 && app_rx[5]!=13 && app_rx[5]!=18)) {
             stage=PM_NET_FAILED;return false;
         }
         if(app_used>=n+4) {
             if(app_rx[4]!=1 || n-2>=cap){stage=PM_NET_FAILED;return false;}
-            if(app_rx[5]<1 || app_rx[5]>17){stage=PM_NET_FAILED;return false;}
-            *kind=app_rx[5];memcpy(json,app_rx+6,n-2);json[n-2]=0;
+            if(app_rx[5]<1 || app_rx[5]>18){stage=PM_NET_FAILED;return false;}
+            last_payload_length=n-2;*kind=app_rx[5];memcpy(json,app_rx+6,n-2);json[n-2]=0;
             app_used-=n+4;memmove(app_rx,app_rx+n+4,app_used);return true;
         }
     }
@@ -293,3 +294,12 @@ again:
     consume(h+(size_t)length);
     goto again;
 }
+
+// Background IRQ owns RX writes; main owns app/pixel decoding. Copy/consume
+// transport buffers under the SDK lock, then release it before rendering.
+void pm_net_close(void){cyw43_arch_lwip_begin();close_unlocked();cyw43_arch_lwip_end();}
+void pm_net_begin(const pm_profile *p){cyw43_arch_lwip_begin();begin_unlocked(p);cyw43_arch_lwip_end();}
+void pm_net_poll(void){cyw43_arch_poll();cyw43_arch_lwip_begin();poll_unlocked();cyw43_arch_lwip_end();}
+pm_net_stage pm_net_state(void){cyw43_arch_lwip_begin();pm_net_stage result=state_unlocked();cyw43_arch_lwip_end();return result;}
+bool pm_net_send(uint8_t kind,const char *json){cyw43_arch_lwip_begin();bool ok=send_unlocked(kind,json);cyw43_arch_lwip_end();return ok;}
+bool pm_net_take(uint8_t *kind,char *json,size_t cap){cyw43_arch_lwip_begin();bool ok=take_unlocked(kind,json,cap);cyw43_arch_lwip_end();return ok;}

@@ -1309,12 +1309,12 @@ fn apply(
                 || device.selected.as_deref() != Some(&plugin)
                 || device
                     .pending_frame_id
-                    .is_some_and(|id| device.last_sent_frame != Some(id))
+                    .is_some_and(|id| device.last_rendered_frame != Some(id))
             {
                 return Ok(false);
             }
-            // Replace only a completely sent frame. The sender cannot invalidate
-            // an image halfway through writing its fragments.
+            // Admit only after terminal drawing. Never replace an image queued in
+            // the socket or still being consumed by a slower terminal.
             device.pending_frame_id = None;
             apply(
                 state,

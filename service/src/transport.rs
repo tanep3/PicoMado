@@ -241,10 +241,22 @@ fn process_inner(
                     selected,
                     display_epoch,
                 } => WireMessage::InputAccepted {
+                    input_context: Some(crate::protocol::InputContext {
+                        incarnation: token.incarnation,
+                        session_epoch: token.session_epoch,
+                        display_epoch,
+                        mode: guard.session_mode(token).unwrap_or("normal").into(),
+                    }),
                     selected,
                     display_epoch,
                 },
                 InputResult::Position(position) => WireMessage::PluginPosition {
+                    input_context: Some(crate::protocol::InputContext {
+                        incarnation: token.incarnation,
+                        session_epoch: token.session_epoch,
+                        display_epoch: after.as_ref().map_or(0, |v| v.1),
+                        mode: guard.session_mode(token).unwrap_or("normal").into(),
+                    }),
                     plugin: position.plugin,
                     dataset_id: position.dataset_id,
                     target_date: position.target_date,
@@ -441,11 +453,12 @@ fn enqueue_outbox(
                         guard
                             .frame_asset(&asset_handle)
                             .zip(guard.frame_mode(&frame))
+                            .map(|(asset, mode)| (asset, mode, guard.binary_frames(token)))
                     } else {
                         None
                     }
                 };
-                let Some((asset, mode)) = asset else {
+                let Some((asset, mode, binary)) = asset else {
                     continue;
                 };
                 let (width, height, format) = if asset.len() == crate::eink::FRAME_BYTES {
@@ -486,7 +499,12 @@ fn enqueue_outbox(
                         offset: (index * IMAGE_FRAGMENT_BYTES) as u32,
                         bytes: chunk.to_vec(),
                     };
-                    let encoded_chunk = encode(&message).map_err(|_| ())?;
+                    let encoded_chunk = if binary {
+                        crate::protocol::encode_frame_bytes(&message)
+                    } else {
+                        encode(&message)
+                    }
+                    .map_err(|_| ())?;
                     wire_bytes += encoded_chunk.len();
                     queue
                         .push(Packet {
@@ -519,9 +537,20 @@ fn enqueue_outbox(
 }
 
 async fn writer_loop<S>(
+    sink: S,
+    rx: tokio::sync::mpsc::Receiver<WriterCommand>,
+    app: SharedApp,
+) -> &'static str
+where
+    S: Sink<Message> + Unpin,
+{
+    writer_loop_with_ack_timeout(sink, rx, app, None).await
+}
+async fn writer_loop_with_ack_timeout<S>(
     mut sink: S,
     mut rx: tokio::sync::mpsc::Receiver<WriterCommand>,
     app: SharedApp,
+    ack_timeout_override: Option<Duration>,
 ) -> &'static str
 where
     S: Sink<Message> + Unpin,
@@ -535,6 +564,7 @@ where
         Ok(guard) => guard.dispatch_notifications(),
         Err(_) => return "application_unavailable",
     };
+    let mut awaiting_render: Option<(u64, tokio::time::Instant)> = None;
     let mut refresh = false;
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let end_reason = loop {
@@ -544,10 +574,19 @@ where
                 Some(WriterCommand::Bind(token))=>{current=Some(token);refresh=true;},
                 Some(WriterCommand::Reply(message))=>{
                     let kind=wire_label(&message);
+                    let reply_context=match &message {
+                        WireMessage::InputAccepted{input_context,..}|WireMessage::PluginPosition{input_context,..}=>input_context.clone(),
+                        _=>None,
+                    };
+                    let reply_started=std::time::Instant::now();
                     if write_wire(&mut sink,message).await.is_err() {
                         let (id,incarnation,session_epoch)=session_identity(&current);
                         eprintln!("picomado control_write_failed id={} incarnation={} session_epoch={} kind={}",id,incarnation,session_epoch,kind);
                         break "control_write_failed";
+                    }
+                    if let Some(ctx)=reply_context {
+                        let (id,_,_)=session_identity(&current);
+                        eprintln!("picomado input_reply_sent id={} incarnation={} session_epoch={} display_epoch={} mode={} kind={} elapsed_us={}",id,ctx.incarnation,ctx.session_epoch,ctx.display_epoch,ctx.mode,kind,reply_started.elapsed().as_micros());
                     }
                 },
                 Some(WriterCommand::Stop)=>break "requested_stop",
@@ -557,7 +596,16 @@ where
                 if result.is_err(){break "application_unavailable";}
                 refresh=true;
             },
-            _=tick.tick()=>refresh=true,
+            _=tick.tick()=>{
+                refresh=true;
+                if let (Some(token),Some((frame_id,deadline)))=(&current,awaiting_render) {
+                    if !app.lock().is_ok_and(|guard|guard.frame_waiting_for_render(token,frame_id)) { awaiting_render=None; }
+                    else if tokio::time::Instant::now()>=deadline {
+                        eprintln!("picomado render_ack_timeout id={} incarnation={} session_epoch={} frame_id={}",token.device_id,token.incarnation,token.session_epoch,frame_id);
+                        break "render_ack_timeout";
+                    }
+                }
+            },
             _=std::future::ready(()),if refresh && current.is_some()=>{
                 refresh=false;
                 let token=current.as_ref().expect("bound");
@@ -648,6 +696,10 @@ where
                             io_complete.duration_since(frame.started).as_micros(), lock_wait.as_micros(), completion_time.as_micros());
                     }
                     if let Some(frame)=progress.remove(&packet.outbox_id) {
+                        // Bound a lost/failed draw ACK without keeping a peer
+                        // stuck forever. This wait holds neither sink nor App lock.
+                        let budget=ack_timeout_override.unwrap_or(Duration::from_secs(if frame.plan.payload_bytes==crate::eink::FRAME_BYTES {15}else{10}));
+                        awaiting_render=Some((frame.plan.frame_id,tokio::time::Instant::now()+budget));
                         log_frame_end(&token.device_id,packet.outbox_id,frame,
                             match completed {Some(true)=>"sent",Some(false)=>"effect_already_resolved",None=>"effect_completion_failed"});
                     }
@@ -1035,6 +1087,272 @@ mod tests {
         }
     }
 
+    #[test]
+    fn input_context_tracks_current_mode_generation_and_keeps_legacy_wire_compatible() {
+        for cap in ["lcd", "eink"] {
+            let temp = tempfile::tempdir().unwrap();
+            let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+                &temp.path().join("state.db"),
+            )));
+            let mut current = None;
+            let mut diagnostics = AckDiagnostics::default();
+            process(
+                &app,
+                &mut current,
+                WireMessage::Hello {
+                    device_id: "desk".into(),
+                    capabilities: vec![cap.into()],
+                    screen_owner_epoch: 1,
+                },
+                &mut diagnostics,
+            )
+            .unwrap();
+            let token = current.clone().unwrap();
+            {
+                let mut guard = app.lock().unwrap();
+                guard
+                    .publish_plugin_source(
+                        "weather",
+                        &token,
+                        1,
+                        include_bytes!("../assets/jma-tokyo-20261012.json"),
+                        "cached",
+                        "2026-10-12",
+                    )
+                    .unwrap();
+                for plugin in ["caricature", "rain-radar", "youtube"] {
+                    let d = guard.view().devices.remove(0);
+                    guard
+                        .set_enabled("desk", d.incarnation, d.enabled_revision, plugin, false)
+                        .unwrap();
+                }
+            }
+            for (message, expected_mode) in [
+                (
+                    WireMessage::EnterSub {
+                        incarnation: token.incarnation,
+                        session_epoch: token.session_epoch,
+                    },
+                    "sub",
+                ),
+                (
+                    WireMessage::Down {
+                        incarnation: token.incarnation,
+                        session_epoch: token.session_epoch,
+                    },
+                    "sub",
+                ),
+                (
+                    WireMessage::Power {
+                        incarnation: token.incarnation,
+                        session_epoch: token.session_epoch,
+                    },
+                    "normal",
+                ),
+                (
+                    WireMessage::Down {
+                        incarnation: token.incarnation,
+                        session_epoch: token.session_epoch,
+                    },
+                    "normal",
+                ),
+            ] {
+                let reply = process(&app, &mut current, message, &mut diagnostics)
+                    .unwrap()
+                    .unwrap();
+                let context = match &reply {
+                    WireMessage::InputAccepted {
+                        input_context: Some(context),
+                        display_epoch,
+                        ..
+                    } => {
+                        assert_eq!(*display_epoch, context.display_epoch);
+                        context
+                    }
+                    WireMessage::PluginPosition {
+                        input_context: Some(context),
+                        ..
+                    } => context,
+                    other => panic!("missing input generation: {other:?}"),
+                };
+                assert_eq!(context.incarnation, token.incarnation);
+                assert_eq!(context.session_epoch, token.session_epoch);
+                assert_eq!(
+                    context.display_epoch,
+                    app.lock().unwrap().selection_for(&token).unwrap().1
+                );
+                assert_eq!(context.mode, expected_mode);
+                assert_eq!(
+                    Decoder::default().push(&encode(&reply).unwrap()).unwrap(),
+                    vec![reply]
+                );
+            }
+        }
+        // Old server replies omit the additive context and still decode.
+        for reply in [
+            WireMessage::InputAccepted {
+                input_context: None,
+                selected: Some("weather".into()),
+                display_epoch: 5,
+            },
+            WireMessage::PluginPosition {
+                input_context: None,
+                plugin: "weather".into(),
+                dataset_id: "fixture".into(),
+                target_date: "2026-10-14".into(),
+                index: 0,
+            },
+        ] {
+            let encoded = encode(&reply).unwrap();
+            assert!(!String::from_utf8_lossy(&encoded).contains("input_context"));
+            assert_eq!(Decoder::default().push(&encoded).unwrap(), vec![reply]);
+        }
+    }
+
+    #[tokio::test]
+    async fn binary_negotiation_delivers_lcd_and_eink_pixels_and_both_acks() {
+        for cap in ["lcd", "eink"] {
+            let temp = tempfile::tempdir().unwrap();
+            let app = Arc::new(std::sync::Mutex::new(
+                App::open_with_clock(&temp.path().join("state.db"), Arc::new(FixtureClock))
+                    .unwrap(),
+            ));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server_app = app.clone();
+            let server = tokio::spawn(async move {
+                axum::serve(listener, web::router(server_app))
+                    .await
+                    .unwrap()
+            });
+            let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{address}/device"))
+                .await
+                .unwrap();
+            ws.send(ClientMessage::Binary(
+                encode(&WireMessage::Hello {
+                    device_id: "desk".into(),
+                    capabilities: vec![cap.into(), crate::protocol::FRAME_BYTES_CAPABILITY.into()],
+                    screen_owner_epoch: 1,
+                })
+                .unwrap()
+                .into(),
+            ))
+            .await
+            .unwrap();
+            let mut decoder = Decoder::default();
+            let mut assembler = FrameAssembler::default();
+            let mut native = 0;
+            let (frame, pixels) = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let ClientMessage::Binary(bytes) = ws.next().await.unwrap().unwrap() else {
+                        continue;
+                    };
+                    if bytes[5] == crate::protocol::FRAME_BYTES_KIND {
+                        native += 1;
+                    }
+                    for message in decoder.push(&bytes).unwrap() {
+                        if matches!(
+                            message,
+                            WireMessage::FrameStart { .. } | WireMessage::FrameChunk { .. }
+                        ) {
+                            if let Some(frame) = assembler.accept(message).unwrap() {
+                                return frame;
+                            }
+                        }
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert!(native > 0);
+            assert_eq!(pixels.len(), if cap == "lcd" { 25600 } else { 3813 });
+            for message in [
+                WireMessage::ReceiptAck {
+                    token: frame.clone(),
+                },
+                WireMessage::RenderedAck {
+                    token: frame.clone(),
+                },
+            ] {
+                ws.send(ClientMessage::Binary(encode(&message).unwrap().into()))
+                    .await
+                    .unwrap();
+            }
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while app.lock().unwrap().view().devices[0].last_rendered_frame
+                    != Some(frame.frame_id)
+                {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            ws.close(None).await.unwrap();
+            server.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn lost_render_ack_is_bounded_while_control_and_heartbeat_still_run() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = app_at_fixture_date(&temp.path().join("state.db"));
+        let session = state.hello("desk", ["lcd".into()].into(), 1).unwrap();
+        let frame = state
+            .queue_lcd_frame(&session, "youtube", vec![0; 25600])
+            .unwrap();
+        let app = Arc::new(std::sync::Mutex::new(state));
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let count = Arc::new(AtomicUsize::new(0));
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
+        let worker = tokio::spawn(writer_loop_with_ack_timeout(
+            MockSink {
+                count: count.clone(),
+                limit: usize::MAX,
+                recorded: Some(recorded.clone()),
+            },
+            rx,
+            app.clone(),
+            Some(Duration::from_millis(80)),
+        ));
+        tx.send(WriterCommand::Bind(session.clone())).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while count.load(Ordering::SeqCst) < 8 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        {
+            let mut guard = app.lock().unwrap();
+            guard.heartbeat(&session, 1).unwrap();
+            assert!(guard
+                .terminal_event(Event::ReceiptAck {
+                    token: frame.clone()
+                })
+                .unwrap());
+            assert!(guard.frame_waiting_for_render(&session, frame.frame_id));
+        }
+        tx.send(WriterCommand::Reply(WireMessage::InputAccepted {
+            input_context: None,
+            selected: Some("youtube".into()),
+            display_epoch: frame.display_epoch,
+        }))
+        .await
+        .unwrap();
+        let reason = tokio::time::timeout(Duration::from_secs(2), worker)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reason, "render_ack_timeout");
+        assert!(recorded.lock().unwrap().iter().any(|m|matches!(m,Message::Binary(bytes) if matches!(Decoder::default().push(bytes).ok().and_then(|v|v.into_iter().next()),Some(WireMessage::InputAccepted{..})))));
+        let mut guard = app.lock().unwrap();
+        guard.button(&session, ButtonAction::Next).unwrap();
+        assert!(!guard.frame_waiting_for_render(&session, frame.frame_id));
+        assert!(!guard
+            .terminal_event(Event::RenderedAck { token: frame })
+            .unwrap());
+    }
+
     struct FixtureClock;
     impl Clock for FixtureClock {
         fn unix_seconds(&self) -> i64 {
@@ -1181,6 +1499,7 @@ mod tests {
         let prior = fast_count.load(Ordering::SeqCst);
         fast_tx
             .send(WriterCommand::Reply(WireMessage::InputAccepted {
+                input_context: None,
                 selected,
                 display_epoch,
             }))
@@ -2028,6 +2347,7 @@ mod tests {
                             WireMessage::InputAccepted {
                                 selected,
                                 display_epoch,
+                                ..
                             } => Some((selected, display_epoch)),
                             WireMessage::Error { code } => panic!("unexpected error: {code}"),
                             _ => None,
@@ -2156,6 +2476,7 @@ mod tests {
         };
         assert!(!app.lock().unwrap().frame_is_current(&old));
         tx.send(WriterCommand::Reply(WireMessage::InputAccepted {
+            input_context: None,
             selected,
             display_epoch,
         }))

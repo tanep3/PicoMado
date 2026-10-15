@@ -26,42 +26,51 @@ static unsigned send_room=sizeof sent;
 static const pm_profile test_profile={"dummy-ssid","dummy-password","198.51.100.1",true,
     "192.0.2.1","dummy-user","dummy-proxy-password",1080};
 int cyw43_arch_init(void){return 0;}
+static unsigned lwip_depth;
+void cyw43_arch_lwip_begin(void){assert(lwip_depth==0);lwip_depth=1;}
+void cyw43_arch_lwip_end(void){assert(lwip_depth==1);lwip_depth=0;}
 void cyw43_arch_poll(void){}
+uint32_t save_and_disable_interrupts(void){return 0;}
+void restore_interrupts(uint32_t state){(void)state;}
 uint32_t get_rand_32(void){return 0x12345678;}
 int ipaddr_aton(const char *text,ip_addr_t *address){return inet_pton(AF_INET,text,&address->addr)==1;}
 struct tcp_pcb *tcp_new_ip_type(int t){assert(t==IPADDR_TYPE_V4);return &socket_instance;}
-void tcp_arg(struct tcp_pcb *p,void *arg){assert(p==&socket_instance && !arg);}
-void tcp_recv(struct tcp_pcb *p,tcp_recv_fn cb){assert(p==&socket_instance);receive_callback=cb;}
-void tcp_err(struct tcp_pcb *p,tcp_err_fn cb){assert(p==&socket_instance);(void)cb;}
+void tcp_arg(struct tcp_pcb *p,void *arg){assert(lwip_depth==1);assert(p==&socket_instance && !arg);}
+void tcp_recv(struct tcp_pcb *p,tcp_recv_fn cb){assert(lwip_depth==1);assert(p==&socket_instance);receive_callback=cb;}
+void tcp_err(struct tcp_pcb *p,tcp_err_fn cb){assert(lwip_depth==1);assert(p==&socket_instance);(void)cb;}
 err_t tcp_connect(struct tcp_pcb *p,const ip_addr_t *a,uint16_t port,tcp_connected_fn cb){
-    assert(p==&socket_instance && a && port==1080);connect_callback=cb;return ERR_OK;
+    assert(lwip_depth==1);assert(p==&socket_instance && a && port==1080);connect_callback=cb;return ERR_OK;
 }
-unsigned tcp_sndbuf(struct tcp_pcb *p){assert(p==&socket_instance);return send_room;}
+unsigned tcp_sndbuf(struct tcp_pcb *p){assert(lwip_depth==1);assert(p==&socket_instance);return send_room;}
 err_t tcp_write(struct tcp_pcb *p,const void *bytes,size_t n,int flags){
-    assert(p==&socket_instance && n<=sizeof sent && flags==TCP_WRITE_FLAG_COPY);
+    assert(lwip_depth==1);assert(p==&socket_instance && n<=sizeof sent && flags==TCP_WRITE_FLAG_COPY);
     if(write_result)return write_result;
     memcpy(sent,bytes,n);sent_length=n;sends++;return ERR_OK;
 }
-err_t tcp_output(struct tcp_pcb *p){assert(p==&socket_instance);
+err_t tcp_output(struct tcp_pcb *p){assert(lwip_depth==1);assert(p==&socket_instance);
 #if PM_TRACE_ENABLE
     clock_us+=60000;
 #endif
     return output_result;
 }
-err_t tcp_close(struct tcp_pcb *p){assert(p==&socket_instance);return ERR_OK;}
-void tcp_abort(struct tcp_pcb *p){assert(p==&socket_instance);}
-void tcp_recved(struct tcp_pcb *p,u16_t n){assert(p==&socket_instance);(void)n;}
+err_t tcp_close(struct tcp_pcb *p){assert(lwip_depth==1);assert(p==&socket_instance);return ERR_OK;}
+void tcp_abort(struct tcp_pcb *p){assert(lwip_depth==1);assert(p==&socket_instance);}
+void tcp_recved(struct tcp_pcb *p,u16_t n){assert(lwip_depth==1);assert(p==&socket_instance);(void)n;}
 unsigned pbuf_copy_partial(const struct pbuf *p,void *out,unsigned n,unsigned offset){
     assert(offset+n<=p->tot_len);memcpy(out,p->payload+offset,n);return n;
 }
 void pbuf_free(struct pbuf *p){assert(p);}
 static void feed(const uint8_t *data,size_t n){
     struct pbuf buffer={(unsigned)n,data};assert(receive_callback);
-    assert(receive_callback(NULL,&socket_instance,&buffer,ERR_OK)==ERR_OK);pm_net_poll();
+    cyw43_arch_lwip_begin();
+    assert(receive_callback(NULL,&socket_instance,&buffer,ERR_OK)==ERR_OK);
+    cyw43_arch_lwip_end();pm_net_poll();
 }
 static void begin(void){
     pm_net_begin(&test_profile);assert(stage==PM_NET_TCP);
+    cyw43_arch_lwip_begin();
     assert(connect_callback(NULL,&socket_instance,ERR_OK)==ERR_OK);
+    cyw43_arch_lwip_end();
     const uint8_t expected[]={5,1,2};
     assert(stage==PM_NET_SOCKS && sent_length==3 && !memcmp(sent,expected,3));
 }
@@ -76,6 +85,32 @@ static void authenticated(void){
     assert(stage==PM_NET_SOCKS && sends==before+1 && sent_length==10);
     const uint8_t expected[]={5,1,0,1,198,51,100,1,16153>>8,16153&255};
     assert(!memcmp(sent,expected,sizeof expected));
+}
+// Main owns the copy while a background callback appends the next message.
+static size_t binary_ws(uint8_t *wire,uint8_t kind,const uint8_t *payload,size_t n){
+    size_t body=n+6,k=0;assert(body<65536);
+    wire[k++]=0x82;wire[k++]=126;wire[k++]=(uint8_t)(body>>8);wire[k++]=(uint8_t)body;
+    uint32_t app_length=(uint32_t)n+2;
+    for(unsigned i=0;i<4;i++)wire[k++]=(uint8_t)(app_length>>(24-8*i));
+    wire[k++]=1;wire[k++]=kind;memcpy(wire+k,payload,n);return k+n;
+}
+static void background_receive_ownership(void){
+    uint8_t pixels[4210],wire[4300];char main_copy[4300],control[16];uint8_t kind;
+    for(size_t i=0;i<sizeof pixels;i++)pixels[i]=(uint8_t)(i*37);
+    size_t n=binary_ws(wire,18,pixels,sizeof pixels);
+    feed(wire,7);assert(!pm_net_take(&kind,main_copy,sizeof main_copy));
+    feed(wire+7,4093);assert(!pm_net_take(&kind,main_copy,sizeof main_copy));
+    feed(wire+4100,n-4100);
+    assert(pm_net_take(&kind,main_copy,sizeof main_copy));
+    assert(kind==18 && pm_net_payload_length()==sizeof pixels && lwip_depth==0);
+    assert(!memcmp(main_copy,pixels,sizeof pixels));
+    // This emulates receive IRQ arrival while main holds a frame for SPI.
+    const uint8_t reply[]={'{','}'};n=binary_ws(wire,8,reply,sizeof reply);feed(wire,n);
+    assert(!memcmp(main_copy,pixels,sizeof pixels));
+    assert(pm_net_take(&kind,control,sizeof control));
+    assert(kind==8 && pm_net_payload_length()==2 && !strcmp(control,"{}"));
+    assert(!pm_net_take(&kind,control,sizeof control) && lwip_depth==0);
+    puts("background receive: SDK-lock protected calls, split >4KiB binary with NUL, immutable main/SPI copy PASS");
 }
 int main(void){
     authenticated();
@@ -98,6 +133,7 @@ int main(void){
     assert(strstr(trace_text,"event=tcp_write frame=255 a=0"));
     puts("TCP output trace: actual error and duration retained; queue acceptance != wire arrival PASS");
 #endif
+    background_receive_ownership();
     puts("production SOCKS5: split METHOD v5 / AUTH v1 / CONNECT v5 / WebSocket accepted");
     write_result=-1;assert(!pm_net_send(5,"{}") && stage==PM_NET_FAILED);write_result=0;
     stage=PM_NET_READY;send_room=0;assert(!pm_net_send(5,"{}") && stage==PM_NET_FAILED);send_room=sizeof sent;

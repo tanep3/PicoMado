@@ -16,7 +16,8 @@ cyw43_t cyw43_state;
 static jmp_buf finished;
 static uint32_t clock_ms=1000,confirm_loop_ms;
 static int pressed=-1,wifi_link=CYW43_LINK_DOWN,ip_link=CYW43_LINK_DOWN;
-static int sdk_result;
+static int sdk_result,pm_result;
+static unsigned lwip_depth,pm_calls;
 static unsigned joins,erases,server_begins,hello_count,heartbeat_count,loops;
 static bool sta_on,server_ready,welcome_available;
 static bool usb_connected;
@@ -50,7 +51,9 @@ void gpio_init(uint pin){assert(pin>=12 && pin<=15);}
 void gpio_set_dir(uint pin,int dir){assert(pin>=12 && pin<=15 && dir==GPIO_IN);}
 void gpio_pull_up(uint pin){assert(pin>=12 && pin<=15);}
 bool gpio_get(uint pin){
+#if PM_BUTTON_COUNT == 4
     if(pin==PM_BUTTON_SUB_PIN && phase==CONFIRM_AWAY)confirm_loop_ms=clock_ms;
+#endif
     return pressed<0 || pin!=button_pins[pressed];
 }
 void pico_get_unique_board_id_string(char *id,size_t n){
@@ -98,6 +101,7 @@ bool pm_net_send(uint8_t kind,const char *j){
     if(kind==9){frame_renders++;clock_ms++;}
     return true;
 }
+size_t pm_net_payload_length(void){return 0;}
 bool pm_net_take(uint8_t *kind,char *j,size_t n){
     if(!welcome_available)return false;
     const char welcome[]="{\"type\":\"welcome\",\"data\":{\"incarnation\":1,\"session_epoch\":1}}";
@@ -106,6 +110,12 @@ bool pm_net_take(uint8_t *kind,char *j,size_t n){
 }
 void cyw43_arch_enable_sta_mode(void){sta_on=true;}
 void cyw43_arch_disable_sta_mode(void){sta_on=false;wifi_link=ip_link=CYW43_LINK_DOWN;}
+void cyw43_arch_lwip_begin(void){assert(lwip_depth==0);lwip_depth=1;}
+void cyw43_arch_lwip_end(void){assert(lwip_depth==1);lwip_depth=0;}
+int cyw43_wifi_pm(cyw43_t *s,uint32_t value){
+    assert(sta_on && lwip_depth==1 && s==&cyw43_state && value==CYW43_NONE_PM);
+    pm_calls++;return pm_result;
+}
 void cyw43_arch_poll(void){}
 int cyw43_arch_wifi_connect_async(const char *ssid,const char *pw,uint32_t auth){
     assert(sta_on && wifi_enabled && auth==CYW43_AUTH_WPA2_AES_PSK);
@@ -116,7 +126,7 @@ int cyw43_wifi_link_status(cyw43_t *s,int i){assert(s==&cyw43_state && i==0);ret
 int cyw43_tcpip_link_status(cyw43_t *s,int i){assert(s==&cyw43_state && i==0);return ip_link;}
 
 static bool released(void){
-    for(unsigned i=0;i<PM_BUTTON_COUNT;i++)if(buttons[i].raw || buttons[i].stable)return false;
+    for(unsigned i=0;i<input_count();i++)if(buttons[i].raw || buttons[i].stable)return false;
     return true;
 }
 static void press_after_release(int index){if(pressed<0 && released())pressed=index;}
@@ -263,7 +273,10 @@ static void test_frame_pipeline(void){
     puts("frame trace: production parse/CRC -> receipt -> SPI -> rendered; stale completion ACK rejected PASS");
 }
 #endif
-int main(int argc,char **argv){
+#ifndef PM_APP_TEST_ENTRY
+#define PM_APP_TEST_ENTRY main
+#endif
+int PM_APP_TEST_ENTRY(int argc,char **argv){
     assert(argc==1 || (argc==2 && (!strcmp(argv[1],"sdk-error") ||
         !strcmp(argv[1],"usb-snapshot") || !strcmp(argv[1],"error-log") ||
         !strcmp(argv[1],"drop-during-retry"))));
@@ -289,6 +302,9 @@ int main(int argc,char **argv){
         process(11,"{\"type\":\"error\",\"data\":{\"code\":\"stale_frame\"}}");
         state=ACTIVE;
         process(11,"{\"type\":\"error\",\"data\":{\"code\":\"invalid_ack_token\"}}");
+        wifi_enabled=sta_on=false;pm_result=-5;unsigned calls=pm_calls;
+        start_wifi();assert(state==WIFI && pm_calls==calls+1 && lwip_depth==0);
+        pm_result=0;
     }
 #if PM_TRACE_ENABLE
     if(!sdk_result)assert(pm_trace_dropped()>0);

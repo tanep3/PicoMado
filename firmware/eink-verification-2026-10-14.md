@@ -21,7 +21,7 @@ PicoMadoサーバのmono1対応は全回帰・Releaseビルド・clippy完了。
 
 通信・状態・メニューは共通main/net/core、LCD／E-ink表示実装はCMakeで分離。表示は1 poll最大128B、BUSYをsleepループで待たず全更新に10秒期限。sleep後100msも非同期。待機では未開始の再描画を破棄し、物理更新終了後に画像を保持。旧世代・未描画・失敗フレームへRenderedAckを返さない。
 
-HOME／AWAY等の10通信マクロはLCD個体と値を表示せず一致比較済み。両config.hは0600・Git除外。DHCPと別々の端末IDを維持。E-ink_1はモジュール未到着なのでCONNECTED=0で通信／ボタンを先行確認する構成。到着時のパネル世代を確認し、V4ならCONNECTED=1で再ビルドする。
+HOME／AWAY等の10通信マクロはLCD個体と値を表示せず一致比較済み。両config.hは0600・Git除外。DHCPと別々の端末IDを維持。E-ink_1は初回準備時にCONNECTED=0で通信／ボタンを先行確認する構成とした。ユーザーが 2026-10-14 20:50 JST に V4 を確認した。現在の表示有効V4候補と未結合条件は[追加検証記録](control-reply-verification-2026-10-14.md)を参照。実機描画・ボタン試験は未実施。
 
 ## 完了した試験
 
@@ -42,7 +42,7 @@ E-ink_0のFlash IDはE6614864D3813227。本人確認後の単一BOOTSELで取得
 | E-ink_1 | build/.unbound/E-ink_1/E-ink_1.uf2 | 720896 | 366468 | 155228 | 未結合・禁止 |
 | PicoMado-lcd1 | build/PicoMado-lcd1/PicoMado-lcd1.uf2 | 718848 | 365348 | 198680 | load／verify済み |
 
-ELF dataは両方0。静的RAM量でありスタック等を含む実測最大値ではない。E-ink_1はCONNECTED=0で表示処理が最適化除去されるため、転置修正によるUF2差分はない。モジュール到着後のCONNECTED=1再ビルドは修正された共通変換を使用する。
+ELF dataは両方0。静的RAM量でありスタック等を含む実測最大値ではない。E-ink_1はCONNECTED=0で表示処理が最適化除去されるため、転置修正によるUF2差分はない。CONNECTED=1の表示有効候補は修正された共通変換を使用する。
 
 ```text
 E-ink_0 e8409d06a6786467b11b7d1554334d8bbbc8aa8cd399436fb04e16e0e230131a
@@ -62,7 +62,7 @@ PicoMado-lcd1 ea8d2a3a9a98dc635117ac6819a2901281549bf874213a40896cee7bcde71a1b
 ## 残件
 
 1. LCDの物理SUB押下からWeb変更で解除される操作全体の目視受入。局所Sub→Normal同期は実mainのホスト試験済み、更新LCDのWeb再配信は両ACK確認済み。E-ink_0は今回再書込み不要。
-2. E-ink_1の実機Flash IDと到着モジュール世代を確認。現在は未結合・CONNECTED=0で未転送。
+2. E-ink_1の実機Flash IDを確認・結合する。実物はユーザーが 2026-10-14 20:50 JST に V4 を確認した。表示有効の通常コード候補は準備済み、未転送・実機描画／ボタン試験未実施。
 3. 2ボタン実機、AWAY実機、天気／雨雲の最終可読性・電流・長期運転は未確認。本番反映の承認ブロッカーは解消済み。
 
 ## 天気・Web保存の追加修正と復旧後の本番試験

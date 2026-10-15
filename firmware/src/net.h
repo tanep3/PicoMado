@@ -18,4 +18,5 @@ void pm_net_poll(void);
 void pm_net_close(void);
 pm_net_stage pm_net_state(void);
 bool pm_net_take(uint8_t *kind, char *json, size_t cap);
+size_t pm_net_payload_length(void);
 bool pm_net_send(uint8_t kind, const char *json);

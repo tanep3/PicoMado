@@ -173,7 +173,16 @@ static void standby(void){
 }
 static void start_wifi(void){
     pm_net_close();
-    if(!wifi_enabled){cyw43_arch_enable_sta_mode();wifi_enabled=true;}
+    if(!wifi_enabled){
+        cyw43_arch_enable_sta_mode();wifi_enabled=true;
+        // Match the working YouTube player: PM2 is the SDK default even in
+        // performance mode. Streaming/control use an awake radio; standby
+        // still disables STA. Change no profile or connection credentials.
+        cyw43_arch_lwip_begin();
+        int result=cyw43_wifi_pm(&cyw43_state,CYW43_NONE_PM);
+        cyw43_arch_lwip_end();
+        pm_logf("net wifi_pm requested=none sdk_result=%d\n",result);
+    }
     incarnation=0;session_epoch=0;display_epoch=0;
     await_selection=false;sub_mode=false;pending_standby=false;pending_sub_cancel=false;
     local("WIFI", "CONNECTING");
@@ -272,7 +281,7 @@ static bool send_pending_render_ack(void){
 static bool send_hello(void){
     int n=snprintf(outbound_json,sizeof outbound_json,
         "{\"type\":\"hello\",\"data\":{\"device_id\":\"%s\","
-        "\"capabilities\":[\"%s\",\"buttons%u\"],\"screen_owner_epoch\":%llu}}",
+        "\"capabilities\":[\"%s\",\"buttons%u\",\"frame-bytes-v1\"],\"screen_owner_epoch\":%llu}}",
         PM_DEVICE_ID,pm_display_capability(),PM_BUTTON_COUNT,(unsigned long long)owner_epoch);
     return n>0 && (size_t)n<sizeof outbound_json && pm_net_send(1,outbound_json);
 }
@@ -324,80 +333,11 @@ static bool settings_message(const char *j){
         (unsigned long long)incarnation,(unsigned long long)settings.revision);
     return n>0&&(size_t)n<sizeof outbound_json && pm_net_send(4,outbound_json);
 }
-static void process(uint8_t kind,const char *j){
-    const char *type=NULL;
-    switch(kind){
-    case 2:type="welcome";break;case 3:type="settings";break;
-    case 10:type="input_accepted";break;case 11:type="error";break;
-    case 12:type="frame_start";break;case 13:type="frame_chunk";break;
-    case 17:type="plugin_position";break;default:break;
-    }
-    if(!type || !string_equals(j,"type",type)){retry();return;}
-    if(kind==2 && state==SESSION && string_equals(j,"type","welcome")){
-        if(!number(j,"incarnation",&incarnation)||!number(j,"session_epoch",&session_epoch)){
-            retry();return;
-        }
-        if(settings.incarnation!=incarnation){
-            uint32_t selected=settings.profile;defaults();settings.profile=selected;
-        }
-        retry_ms=settings.retry_s*1000u;
-        display_epoch=0;state=ACTIVE;last_heartbeat_ms=now_ms();
-#if PM_DIAGNOSTIC_STAGE
-        pm_logf("diag stage=welcome session=%llu\n",(unsigned long long)session_epoch);
-#endif
-        pm_display_status("PICO MADO","WAIT IMAGE");return;
-    }
-    if(state!=ACTIVE)return;
-    if(kind==3){if(!settings_message(j))retry();return;}
-    if(kind==10){
-        uint64_t d;if(number(j,"display_epoch",&d) && d>=display_epoch){
-            display_epoch=d;await_selection=false;pm_reset(&assembly);
-        }
-        if(pending_sub_cancel){sub_mode=false;pending_sub_cancel=false;}
-        if(pending_standby)standby();
-        return;
-    }
-    if(kind==17){
-        sub_mode=!pending_sub_cancel;pending_sub_cancel=false;
-        await_selection=false;pm_reset(&assembly);return;
-    }
-    if(kind==11){
-        // Only fixed protocol error names are printable; never echo received JSON.
-        static const char *const codes[]={"stale_frame","invalid_ack","invalid_ack_token","invalid_input",
-            "invalid_frame","invalid_hello","stale_session","stale_settings",
-            "unavailable","hello_required","duplicate_hello","unexpected_message"};
-        const char *code="unknown";
-        for(size_t i=0;i<sizeof codes/sizeof codes[0];i++)
-            if(string_equals(j,"code",codes[i])){code=codes[i];break;}
-        pm_logf("net profile=%s server_error=%s\n",profile_name(),code);
-        retry();return;
-    }
-    if(kind!=12 && kind!=13)return;
-    pm_token t;if(!token_from(j,&t))return;
-    if(await_selection || t.incarnation!=incarnation || t.session_epoch!=session_epoch ||
-       t.screen_owner_epoch!=owner_epoch || t.display_epoch<display_epoch)return;
-    if(kind==12){
-#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
-        if(drawing)return;
-#endif
-        uint64_t w,h,len,crc;
-        if(!number(j,"width",&w)||!number(j,"height",&h)||
-           !number(j,"byte_len",&len)||!number(j,"crc32",&crc)||
-           !string_equals(j,"format",PM_PIXEL_FORMAT_NAME) ||
-           !pm_start(&assembly,t,w,h,PM_PIXEL_FORMAT_NAME,len,crc))pm_reset(&assembly);
-        else {
-            display_epoch=t.display_epoch;
-            // Web changes can leave SUB without a physical button response.
-            // Only a validated current frame may replace the cached mode.
-            if(string_equals(j,"mode","normal"))sub_mode=false;
-            else if(string_equals(j,"mode","sub"))sub_mode=true;
-            pm_trace_event(PM_TRACE_FRAME_START,t.frame_id,0,0);
-        }
-        return;
-    }
-    uint64_t offset;size_t count;bool complete;
-    if(!number(j,"offset",&offset)||!parse_bytes(j,&count)||
-       !pm_chunk(&assembly,t,offset,fragment,count,&complete))return;
+static void receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t count){
+    if(state!=ACTIVE || await_selection || !pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch) ||
+       !assembly.active || !pm_token_equal(assembly.token,t))return;
+    bool complete;
+    if(!pm_chunk(&assembly,t,offset,bytes,count,&complete))return;
     if(!complete)return;
     pm_trace_event(PM_TRACE_CRC_OK,t.frame_id,0,PM_IMAGE_BYTES);
     if(!pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch))return;
@@ -427,6 +367,106 @@ static void process(uint8_t kind,const char *j){
 #endif
     }
     pending_render_token=t;pending_render_ack=true;
+}
+static uint64_t binary_u64(const uint8_t *p){uint64_t v=0;for(unsigned i=0;i<8;i++)v=(v<<8)|p[i];return v;}
+static void process_frame_bytes(const uint8_t *p,size_t length){
+    if(!length)return;
+    size_t id_length=p[0],header=1+id_length+44;
+    if(id_length!=strlen(PM_DEVICE_ID) || length<=header || length-header>PM_FRAGMENT_BYTES ||
+       memcmp(p+1,PM_DEVICE_ID,id_length))return;
+    const uint8_t *fields=p+1+id_length;
+    pm_token t={.incarnation=binary_u64(fields),.session_epoch=binary_u64(fields+8),
+        .display_epoch=binary_u64(fields+16),.screen_owner_epoch=binary_u64(fields+24),.frame_id=binary_u64(fields+32)};
+    uint32_t offset=(uint32_t)fields[40]<<24|(uint32_t)fields[41]<<16|(uint32_t)fields[42]<<8|fields[43];
+    receive_chunk(t,offset,p+header,length-header);
+}
+static void process(uint8_t kind,const char *j){
+    const char *type=NULL;
+    switch(kind){
+    case 2:type="welcome";break;case 3:type="settings";break;
+    case 10:type="input_accepted";break;case 11:type="error";break;
+    case 12:type="frame_start";break;case 13:type="frame_chunk";break;
+    case 17:type="plugin_position";break;default:break;
+    }
+    if(!type || !string_equals(j,"type",type)){retry();return;}
+    if(kind==2 && state==SESSION && string_equals(j,"type","welcome")){
+        if(!number(j,"incarnation",&incarnation)||!number(j,"session_epoch",&session_epoch)){
+            retry();return;
+        }
+        if(settings.incarnation!=incarnation){
+            uint32_t selected=settings.profile;defaults();settings.profile=selected;
+        }
+        retry_ms=settings.retry_s*1000u;
+        display_epoch=0;state=ACTIVE;last_heartbeat_ms=now_ms();
+#if PM_DIAGNOSTIC_STAGE
+        pm_logf("diag stage=welcome session=%llu\n",(unsigned long long)session_epoch);
+#endif
+        pm_display_status("PICO MADO","WAIT IMAGE");return;
+    }
+    if(state!=ACTIVE)return;
+    if(kind==3){if(!settings_message(j))retry();return;}
+    if(kind==10 || kind==17){
+        uint64_t epoch=display_epoch,reply_inc,reply_session;
+        bool contextual=strstr(j,"\"input_context\"")!=NULL;
+        bool has_epoch=number(j,"display_epoch",&epoch);
+        if((contextual && (!has_epoch || !number(j,"incarnation",&reply_inc) ||
+             !number(j,"session_epoch",&reply_session) || reply_inc!=incarnation || reply_session!=session_epoch)) ||
+           (kind==10 && !has_epoch) || (has_epoch && epoch<display_epoch)){
+            pm_logf("net reply kind=%u current=%llu result=stale\n",kind,(unsigned long long)display_epoch);return;
+        }
+        // A matching reply may arrive after FrameStart or between its chunks.
+        // Only a genuinely newer generation invalidates an assembly.
+        bool keep=assembly.active && (!has_epoch || epoch==display_epoch);
+        if(has_epoch && epoch>display_epoch){display_epoch=epoch;pm_reset(&assembly);}
+        await_selection=false;
+        if(string_equals(j,"mode","normal"))sub_mode=false;
+        else if(string_equals(j,"mode","sub"))sub_mode=true;
+        else if(kind==17)sub_mode=!pending_sub_cancel;
+        else if(pending_sub_cancel)sub_mode=false;
+        pending_sub_cancel=false;
+        pm_logf("net reply kind=%u epoch=%llu keep=%u\n",kind,(unsigned long long)display_epoch,keep?1u:0u);
+        if(kind==10 && pending_standby)standby();
+        return;
+    }
+    if(kind==11){
+        // Only fixed protocol error names are printable; never echo received JSON.
+        static const char *const codes[]={"stale_frame","invalid_ack","invalid_ack_token","invalid_input",
+            "invalid_frame","invalid_hello","stale_session","stale_settings",
+            "unavailable","hello_required","duplicate_hello","unexpected_message"};
+        const char *code="unknown";
+        for(size_t i=0;i<sizeof codes/sizeof codes[0];i++)
+            if(string_equals(j,"code",codes[i])){code=codes[i];break;}
+        pm_logf("net profile=%s server_error=%s\n",profile_name(),code);
+        retry();return;
+    }
+    if(kind!=12 && kind!=13)return;
+    pm_token t;if(!token_from(j,&t))return;
+    if(t.incarnation!=incarnation || t.session_epoch!=session_epoch ||
+       t.screen_owner_epoch!=owner_epoch || t.display_epoch<display_epoch)return;
+    // A validated newer FrameStart is also proof that the server accepted
+    // the selection, even when its control reply is still in flight.
+    if(await_selection && (kind!=12 || t.display_epoch<=display_epoch || pending_standby))return;
+    if(kind==12){
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+        if(drawing)return;
+#endif
+        uint64_t w,h,len,crc;
+        if(!number(j,"width",&w)||!number(j,"height",&h)||
+           !number(j,"byte_len",&len)||!number(j,"crc32",&crc)||
+           !string_equals(j,"format",PM_PIXEL_FORMAT_NAME) ||
+           !pm_start(&assembly,t,w,h,PM_PIXEL_FORMAT_NAME,len,crc))pm_reset(&assembly);
+        else {
+            display_epoch=t.display_epoch;await_selection=false;
+            // Web changes can leave SUB without a physical button response.
+            // Only a validated current frame may replace the cached mode.
+            if(string_equals(j,"mode","normal"))sub_mode=false;
+            else if(string_equals(j,"mode","sub"))sub_mode=true;
+            pm_trace_event(PM_TRACE_FRAME_START,t.frame_id,0,0);
+        }
+        return;
+    }
+    uint64_t offset;size_t count;
+    if(number(j,"offset",&offset) && parse_bytes(j,&count))receive_chunk(t,offset,fragment,count);
 }
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
 static void poll_display(void){
@@ -579,7 +619,13 @@ int main(void){
             }
             if(state!=ACTIVE && now-started_ms>settings.app_s*1000u){retry();continue;}
             uint8_t kind;
-            while(pm_net_take(&kind,json,sizeof json))process(kind,json);
+            // Bound cooperative receive work so image decoding cannot starve
+            // network polling or physical input under continuous playback.
+            for(unsigned messages=0;messages<2 && pm_net_take(&kind,json,sizeof json);messages++){
+                if(kind==18)process_frame_bytes((const uint8_t *)json,pm_net_payload_length());
+                else process(kind,json);
+                if(state==ACTIVE)pm_net_poll();
+            }
             // Welcome/settings handling may also advance timers and draw.
             now=now_ms();
             if(!send_pending_render_ack()){retry();continue;}

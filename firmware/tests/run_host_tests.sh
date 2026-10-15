@@ -72,3 +72,11 @@ done
 build eink-order tests/eink_transform_dump.c
 python3 tests/eink_legacy_order_test.py "$work/eink-order"
 printf 'PASS eink-legacy-order\n'
+
+for device in sample-a E-ink_0 E-ink_1; do
+    cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 \
+        '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
+        -I"devices/$device" -Isrc -Itests/app_stubs tests/control_reply_test.c src/core.c src/trace.c \
+        -o "$work/control-$device"
+    run "control-$device"
+done

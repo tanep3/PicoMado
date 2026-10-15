@@ -19,3 +19,9 @@ int cyw43_arch_wifi_connect_async(const char *ssid,const char *password,uint32_t
 void cyw43_arch_poll(void);
 int cyw43_wifi_link_status(cyw43_t *state,int interface);
 int cyw43_tcpip_link_status(cyw43_t *state,int interface);
+
+void cyw43_arch_lwip_begin(void);
+void cyw43_arch_lwip_end(void);
+
+#define CYW43_NONE_PM 0x10u
+int cyw43_wifi_pm(cyw43_t *state,uint32_t value);

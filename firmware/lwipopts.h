@@ -1,7 +1,8 @@
 #pragma once
 #define NO_SYS 1
 #define LWIP_SOCKET 0
-#define MEM_LIBC_MALLOC 1
+// Background lwIP runs in IRQ context; use its bounded internal heap.
+#define MEM_LIBC_MALLOC 0
 #define MEM_ALIGNMENT 4
 #define MEM_SIZE 16000
 #define MEMP_NUM_TCP_SEG 32
