@@ -801,10 +801,10 @@ fn image_prompt(
             serde_json::to_string(&news).unwrap_or_default()
         ),
     };
-    const HEADING: &str = "一言なんの画像か見出しをそえてください。";
+    let heading = templates.heading.trim();
     let mut style = job.request.settings.style.prompt.clone();
-    if job.request.settings.include_heading && !style.contains(HEADING) {
-        style.push_str(HEADING);
+    if job.request.settings.include_heading && !style.contains(heading) {
+        style.push_str(heading);
     }
     templates
         .image_prompt(&[
@@ -1188,6 +1188,7 @@ mod tests {
         PromptSnapshot {
             news: include_str!("../../assets/caricature-news-prompt.txt").into(),
             image: include_str!("../../assets/caricature-image-prompt.txt").into(),
+            heading: include_str!("../../assets/caricature-heading-prompt.txt").into(),
             warning: None,
         }
     }
@@ -1242,14 +1243,14 @@ mod tests {
             assert_eq!(new_prompt.matches(phrase).count(), 1, "{job_id}");
             let style = &old_job.request.settings.style.prompt;
             assert!(
-                new_prompt.contains(&format!("{style}{phrase} Draw")),
+                new_prompt.contains(&format!("{style}{phrase} オリジナル")),
                 "{job_id}"
             );
             assert_eq!(
                 new_prompt,
                 old_prompt.replacen(
-                    &format!("{style} Draw an original composition."),
-                    &format!("{style}{phrase} Draw an original composition."),
+                    &format!("{style} オリジナルの構図で描いてください。"),
+                    &format!("{style}{phrase} オリジナルの構図で描いてください。"),
                     1
                 ),
                 "{job_id}"
@@ -1284,7 +1285,49 @@ mod tests {
         .unwrap();
         let prompt = image_prompt(&test_templates(), &job, None, Path::new("/tmp"), "").unwrap();
         assert_eq!(prompt.matches(phrase).count(), 1);
-        assert!(prompt.contains(&format!("昭和のキラキラ少女漫画調。{phrase} Draw")));
+        assert!(prompt.contains(&format!("昭和のキラキラ少女漫画調。{phrase} オリジナル")));
+    }
+    #[test]
+    fn edited_heading_file_controls_all_generation_routes() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("templates");
+        fs::create_dir_all(&root).unwrap();
+        let instruction = "画像の内容が伝わる短い日本語の見出しを必ず画像内に書いてください。";
+        fs::write(root.join("heading.txt"), format!("{instruction}\n")).unwrap();
+        let templates = PromptSnapshot::load(&root, &temp.path().join("job")).unwrap();
+        for (slot, input) in [
+            (0, GenerationInput::News),
+            (-1, GenerationInput::News),
+            (-2, GenerationInput::CustomText("雲の上の猫".into())),
+        ] {
+            let mut request = GenerationRequest {
+                job_id: "edited_heading".into(),
+                slot,
+                requested_at_unix: 0,
+                input,
+                settings: GenerationSettings::default(),
+            };
+            let off = GenerationJob::accept(request.clone()).unwrap();
+            let off_prompt = image_prompt(&templates, &off, None, Path::new("/tmp"), "").unwrap();
+            assert!(!off_prompt.contains(instruction));
+            request.settings.include_heading = true;
+            let mut on = GenerationJob::accept(request).unwrap();
+            let on_prompt = image_prompt(&templates, &on, None, Path::new("/tmp"), "").unwrap();
+            assert_eq!(on_prompt.matches(instruction).count(), 1);
+            assert!(on_prompt.contains(&format!(
+                "{}{instruction} オリジナル",
+                on.request.settings.style.prompt
+            )));
+            assert!(!on_prompt.contains("一言なんの画像か見出しをそえてください。"));
+            on.request.settings.style.prompt.push_str(instruction);
+            assert_eq!(
+                image_prompt(&templates, &on, None, Path::new("/tmp"), "")
+                    .unwrap()
+                    .matches(instruction)
+                    .count(),
+                1
+            );
+        }
     }
     use std::os::unix::fs::PermissionsExt;
     #[test]
@@ -1442,7 +1485,7 @@ esac
             &later_template,
             test_templates()
                 .image
-                .replace("one original illustration", "one later illustration"),
+                .replace("作品を1枚", "後から編集した作品を1枚"),
         )
         .unwrap();
         let codex = temp.path().join("fake-codex");
@@ -1502,7 +1545,7 @@ printf '%s\n' "$PWD/generated.png" > "$out"
             options.template_root.join("image.txt"),
             test_templates()
                 .image
-                .replace("one original illustration", "one edited illustration"),
+                .replace("作品を1枚", "編集済みの作品を1枚"),
         )
         .unwrap();
         let mut request = GenerationRequest {
@@ -1546,11 +1589,11 @@ printf '%s\n' "$PWD/generated.png" > "$out"
         assert!(evidence["submitted_prompt"]
             .as_str()
             .unwrap()
-            .contains("one edited illustration"));
+            .contains("編集済みの作品を1枚"));
         assert!(!evidence["submitted_prompt"]
             .as_str()
             .unwrap()
-            .contains("one later illustration"));
+            .contains("後から編集した作品を1枚"));
         let resume_request = GenerationRequest {
             job_id: "resume_job".into(),
             slot: 1,

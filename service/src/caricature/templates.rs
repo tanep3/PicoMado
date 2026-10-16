@@ -9,6 +9,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const LIMIT: u64 = 32 * 1024;
 const NEWS_DEFAULT: &str = include_str!("../../assets/caricature-news-prompt.txt");
 const IMAGE_DEFAULT: &str = include_str!("../../assets/caricature-image-prompt.txt");
+const HEADING_DEFAULT: &str = include_str!("../../assets/caricature-heading-prompt.txt");
+const SNAPSHOT_LIMIT: u64 = 20 * LIMIT;
 const NEWS_KEYS: &[&str] = &["topic", "utc_time", "recent_sources", "feedback"];
 const IMAGE_KEYS: &[&str] = &["style", "brief", "work_dir", "feedback"];
 
@@ -16,12 +18,18 @@ const IMAGE_KEYS: &[&str] = &["style", "brief", "work_dir", "feedback"];
 pub struct PromptSnapshot {
     pub news: String,
     pub image: String,
+    #[serde(default = "default_heading")]
+    pub heading: String,
     pub warning: Option<String>,
+}
+
+fn default_heading() -> String {
+    HEADING_DEFAULT.into()
 }
 
 impl PromptSnapshot {
     pub fn saved_warning(job_dir: &Path) -> Option<String> {
-        let data = read_limited(&job_dir.join("prompt-templates.json"), 2 * LIMIT).ok()?;
+        let data = read_limited(&job_dir.join("prompt-templates.json"), SNAPSHOT_LIMIT).ok()?;
         serde_json::from_slice::<Self>(&data).ok()?.warning
     }
 
@@ -29,7 +37,7 @@ impl PromptSnapshot {
         fs::create_dir_all(job_dir).map_err(|_| "prompt template snapshot unavailable")?;
         let snapshot_path = job_dir.join("prompt-templates.json");
         if snapshot_path.exists() {
-            let data = read_limited(&snapshot_path, 2 * LIMIT)
+            let data = read_limited(&snapshot_path, SNAPSHOT_LIMIT)
                 .map_err(|_| "saved prompt template snapshot unavailable")?;
             let snapshot: Self = serde_json::from_slice(&data)
                 .map_err(|_| "saved prompt template snapshot invalid")?;
@@ -37,17 +45,21 @@ impl PromptSnapshot {
                 .map_err(|_| "saved news prompt template invalid")?;
             validate(&snapshot.image, IMAGE_KEYS)
                 .map_err(|_| "saved image prompt template invalid")?;
+            validate(&snapshot.heading, &[])
+                .map_err(|_| "saved heading prompt template invalid")?;
             return Ok(snapshot);
         }
         let (news, news_warning) = load_one(root, "news.txt", NEWS_DEFAULT, NEWS_KEYS);
         let (image, image_warning) = load_one(root, "image.txt", IMAGE_DEFAULT, IMAGE_KEYS);
-        let warnings: Vec<_> = [news_warning, image_warning]
+        let (heading, heading_warning) = load_one(root, "heading.txt", HEADING_DEFAULT, &[]);
+        let warnings: Vec<_> = [news_warning, image_warning, heading_warning]
             .into_iter()
             .flatten()
             .collect();
         let snapshot = Self {
             news,
             image,
+            heading,
             warning: (!warnings.is_empty()).then(|| warnings.join("; ")),
         };
         let data = serde_json::to_vec(&snapshot).map_err(|_| "prompt template snapshot invalid")?;
@@ -127,6 +139,9 @@ fn read_limited(path: &Path, limit: u64) -> Result<Vec<u8>, &'static str> {
 }
 
 fn validate(source: &str, keys: &[&str]) -> Result<(), &'static str> {
+    if source.trim().is_empty() {
+        return Err("empty template");
+    }
     let fields: Vec<_> = keys.iter().map(|key| (*key, String::new())).collect();
     expand(source, keys, &fields).map(|_| ())
 }
@@ -205,20 +220,27 @@ mod tests {
         let first = PromptSnapshot::load(&root, &first_dir).unwrap();
         assert!(root.join("news.txt").exists());
         assert!(root.join("image.txt").exists());
+        assert!(root.join("heading.txt").exists());
         assert!(first.warning.is_none());
-        let updated = IMAGE_DEFAULT.replace("one original illustration", "one edited illustration");
+        let updated = IMAGE_DEFAULT.replace("作品を1枚", "編集済みの作品を1枚");
         fs::write(root.join("image.txt"), updated).unwrap();
         let updated_news = NEWS_DEFAULT.replace("Webを調べ", "編集後に調べ");
         fs::write(root.join("news.txt"), updated_news).unwrap();
+        fs::write(root.join("heading.txt"), "編集した見出し指示。").unwrap();
         let second_dir = temp.path().join("job2");
         fs::create_dir_all(&second_dir).unwrap();
         let second = PromptSnapshot::load(&root, &second_dir).unwrap();
-        assert!(second.image.contains("one edited illustration"));
+        assert!(second.image.contains("編集済みの作品を1枚"));
         assert!(second.news.contains("編集後に調べ"));
+        assert_eq!(second.heading, "編集した見出し指示。");
+        assert_eq!(
+            PromptSnapshot::load(&root, &first_dir).unwrap().heading,
+            HEADING_DEFAULT
+        );
         assert!(!PromptSnapshot::load(&root, &first_dir)
             .unwrap()
             .image
-            .contains("one edited illustration"));
+            .contains("編集済みの作品を1枚"));
         assert!(!PromptSnapshot::load(&root, &first_dir)
             .unwrap()
             .news
@@ -290,5 +312,41 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output, "literal {{feedback}} 1 [] none");
+    }
+
+    #[test]
+    fn heading_invalid_edit_falls_back_and_old_snapshots_keep_the_original_instruction() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("templates");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("heading.txt"), "   \n").unwrap();
+        let initial = PromptSnapshot::load(&root, &temp.path().join("first")).unwrap();
+        assert_eq!(initial.heading, HEADING_DEFAULT);
+        assert!(initial
+            .warning
+            .unwrap()
+            .contains("heading.txt: empty template; using bundled default"));
+        fs::write(root.join("heading.txt"), "日本語で見出しを書いてください。").unwrap();
+        let good = PromptSnapshot::load(&root, &temp.path().join("good")).unwrap();
+        fs::write(root.join("heading.txt"), "{{unknown}}").unwrap();
+        let fallback = PromptSnapshot::load(&root, &temp.path().join("bad")).unwrap();
+        assert_eq!(fallback.heading, good.heading);
+        assert!(fallback
+            .warning
+            .unwrap()
+            .contains("heading.txt: unknown placeholder; using last valid"));
+        let mut old = serde_json::to_value(&good).unwrap();
+        old.as_object_mut().unwrap().remove("heading");
+        let old_dir = temp.path().join("old");
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::write(
+            old_dir.join("prompt-templates.json"),
+            serde_json::to_vec(&old).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            PromptSnapshot::load(&root, &old_dir).unwrap().heading,
+            HEADING_DEFAULT
+        );
     }
 }
