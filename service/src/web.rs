@@ -21,6 +21,7 @@ pub fn router(app: SharedApp) -> Router {
         .route("/", get(home))
         .route("/device", get(crate::transport::upgrade))
         .route("/plugins/{plugin}", get(plugin_page))
+        .route("/plugins/caricature/prompts", get(home))
         .route("/api/plugins/{plugin}/options", get(plugin_options))
         .route("/api/plugins/{plugin}", get(plugin_state))
         .route(
@@ -476,6 +477,78 @@ mod tests {
         let status = response.status();
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
         (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn caricature_catalog_api_edits_adds_deletes_and_survives_reopening() {
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("state.db");
+        let router = super::router(Arc::new(Mutex::new(App::open(&database).unwrap())));
+        let route = "/api/plugins/caricature";
+        let mut view = call(&router, Method::GET, route, json!({})).await.1;
+        let old = view.clone();
+        for key in ["topic", "style"] {
+            let change = json!({"expected_revision":view["revision"],"command":{"kind":format!("save_{key}"),"id":null,"label":"日本語の新候補","prompt":"追加した日本語の指示文"}});
+            let (status, next) = call(
+                &router,
+                Method::POST,
+                "/api/plugins/caricature/commands",
+                change.clone(),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(
+                call(
+                    &router,
+                    Method::POST,
+                    "/api/plugins/caricature/commands",
+                    change
+                )
+                .await
+                .0,
+                StatusCode::CONFLICT
+            );
+            view = next;
+            let id = view["data"]["settings"][key]["id"].clone();
+            let (status,next)=call(&router,Method::POST,"/api/plugins/caricature/commands",json!({"expected_revision":view["revision"],"command":{"kind":format!("save_{key}"),"id":id,"label":"編集した候補","prompt":"編集後の日本語の指示文"}})).await;
+            assert_eq!(status, StatusCode::OK);
+            view = next;
+            assert_eq!(
+                view["data"]["settings"][key]["prompt"],
+                "編集後の日本語の指示文"
+            );
+            let old_id = old["data"]["settings"][key]["id"].clone();
+            let (status,next)=call(&router,Method::POST,"/api/plugins/caricature/commands",json!({"expected_revision":view["revision"],"command":{"kind":format!("delete_{key}"),"id":old_id}})).await;
+            assert_eq!(status, StatusCode::OK);
+            view = next;
+        }
+        assert_eq!(
+            view["data"]["settings"]["include_heading"],
+            old["data"]["settings"]["include_heading"]
+        );
+        assert_eq!(view["data"]["history"], old["data"]["history"]);
+        assert_eq!(
+            view["data"]["default_topics"],
+            old["data"]["default_topics"]
+        );
+        assert_eq!(
+            view["data"]["default_styles"],
+            old["data"]["default_styles"]
+        );
+        drop(router);
+        let reopened = super::router(Arc::new(Mutex::new(App::open(&database).unwrap())));
+        let saved = call(&reopened, Method::GET, route, json!({})).await.1;
+        assert_eq!(saved["data"], view["data"]);
+        let response = reopened
+            .oneshot(
+                Request::builder()
+                    .uri("/plugins/caricature/prompts")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]

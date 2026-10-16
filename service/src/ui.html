@@ -263,7 +263,7 @@
       parent.append(box);
     }
     async function loadManaged(){
-      const id=location.pathname.split('/').pop();
+      const id=location.pathname.split('/')[2];
       if(['youtube','caricature'].includes(id))managedViews[id]=await api(`/api/plugins/${id}`);
       if(id==='caricature')protectionView=await api('/api/plugins/caricature/protections');
     }
@@ -328,7 +328,7 @@
     }
     function renderManaged(id){
       const view=managedViews[id];if(!view)return;const data=view.data||{};
-      if(id==='caricature'){renderCaricature(data);return}
+      if(id==='caricature'){if(location.pathname==='/plugins/caricature/prompts')renderCaricaturePrompts(data);else renderCaricature(data);return}
       const panel=section(id==='youtube'?'共有動画と再生':'作画と共有設定','この内容はプラグインを表示中の端末で共有します。端末別設定はホームで管理します。','plugin-card');
       jobsPanel(id,panel);
       if(id==='youtube'){
@@ -383,6 +383,52 @@
       if(!latest){const devices=current.devices.filter(d=>d.online&&d.selected==='caricature');if(devices.length){const actions=el('div',undefined,'actions'),select=el('select');select.setAttribute('aria-label','表示先の端末');for(const d of devices){const option=el('option',d.id);option.value=d.id;select.append(option)}const show=button('この端末へ一時表示');show.onclick=()=>managedCommand('caricature',{kind:'show_history',artwork_id:item.artwork_id,device_id:select.value});actions.append(select,show);card.append(actions)}}
       return card;
     }
+    function deleteCaricatureSelection(key,item){
+      if(busy)return;
+      const dialog=el('dialog'),form=el('form',undefined,'dialog-body');dialog.append(form);
+      form.append(el('h2',`「${item.label}」を削除`),el('p','候補一覧から削除します。選択中の場合は残っている別の候補に切り替えます。生成中の文面と保存済み画像は変更しません。'));
+      const name=textField(form,'確認のため名前を入力','text','',true),actions=el('div',undefined,'dialog-actions'),cancel=button('取消'),remove=button('削除する','danger');cancel.type='button';remove.type='submit';remove.disabled=true;
+      name.oninput=()=>remove.disabled=name.value!==item.label||busy;cancel.onclick=()=>dialog.close();actions.append(cancel,remove);form.append(actions);let saving=false;
+      dialog.oncancel=event=>{if(saving)event.preventDefault()};dialog.onclose=()=>dialog.remove();
+      form.onsubmit=async event=>{event.preventDefault();if(saving||name.value!==item.label||busy)return;saving=true;remove.disabled=cancel.disabled=true;
+        if(await managedCommand('caricature',{kind:key==='topic'?'delete_topic':'delete_style',id:item.id},'候補を削除しました')){delete drafts.caricature.catalogEditors?.[key];delete drafts.caricature.catalogSelection?.[key];dialog.close();render()}
+        else{saving=false;remove.disabled=false;cancel.disabled=false}
+      };document.body.append(dialog);dialog.showModal();name.focus();
+    }
+    function renderCaricaturePrompts(data){
+      document.getElementById('page-title').textContent='情報取得プロンプト・作画テイストの管理';
+      document.getElementById('page-lead').textContent='候補の文面と名前を編集し、新しい候補を追加できます。保存後、次の生成から使います。';
+      const draft=drafts.caricature;draft.catalogEditors??={};draft.catalogSelection??={};draft.defaultCatalogSelection??={};
+      const back=el('a','← 風刺画画面へ戻る','button secondary');back.href='/plugins/caricature';main.append(back);
+      for(const [label,key,items] of [['情報取得プロンプト','topic',data.topics||[]],['作画テイスト','style',data.styles||[]]]){
+        const panel=section(label,'既存の候補も編集できます。新規追加では、名前と指示文を入力してください。','plugin-card');
+        const selected=items.find(item=>item.id===(draft.catalogSelection[key]??data.settings?.[key]?.id))||items[0];
+        const selectWrap=el('label',undefined,'field'),select=el('select');selectWrap.append(el('span',`${label}の管理対象`));
+        for(const item of items){const option=el('option',item.label);option.value=item.id;select.append(option)}select.value=selected?.id||'';
+        select.onchange=()=>{draft.catalogSelection[key]=select.value;delete draft.catalogEditors[key];render()};selectWrap.append(select);panel.append(selectWrap,el('p',selected?.prompt||'','prompt-text'));
+        const controls=el('div',undefined,'actions'),edit=button('文面を編集'),add=button('新規追加'),remove=button('削除','danger');
+        edit.disabled=!selected;remove.disabled=!selected||items.length<=1;
+        edit.onclick=()=>{draft.catalogEditors[key]={...selected};render()};add.onclick=()=>{draft.catalogEditors[key]={id:null,label:'',prompt:''};render()};remove.onclick=()=>deleteCaricatureSelection(key,selected);controls.append(edit,add,remove);panel.append(controls);
+        if(items.length<=1)panel.append(el('p','最後の候補は削除できません。必要なら先に新しい候補を追加してください。','plugin-note'));
+        const editor=draft.catalogEditors[key];if(editor){
+          const form=el('form',undefined,'subsection');form.append(el('h3',editor.id?'候補を編集':'候補を新規追加'));
+          const name=textField(form,'名前','text',editor.label,true),body=textField(form,'指示文','textarea',editor.prompt,true);name.maxLength=80;body.maxLength=1200;body.rows=7;
+          name.oninput=()=>editor.label=name.value;body.oninput=()=>editor.prompt=body.value;
+          form.append(el('p','保存した候補を次回生成用に選択します。進行中の生成と既存画像は変更しません。','plugin-note'));
+          const actions=el('div',undefined,'actions'),save=button(editor.id?'変更を保存':'追加して選択','primary'),cancel=button('取消');save.type='submit';cancel.type='button';cancel.onclick=()=>{delete draft.catalogEditors[key];render()};actions.append(save,cancel);form.append(actions);
+          form.onsubmit=async event=>{event.preventDefault();if(form.reportValidity()&&await managedCommand('caricature',{kind:key==='topic'?'save_topic':'save_style',id:editor.id,label:name.value,prompt:body.value},`${label}を${editor.id?'更新':'追加'}しました`)){delete draft.catalogEditors[key];delete draft.catalogSelection[key];render()}};panel.append(form);
+        }
+        const defaults=data[key==='topic'?'default_topics':'default_styles']||[],reference=el('details',undefined,'subsection');reference.open=!!draft.defaultCatalogOpen?.[key];reference.ontoggle=()=>{draft.defaultCatalogOpen??={};draft.defaultCatalogOpen[key]=reference.open};reference.append(el('summary','配布時のデフォルトを表示・コピー'));
+        if(defaults.length){
+          const original=defaults.find(item=>item.id===(draft.defaultCatalogSelection[key]??selected?.id))||defaults[0];
+          const chooseWrap=el('label',undefined,'field'),choose=el('select');chooseWrap.append(el('span','デフォルトの候補'));
+          for(const item of defaults){const option=el('option',item.label);option.value=item.id;choose.append(option)}choose.value=original.id;
+          const originalName=textField(reference,'デフォルトの名前','text',original.label),originalPrompt=textField(reference,'デフォルトの指示文','textarea',original.prompt);originalName.readOnly=originalPrompt.readOnly=true;originalPrompt.rows=7;
+          choose.onchange=()=>{const item=defaults.find(item=>item.id===choose.value);draft.defaultCatalogSelection[key]=choose.value;originalName.value=item.label;originalPrompt.value=item.prompt};chooseWrap.append(choose);reference.insertBefore(chooseWrap,originalName.parentElement);
+          const copy=button('指示文をコピー');copy.type='button';copy.onclick=async()=>{originalPrompt.focus();originalPrompt.select();try{if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(originalPrompt.value);else if(!document.execCommand('copy'))throw new Error();say('デフォルトの指示文をコピーしました')}catch{say('指示文を選択しました。コピーして編集欄に貼り付けてください')}};reference.append(copy,el('p','この欄は参照専用です。編集・削除しても配布時の文面は残ります。必要な文面をコピーし、上の編集欄へ貼り付けて保存してください。','plugin-note'));
+        }panel.append(reference);main.append(panel);
+      }
+    }
     function renderCaricature(data){
       const draft=drafts.caricature,settings=data.settings||{},history=[...(data.history||[])].sort((a,b)=>a.publish_seq-b.publish_seq);
       if(!draft.month)draft.month=new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'}).slice(0,7);
@@ -393,6 +439,7 @@
       }settingsPanel.append(choices);
       const toggles=el('div',undefined,'actions');for(const [label,key,kind,defaultOn]of[['毎時の自動生成','automatic_generation','set_automatic_generation',true],['画像に見出しを付ける','include_heading','set_include_heading',false]]){const wrap=el('label',undefined,'toggle'),input=el('input');input.type='checkbox';input.checked=settings[key]??defaultOn;input.onchange=()=>managedCommand('caricature',{kind,enabled:input.checked},`${label}を保存しました`);wrap.append(input,el('span',label));toggles.append(wrap)}settingsPanel.append(toggles);
       const advanced=el('details',undefined,'advanced');advanced.open=!!draft.advancedOpen;advanced.ontoggle=()=>{draft.advancedOpen=advanced.open};advanced.append(el('summary','詳細設定'));const inner=el('div');advanced.append(inner);
+      const manage=el('a','情報取得プロンプト・作画テイストを管理','button secondary');manage.href='/plugins/caricature/prompts';inner.append(manage);
       const models=el('div',undefined,'field-grid');for(const [label,key,kind]of[['ニュースのモデル','news_model','set_news_model'],['画像のモデル','image_model','set_image_model']]){const input=textField(models,label,'text',settings[key]);const save=button('保存');save.onclick=()=>managedCommand('caricature',{kind,model:input.value});input.parentElement.append(save)}inner.append(models);
       const normal=el('form',undefined,'subsection'),normalFields=el('div',undefined,'field-grid');const lambda=textField(normalFields,'DPID λ','number',settings.dpid_lambda);lambda.min=0;lambda.max=1;lambda.step=.05;const threshold=textField(normalFields,'白黒しきい値','number',settings.threshold);threshold.min=1;threshold.max=254;threshold.step=1;const normalSave=button('画像処理設定を保存');normalSave.type='submit';normal.append(normalFields,normalSave);normal.onsubmit=e=>{e.preventDefault();if(normal.reportValidity())managedCommand('caricature',{kind:'set_normalizer',dpid_lambda:Number(lambda.value),threshold:Number(threshold.value)})};inner.append(normal);
       for(const [label,key,kind]of[['ニュース取得','news_retry','set_news_retry'],['画像生成','image_retry','set_image_retry']]){const form=el('form',undefined,'subsection');form.append(el('p',`${label}の再試行`,'section-label'));const fs=el('div',undefined,'field-grid'),policy=settings[key]||{};const controls=[['retry_count','追加試行回数'],['interval_seconds','試行間隔（秒）'],['deadline_seconds','全体期限（秒・0は無効）'],['attempt_timeout_seconds','1試行の期限（秒）']].map(([k,l])=>{const input=textField(fs,l,'number',policy[k]);input.min=k==='attempt_timeout_seconds'?1:0;input.step=1;return[k,input]});const save=button('再試行設定を保存');save.type='submit';form.append(fs,save);form.onsubmit=e=>{e.preventDefault();if(form.reportValidity())managedCommand('caricature',{kind,policy:Object.fromEntries(controls.map(([k,input])=>[k,Number(input.value)]))})};inner.append(form)}settingsPanel.append(advanced);
@@ -404,7 +451,7 @@
     }
 
     function render(){
-      main.replaceChildren();const id=location.pathname.startsWith('/plugins/')?location.pathname.split('/').pop():null;
+      main.replaceChildren();const id=location.pathname.startsWith('/plugins/')?location.pathname.split('/')[2]:null;
       document.querySelectorAll('nav a').forEach(a=>{if(a.pathname===location.pathname)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
       if(id)renderPlugin(id);else renderHome();
     }

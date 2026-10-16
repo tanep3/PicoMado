@@ -461,6 +461,8 @@ pub struct CaricatureContent {
     browsing: BTreeMap<String, HistoryBrowse>,
     next_manual_slot: i64,
     last_work_cleanup_day: Option<String>,
+    removed_topics: BTreeSet<String>,
+    removed_styles: BTreeSet<String>,
 }
 
 /// A device's display at entry is kept independently from the shared latest
@@ -493,6 +495,22 @@ pub enum CaricatureCommand {
         id: String,
     },
     SetStyle {
+        id: String,
+    },
+    SaveTopic {
+        id: Option<String>,
+        label: String,
+        prompt: String,
+    },
+    SaveStyle {
+        id: Option<String>,
+        label: String,
+        prompt: String,
+    },
+    DeleteTopic {
+        id: String,
+    },
+    DeleteStyle {
         id: String,
     },
     SetNewsModel {
@@ -595,6 +613,90 @@ impl CaricatureContent {
     pub fn settings(&self) -> &GenerationSettings {
         &self.settings
     }
+    fn save_selection(
+        &mut self,
+        topic: bool,
+        id: Option<String>,
+        label: String,
+        prompt: String,
+    ) -> Result<(), ContentError> {
+        let selected = if topic {
+            &self.settings.topic
+        } else {
+            &self.settings.style
+        };
+        let mut items = if topic {
+            self.topics.clone()
+        } else {
+            self.styles.clone()
+        };
+        if items.is_empty() {
+            items.push(selected.clone());
+        }
+        let id = match id {
+            Some(id) if items.iter().any(|item| item.id == id) => id,
+            Some(_) => return Err(ContentError::InvalidSource),
+            None => {
+                let prefix = if topic {
+                    "custom_topic"
+                } else {
+                    "custom_style"
+                };
+                (1..=items.len() + 1)
+                    .map(|n| format!("{prefix}_{n}"))
+                    .find(|id| !items.iter().any(|item| item.id == *id))
+                    .ok_or(ContentError::InvalidSource)?
+            }
+        };
+        let item = Selection {
+            id,
+            label: label.trim().into(),
+            prompt: prompt.trim().into(),
+        };
+        item.validate().map_err(|_| ContentError::InvalidSource)?;
+        if let Some(existing) = items.iter_mut().find(|existing| existing.id == item.id) {
+            *existing = item.clone();
+        } else {
+            items.push(item.clone());
+        }
+        if topic {
+            self.removed_topics.remove(&item.id);
+            self.topics = items;
+            self.settings.topic = item;
+        } else {
+            self.removed_styles.remove(&item.id);
+            self.styles = items;
+            self.settings.style = item;
+        }
+        self.settings.revision = self.settings.revision.saturating_add(1);
+        Ok(())
+    }
+    fn delete_selection(&mut self, topic: bool, id: &str) -> Result<(), ContentError> {
+        let items = if topic {
+            &mut self.topics
+        } else {
+            &mut self.styles
+        };
+        if items.len() <= 1 || !items.iter().any(|item| item.id == id) {
+            return Err(ContentError::InvalidSource);
+        }
+        items.retain(|item| item.id != id);
+        let selected = if topic {
+            &mut self.settings.topic
+        } else {
+            &mut self.settings.style
+        };
+        if selected.id == id {
+            *selected = items[0].clone();
+        }
+        if topic {
+            self.removed_topics.insert(id.into());
+        } else {
+            self.removed_styles.insert(id.into());
+        }
+        self.settings.revision = self.settings.revision.saturating_add(1);
+        Ok(())
+    }
     pub fn state(&self) -> &CaricatureState {
         &self.state
     }
@@ -616,6 +718,11 @@ impl CaricatureContent {
                 .any(|item| item.id == self.settings.style.id)
     }
     pub fn web_state(&self) -> serde_json::Value {
+        static DEFAULTS: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+        let defaults = DEFAULTS.get_or_init(|| {
+            serde_json::from_str(include_str!("../assets/caricature-catalog.json"))
+                .expect("validated bundled catalog")
+        });
         let last_custom_text = self
             .state
             .jobs
@@ -633,6 +740,8 @@ impl CaricatureContent {
             "settings": self.settings,
             "topics": if self.topics.is_empty() { vec![self.settings.topic.clone()] } else { self.topics.clone() },
             "styles": if self.styles.is_empty() { vec![self.settings.style.clone()] } else { self.styles.clone() },
+            "default_topics": defaults["topics"],
+            "default_styles": defaults["styles"],
             "history": self.history,
             "topic_selection_valid": self.topic_valid(),
             "style_selection_valid": self.style_valid(),
@@ -657,6 +766,14 @@ impl CaricatureContent {
             CaricatureCommand::GenerateCustom { text } => plan
                 .jobs
                 .push(self.accept_manual(ctx.now_unix, GenerationInput::CustomText(text))?),
+            CaricatureCommand::SaveTopic { id, label, prompt } => {
+                self.save_selection(true, id, label, prompt)?;
+            }
+            CaricatureCommand::SaveStyle { id, label, prompt } => {
+                self.save_selection(false, id, label, prompt)?;
+            }
+            CaricatureCommand::DeleteTopic { id } => self.delete_selection(true, &id)?,
+            CaricatureCommand::DeleteStyle { id } => self.delete_selection(false, &id)?,
             CaricatureCommand::SetTopic { id } => {
                 let selected = self
                     .topics
@@ -1285,7 +1402,9 @@ impl ContentPlugin for CaricatureContent {
         // Older snapshots contain their own catalogue. Add newly bundled topics
         // without replacing existing choices, settings, jobs or artwork.
         for topic in &self.topics {
-            if !next.topics.iter().any(|existing| existing.id == topic.id) {
+            if !next.removed_topics.contains(&topic.id)
+                && !next.topics.iter().any(|existing| existing.id == topic.id)
+            {
                 next.topics.push(topic.clone());
             }
         }
@@ -1502,6 +1621,160 @@ pub(crate) fn test_canonical_png() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn catalog_edit_add_delete_persists_and_new_jobs_use_saved_prompts() {
+        let ctx = crate::plugin_jobs::CommandContext {
+            now_unix: 7200,
+            now_mono_ms: 0,
+            today_jst: "1970-01-01".into(),
+            settings: crate::settings::PluginSettings::default(),
+            devices: vec![],
+        };
+        let mut content = CaricatureContent::default();
+        for (kind, id, label, prompt) in [
+            (
+                "save_topic",
+                Some("ai_news"),
+                "編集した情報取得",
+                "日本のニュースを調べてください。",
+            ),
+            (
+                "save_style",
+                Some("newspaper_cartoon"),
+                "編集したテイスト",
+                "柔らかな水彩画で描いてください。",
+            ),
+            (
+                "save_topic",
+                None,
+                "追加した情報取得",
+                "宇宙に関するニュースを調べてください。",
+            ),
+            (
+                "save_style",
+                None,
+                "追加したテイスト",
+                "色鮮やかな切り絵で描いてください。",
+            ),
+        ] {
+            let plan = content
+                .plan_command(
+                    &ctx,
+                    &serde_json::json!({"kind":kind,"id":id,"label":label,"prompt":prompt}),
+                )
+                .unwrap();
+            assert!(plan.jobs.is_empty());
+        }
+        assert_eq!(content.topics.len(), 2);
+        assert_eq!(content.styles.len(), 2);
+        assert_eq!(content.settings.topic.id, "custom_topic_1");
+        assert_eq!(content.settings.style.id, "custom_style_1");
+        let mut restored = CaricatureContent::default();
+        restored.load_state(content.save_state()).unwrap();
+        assert_eq!(restored.topics, content.topics);
+        assert_eq!(restored.styles, content.styles);
+        for command in [
+            Some(serde_json::json!({"kind":"generate_news"})),
+            Some(serde_json::json!({"kind":"generate_custom","text":"雲の上の猫"})),
+            None,
+        ] {
+            let mut next = restored.clone();
+            let plan = match command {
+                Some(command) => next.plan_command(&ctx, &command).unwrap(),
+                None => next.plan_schedule(&ctx).unwrap().unwrap(),
+            };
+            let CaricatureWork::Generate { job } =
+                serde_json::from_value(plan.jobs[0].payload.clone()).unwrap()
+            else {
+                panic!("wrong work")
+            };
+            assert_eq!(
+                job.request.settings.topic.prompt,
+                "宇宙に関するニュースを調べてください。"
+            );
+            assert_eq!(
+                job.request.settings.style.prompt,
+                "色鮮やかな切り絵で描いてください。"
+            );
+            next.plan_command(&ctx,&serde_json::json!({"kind":"save_style","id":"custom_style_1","label":"後から編集","prompt":"あとで変更したテイスト"})).unwrap();
+            assert_eq!(
+                next.state.jobs[&job.request.job_id]
+                    .request
+                    .settings
+                    .style
+                    .prompt,
+                "色鮮やかな切り絵で描いてください。"
+            );
+        }
+        for (kind, id) in [
+            ("delete_topic", "ai_news"),
+            ("delete_style", "newspaper_cartoon"),
+        ] {
+            restored
+                .plan_command(&ctx, &serde_json::json!({"kind":kind,"id":id}))
+                .unwrap();
+        }
+        let mut bundled = CaricatureContent::default();
+        bundled
+            .set_catalog(
+                vec![bundled.settings.topic.clone()],
+                vec![bundled.settings.style.clone()],
+            )
+            .unwrap();
+        bundled.load_state(restored.save_state()).unwrap();
+        assert_eq!(bundled.topics.len(), 1);
+        assert_eq!(bundled.styles.len(), 1);
+        let before = bundled.save_state();
+        for command in [
+            serde_json::json!({"kind":"delete_topic","id":"custom_topic_1"}),
+            serde_json::json!({"kind":"delete_style","id":"custom_style_1"}),
+            serde_json::json!({"kind":"save_topic","id":"missing","label":"名前","prompt":"文面"}),
+            serde_json::json!({"kind":"save_style","id":null,"label":"名前","prompt":"   "}),
+        ] {
+            assert!(bundled.plan_command(&ctx, &command).is_err());
+            assert_eq!(bundled.save_state(), before);
+        }
+    }
+    #[test]
+    fn deleting_the_selected_candidate_chooses_a_survivor_without_changing_old_jobs() {
+        let ctx = crate::plugin_jobs::CommandContext {
+            now_unix: 0,
+            now_mono_ms: 0,
+            today_jst: "1970-01-01".into(),
+            settings: crate::settings::PluginSettings::default(),
+            devices: vec![],
+        };
+        let mut content = CaricatureContent::default();
+        for kind in ["save_topic", "save_style"] {
+            content.plan_command(&ctx,&serde_json::json!({"kind":kind,"id":null,"label":"追加","prompt":"追加した文面"})).unwrap();
+        }
+        let plan = content
+            .plan_command(&ctx, &serde_json::json!({"kind":"generate_news"}))
+            .unwrap();
+        let CaricatureWork::Generate { job } =
+            serde_json::from_value(plan.jobs[0].payload.clone()).unwrap()
+        else {
+            panic!("wrong work")
+        };
+        for (kind, id) in [
+            ("delete_topic", "custom_topic_1"),
+            ("delete_style", "custom_style_1"),
+        ] {
+            content
+                .plan_command(&ctx, &serde_json::json!({"kind":kind,"id":id}))
+                .unwrap();
+        }
+        assert_eq!(content.settings.topic.id, "ai_news");
+        assert_eq!(content.settings.style.id, "newspaper_cartoon");
+        assert_eq!(
+            content.state.jobs[&job.request.job_id]
+                .request
+                .settings
+                .style
+                .prompt,
+            "追加した文面"
+        );
+    }
     #[test]
     fn settings_and_snapshot_are_fixed() {
         let mut settings = GenerationSettings::default();
