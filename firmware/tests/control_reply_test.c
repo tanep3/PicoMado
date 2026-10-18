@@ -112,6 +112,23 @@ static void video_reception(void){
  printf("production video clock trace=%u: >32-bit clock, second-frame deadline, elapsed/max-gap stats PASS\n",PM_TRACE_ENABLE);
  puts("production video parser: no per-frame ACK, local input suppression, static ACK restoration PASS");
 }
+#if PM_TRACE_STATS
+static void recorded_frame_paths(void){
+ setup();clock_ms+=1;unsigned id=100001;start(id,1,1,"normal");pm_rx_capture(time_us_64());
+ uint8_t wrong=1;receive_chunk(assembly.token,0,&wrong,1);
+ finish_image(id,1,1,1);assert(!assembly.active && !frame_receipts && !frame_renders);
+ pm_rx_capture(time_us_64());pm_rx_record r;
+ assert(pm_rx_snapshot_record(1,&r) && r.frame==id && r.reason==PM_RX_INVALID);
+ setup();clock_ms++;start(++id,1,1,"normal");pm_rx_capture(time_us_64());
+ reset_assembly();pm_rx_capture(time_us_64());
+ assert(pm_rx_snapshot_record(1,&r) && r.frame==id && r.reason==PM_RX_RESET);
+ setup();clock_ms++;start(++id,1,1,"normal");pm_rx_capture(time_us_64());clock_ms++;
+ start(id+1,1,1,"normal");pm_rx_capture(time_us_64());
+ assert(pm_rx_snapshot_record(1,&r) && r.frame==id && r.reason==PM_RX_REPLACED);
+ assert(pm_rx_snapshot_record(3,&r) && r.frame==id+1 && r.reason==PM_RX_ACTIVE);
+ puts("production frame RX records: valid CRC completion, CRC rejection, reset and replacement IDs PASS");
+}
+#endif
 #endif
 #if defined(PM_TEST_OLD_FIRMWARE) && PM_TEST_OLD_FIRMWARE
 int main(void){
@@ -127,6 +144,9 @@ int main(void){
  native_reception();
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
  video_reception();
+#if PM_TRACE_STATS
+ recorded_frame_paths();
+#endif
 #endif
  // Both response types, legacy/current contexts, before/after start and mid-image.
  for(unsigned kind=10;kind<=17;kind+=7)for(unsigned legacy=0;legacy<2;legacy++)for(unsigned order=0;order<3;order++){

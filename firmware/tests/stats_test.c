@@ -74,4 +74,5 @@ int main(void){
     before=used;clock_us+=100000;pm_stats_usb_poll(false);pm_trace_flush();assert(used==before);
     assert(!masked);
     printf("stats PASS: %zuB RAM, saturation, 64-bit time, frame age, flush cost, USB banks, immutable paced/reopen dumps, quiet/full endpoint\n",pm_stats_ram_bytes());
+    return 0;
 }

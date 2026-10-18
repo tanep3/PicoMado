@@ -8,12 +8,17 @@
 #endif
 #include PM_NET_SOURCE
 cyw43_t cyw43_state;
+#if PM_TRACE_STATS
+static struct stats_mem pool_stats,seg_stats;
+struct stats_ lwip_stats={.memp={&pool_stats,&seg_stats}};
+#endif
 static struct tcp_pcb socket_instance;
 static tcp_connected_fn connect_callback;
 static tcp_recv_fn receive_callback;
 static uint8_t sent[4096];
 static size_t sent_length;
 static unsigned sends;
+static unsigned credits_returned;
 static int write_result,output_result;
 #if PM_TRACE_ENABLE
 static uint64_t clock_us;static char trace_text[32768];static size_t trace_used;
@@ -55,11 +60,11 @@ err_t tcp_output(struct tcp_pcb *p){assert(lwip_depth==1);assert(p==&socket_inst
 }
 err_t tcp_close(struct tcp_pcb *p){assert(lwip_depth==1);assert(p==&socket_instance);return ERR_OK;}
 void tcp_abort(struct tcp_pcb *p){assert(lwip_depth==1);assert(p==&socket_instance);}
-void tcp_recved(struct tcp_pcb *p,u16_t n){assert(lwip_depth==1);assert(p==&socket_instance);(void)n;}
+void tcp_recved(struct tcp_pcb *p,u16_t n){assert(lwip_depth==1);assert(p==&socket_instance);credits_returned+=n;}
 unsigned pbuf_copy_partial(const struct pbuf *p,void *out,unsigned n,unsigned offset){
     assert(offset+n<=p->tot_len);memcpy(out,p->payload+offset,n);return n;
 }
-void pbuf_free(struct pbuf *p){assert(p);}
+unsigned char pbuf_free(struct pbuf *p){assert(p);return 1;}
 static void feed(const uint8_t *data,size_t n){
     struct pbuf buffer={(unsigned)n,data};assert(receive_callback);
     cyw43_arch_lwip_begin();
@@ -112,12 +117,55 @@ static void background_receive_ownership(void){
     assert(!pm_net_take(&kind,control,sizeof control) && lwip_depth==0);
     puts("background receive: SDK-lock protected calls, split >4KiB binary with NUL, immutable main/SPI copy PASS");
 }
+#if PM_TRACE_STATS
+static void ready_again(void){
+    authenticated();const uint8_t reply[]={5,0,0,1,0,0,0,0,0,0};feed(reply,sizeof reply);
+    char response[256];int n=snprintf(response,sizeof response,"HTTP/1.1 101 Switching Protocols\r\nSec-WebSocket-Accept: %s\r\n\r\n",expected_accept);
+    assert(n>0 && (size_t)n<sizeof response);feed((const uint8_t *)response,(size_t)n);assert(stage==PM_NET_READY);
+    socket_instance.rcv_wnd=socket_instance.rcv_ann_wnd=23360;
+}
+static pm_rx_record rx_record(unsigned slot){pm_rx_record r;assert(pm_rx_snapshot_record(slot,&r));return r;}
+static void receive_statistics(void){
+    socket_instance.rcv_wnd=socket_instance.rcv_ann_wnd=23360;
+    pm_rx_capture(clock_us);uint8_t payload[32]={0},wire[64],kind;char decoded[64];
+    size_t n=binary_ws(wire,18,payload,sizeof payload);unsigned credit_before=credits_returned;
+    pm_net_rx_frame_start(901,7);feed(wire,n);assert(pm_net_take(&kind,decoded,sizeof decoded));
+    clock_us+=3000000;pm_net_poll();feed(wire,n);assert(pm_net_take(&kind,decoded,sizeof decoded));
+    pm_rx_progress(64);pm_net_rx_frame_end(PM_RX_COMPLETE,0);pm_rx_capture(clock_us);
+    pm_rx_record r=rx_record(0);assert(r.frame==901 && r.session==7 && r.callbacks==2);
+    assert(r.gap_to-r.gap_from==3000000 && r.gap_anchor && !r.gap_tail && r.gap_rx1==0);
+    assert(r.bytes==2*n && r.free_calls==2 && r.freed==2 && r.assembled==64);
+    assert(r.early_bytes+r.consume_credit==credits_returned-credit_before && !r.after.rx && !r.after.credit);
+    assert(r.before.alloc.flags==15 && r.before.alloc.bits==16);
+    // A consumer stall with a near-full RX reserve and real early/deferred credit calls.
+    pm_net_rx_frame_start(902,7);static uint8_t backlog[30000];feed(backlog,sizeof backlog);
+    cyw43_arch_lwip_begin();consume(2000);cyw43_arch_lwip_end();
+    clock_us+=50000;pool_stats.err++;seg_stats.err++;lwip_stats.mem.err++;lwip_stats.tcp.drop++;
+    pm_net_poll();uint64_t first=clock_us;clock_us+=3000000;
+    cyw43_arch_lwip_begin();assert(recv_cb(NULL,&socket_instance,NULL,ERR_OK)==ERR_OK);cyw43_arch_lwip_end();
+    pm_rx_capture(clock_us);r=rx_record(1);assert(r.frame==902 && r.reason==PM_RX_PEER_CLOSED);
+    assert(r.rx_peak==30000 && r.credit_peak==20592 && r.consume_credit==2000);
+    assert(r.after.rx==28000 && r.after.credit==18592 && r.failure_mask==75 && r.first_failure==first);
+    pm_net_close();ready_again();pm_rx_capture(clock_us);
+    // The callback that overflows the bounded RX is counted and its pbuf is freed.
+    pm_net_rx_frame_start(903,8);feed(backlog,sizeof backlog);feed(backlog,3000);assert(stage==PM_NET_FAILED);
+    pm_rx_capture(clock_us);r=rx_record(1);assert(r.frame==903 && r.reason==PM_RX_OVERFLOW);
+    assert(r.callbacks==2 && r.bytes==33000 && r.free_calls==2 && r.freed==2);
+    pm_net_close();ready_again();pm_rx_capture(clock_us);
+    // Allocation failures remain observable before any FrameStart is parsed.
+    clock_us+=50000;pool_stats.err++;pm_net_poll();clock_us+=2000000;pm_net_rx_snapshot();pm_rx_capture(clock_us);
+    r=rx_record(3);assert(r.frame==0 && r.reason==PM_RX_IDLE && (r.failure_mask&1) && r.end-r.start>=2050000);
+    puts("production RX statistics: 3s arrival gap vs consumer backlog, exact credit/free accounting, pool/heap/TCP_SEG failures, overflow callback and pre-FrameStart idle PASS");
+}
+#endif
 int main(void){
     authenticated();
+    assert(!pm_net_proxy_target_connected());
     const uint8_t reply[]={5,0,0,1,0,0,0,0,0,0};
     unsigned before=sends;
     feed(reply,4);assert(stage==PM_NET_SOCKS && sends==before);
     feed(reply+4,6);assert(stage==PM_NET_WS && sent_length>20 && !memcmp(sent,"GET /device ",12));
+    assert(pm_net_proxy_target_connected());
     char response[256];int n=snprintf(response,sizeof response,
         "HTTP/1.1 101 Switching Protocols\r\nSec-WebSocket-Accept: %s\r\n\r\n",expected_accept);
     assert(n>0 && (size_t)n<sizeof response);
@@ -161,6 +209,9 @@ int main(void){
     assert(!pm_net_take(&kind,decoded,sizeof decoded)&&pm_net_state()==PM_NET_READY);
     puts("streaming WS decoder: concatenated >APP_CAP body and partial TCP preserve both legacy messages PASS");
     puts("production SOCKS5: split METHOD v5 / AUTH v1 / CONNECT v5 / WebSocket accepted");
+#if PM_TRACE_STATS
+    receive_statistics();
+#endif
     write_result=-1;assert(!pm_net_send(5,"{}") && stage==PM_NET_FAILED);write_result=0;
     stage=PM_NET_READY;send_room=0;assert(!pm_net_send(5,"{}") && stage==PM_NET_FAILED);send_room=sizeof sent;
     puts("TCP send failure diagnostics: SDK error/full buffer preserve failure behavior");
@@ -168,8 +219,15 @@ int main(void){
     begin();const uint8_t wrong_method[]={5,0};feed(wrong_method,2);assert(stage==PM_NET_FAILED);
     begin();const uint8_t method[]={5,2};feed(method,2);
     const uint8_t wrong_auth[]={1,1};feed(wrong_auth,2);assert(stage==PM_NET_FAILED);
+    assert(!pm_net_proxy_target_connected() && pm_net_last_failure()==PM_NET_FAIL_PROTOCOL);
     authenticated();const uint8_t rejected[]={5,5,0,1};feed(rejected,4);assert(stage==PM_NET_FAILED);
+    assert(!pm_net_proxy_target_connected() && pm_net_last_failure()==PM_NET_FAIL_TARGET);
     authenticated();const uint8_t malformed[]={5,0,1,1};feed(malformed,4);assert(stage==PM_NET_FAILED);
+    assert(!pm_net_proxy_target_connected() && pm_net_last_failure()==PM_NET_FAIL_PROTOCOL);
+    begin();error_cb(NULL,-14);pm_net_poll();
+    assert(pm_net_last_failure()==PM_NET_FAIL_PROTOCOL);
+    pm_net_begin(&test_profile);error_cb(NULL,-14);pm_net_poll();
+    assert(pm_net_last_failure()==PM_NET_FAIL_TCP);
     puts("production SOCKS5: rejected method/auth/CONNECT and malformed reply fail; reconnect resets state");
     return 0;
 }

@@ -12,32 +12,48 @@ build wake tests/wake_test.c src/core.c
 build transform tests/lcd_transform_test.c
 build rx-flow tests/rx_flow_test.c
 build ws-accept tests/ws_accept_test.c src/ws_accept.c
-for name in core wake transform rx-flow ws-accept; do run "$name"; done
+build endpoint-policy tests/endpoint_policy_test.c src/endpoint_policy.c
+build eex-wire tests/eex_wire_test.c src/eex_wire.c
+build eex-exchange tests/eex_exchange_test.c src/eex_wire.c src/eex_exchange.c src/endpoint_policy.c
+build endpoint-client tests/endpoint_client_test.c src/eex_wire.c src/eex_exchange.c src/endpoint_policy.c src/endpoint_client.c
+for name in core wake transform rx-flow ws-accept endpoint-policy eex-wire eex-exchange endpoint-client; do run "$name"; done
 build trace -DPM_TRACE_ENABLE=1 -Itests/trace_stubs -Itests/app_stubs -Itests/stubs \
-    tests/trace_test.c src/trace.c src/trace_usb.c src/core.c
+    tests/trace_test.c src/trace.c src/rx_stats.c src/trace_usb.c src/core.c
 run trace
 build stats -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 -DPM_TRACE_VERBOSE=0 \
     -Itests/trace_stubs -Itests/app_stubs -Itests/stubs \
-    tests/stats_test.c src/trace.c src/trace_usb.c
+    tests/stats_test.c src/trace.c src/rx_stats.c src/trace_usb.c
 run stats
+build rx-stats -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 -DPM_TRACE_VERBOSE=0 \
+    -Itests/app_stubs -Itests/stubs tests/rx_stats_test.c src/rx_stats.c
+run rx-stats
+build rx-width -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 -DPM_TRACE_VERBOSE=0 \
+    -Itests/app_stubs -Itests/stubs tests/rx_stats_width_test.c
+run rx-width
+build rx-dump -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 -DPM_TRACE_VERBOSE=0 \
+    -Itests/trace_stubs -Itests/app_stubs -Itests/stubs \
+    tests/rx_dump_test.c src/trace.c src/rx_stats.c src/trace_usb.c
+run rx-dump "$work/rx-dump.txt"
+python3 tests/rx_dump_parser_test.py "$work/rx-dump.txt"
+printf 'PASS rx-parser\n'
 build app -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 \
     '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
-    -Itests/app_stubs tests/app_timing_test.c src/core.c src/video.c src/trace.c
+    -Itests/app_stubs tests/app_timing_test.c src/core.c src/video.c src/trace.c src/rx_stats.c
 run app
 for mode in drop-during-retry usb-snapshot sdk-error error-log pm-set-error pm-read-error pm-read-mismatch; do run app "$mode"; done
 build app-stats -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 \
     '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
-    -Itests/app_stubs tests/app_timing_test.c src/core.c src/video.c src/trace.c
+    -Itests/app_stubs tests/app_timing_test.c src/core.c src/video.c src/trace.c src/rx_stats.c
 run app-stats
 build net -DPM_TRACE_ENABLE=1 -Itests/net_stubs -Itests/app_stubs -I. \
-    tests/net_socks_test.c src/ws_accept.c src/trace.c
+    tests/net_socks_test.c src/ws_accept.c src/trace.c src/rx_stats.c
 run net
 build net-stats -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 -DPM_TRACE_VERBOSE=0 \
-    -Itests/net_stubs -Itests/app_stubs -I. tests/net_socks_test.c src/ws_accept.c src/trace.c
+    -Itests/net_stubs -Itests/app_stubs -I. tests/net_socks_test.c src/ws_accept.c src/trace.c src/rx_stats.c
 run net-stats
 build lcd-bus -DPM_TRACE_ENABLE=1 -DPM_NORMAL_BUILD=1 -DPM_LCD_FRAME_CS_HOLD=1 \
     -DPM_LCD_CONTROL_SPI_BAUD=20000000 -DPM_TEST_NORMAL_SPI_BAUD=20000000 \
-    -Itests/stubs tests/lcd_bus_test.c src/lcd.c src/core.c src/video.c src/trace.c
+    -Itests/stubs tests/lcd_bus_test.c src/lcd.c src/core.c src/video.c src/trace.c src/rx_stats.c
 run lcd-bus
 build backlight -DPM_NORMAL_BUILD=1 -DPM_LCD_FRAME_CS_HOLD=1 \
     -DPM_LCD_CONTROL_SPI_BAUD=20000000 -Itests/stubs \
@@ -87,7 +103,7 @@ printf 'PASS eink-legacy-order\n'
 for device in sample-a E-ink_0 E-ink_1; do
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 \
         '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
-        -I"devices/$device" -Isrc -Itests/app_stubs tests/control_reply_test.c src/core.c src/video.c src/trace.c \
+        -I"devices/$device" -Isrc -Itests/app_stubs tests/control_reply_test.c src/core.c src/video.c src/trace.c src/rx_stats.c \
         -o "$work/control-$device"
     run "control-$device"
 done
@@ -95,12 +111,19 @@ done
 # Exercise the same production LCD parser and functional deadlines without diagnostics.
 build control-trace-off -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=0 \
     '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
-    -Itests/app_stubs tests/control_reply_test.c src/core.c src/video.c src/trace.c
+    -Itests/app_stubs tests/control_reply_test.c src/core.c src/video.c src/trace.c src/rx_stats.c
 run control-trace-off
 build control-stats-quiet -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 -DPM_TRACE_VERBOSE=0 \
     '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
-    -Itests/app_stubs tests/control_reply_test.c src/core.c src/video.c src/trace.c
+    -Itests/app_stubs tests/control_reply_test.c src/core.c src/video.c src/trace.c src/rx_stats.c
 run control-stats-quiet
 
 build video tests/video_test.c src/video.c src/core.c
 run video
+
+# Exercise production main's EEX1 glue with socket/radio operations mocked.
+build app-eex -DPM_AWAY_EEX1=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 \
+    '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
+    -Itests/app_stubs tests/app_endpoint_test.c src/core.c src/video.c src/trace.c \
+    src/eex_wire.c src/eex_exchange.c src/endpoint_policy.c src/endpoint_client.c
+run app-eex

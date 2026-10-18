@@ -13,6 +13,13 @@
 #include "display.h"
 #include "net.h"
 #include "video.h"
+#include "endpoint_client.h"
+#ifndef PM_AWAY_EEX1
+#define PM_AWAY_EEX1 0
+#endif
+#ifndef PM_EEX1_PORT
+#define PM_EEX1_PORT 48116
+#endif
 
 #if defined(PM_NORMAL_BUILD) && PM_NORMAL_BUILD
 // Release selection is a build property. Keep the private device config intact.
@@ -22,7 +29,7 @@
 #define PM_DIAGNOSTIC_STAGE 0
 #endif
 
-typedef enum { WIFI, SERVER, SESSION, ACTIVE, MENU, STANDBY, RETRY } app_state;
+typedef enum { WIFI, SERVER, SESSION, ACTIVE, MENU, STANDBY, RETRY, ENDPOINT } app_state;
 static const pm_profile profiles[2]={
     {PM_HOME_SSID,PM_HOME_PASSWORD,PM_HOME_SERVER_IP,false,NULL,NULL,NULL,0},
     {PM_AWAY_SSID,PM_AWAY_PASSWORD,PM_AWAY_SERVER_IP,true,
@@ -67,6 +74,7 @@ static uint64_t receiving_clock_minute;
 #endif
 
 static pm_assembly assembly;
+static void reset_assembly(void){pm_net_rx_frame_end(PM_RX_RESET,0);pm_reset(&assembly);}
 static char json[18000];
 _Static_assert(sizeof json>4u*PM_FRAGMENT_BYTES+1024u,"legacy JSON chunk capacity");
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
@@ -77,6 +85,37 @@ static uint64_t receiving_sequence,last_video_status_us;
 // Outbound messages are serialized on the main loop, including the TCP copy.
 static char outbound_json[768];
 static uint8_t fragment[PM_FRAGMENT_BYTES];
+#if PM_AWAY_EEX1
+_Static_assert(sizeof(PM_DEVICE_ID)<=33,"EEX1 client ID must fit32 ASCII characters");
+static pm_endpoint_client endpoint_client;
+static pm_profile endpoint_profile;
+static char endpoint_ip[16];
+static bool endpoint_initialized;
+static uint64_t endpoint_now(void){return time_us_64()/1000;}
+static void endpoint_reset(void){if(endpoint_initialized)pm_endpoint_client_reset(&endpoint_client);}
+static void endpoint_result(pm_eex_status status,pm_eex_stage stage){
+    if(active_profile && endpoint_initialized)
+        pm_endpoint_client_result(&endpoint_client,status,stage,endpoint_now());
+}
+static void endpoint_snapshot(void){
+    if(!endpoint_initialized || !active_profile)return;
+    pm_endpoint_client *c=&endpoint_client;
+    uint32_t ip=c->network.local_ipv4,gw=c->network.gateway_ipv4,mask=c->observed.netmask;
+    uint32_t proxy=c->cache.valid?c->cache.endpoint.ipv4:
+        (c->exchange.offer.source_host?c->exchange.reporter.ipv4:c->exchange.offer.host);
+    pm_logf("net endpoint source=EEX1 wifi_gen=%llu phase=%u verified=%u udp_open=%u receipt=%u result=%u\n",
+        (unsigned long long)c->network.wifi_generation,(unsigned)c->exchange.phase,c->cache.valid?1u:0u,
+        c->opened?1u:0u,c->exchange.receipt_confirmed?1u:0u,c->exchange.result_confirmed?1u:0u);
+    pm_logf("net endpoint local=%u.%u.%u.%u gateway=%u.%u.%u.%u netmask=%u.%u.%u.%u\n",
+        (unsigned)(ip>>24),(unsigned)((ip>>16)&255),(unsigned)((ip>>8)&255),(unsigned)(ip&255),
+        (unsigned)(gw>>24),(unsigned)((gw>>16)&255),(unsigned)((gw>>8)&255),(unsigned)(gw&255),
+        (unsigned)(mask>>24),(unsigned)((mask>>16)&255),(unsigned)((mask>>8)&255),(unsigned)(mask&255));
+    pm_logf("net endpoint candidate=%u.%u.%u.%u socks_port=%u report_udp_port=%u tx=%lu rx=%lu tx_error=%lu\n",
+        (unsigned)(proxy>>24),(unsigned)((proxy>>16)&255),(unsigned)((proxy>>8)&255),(unsigned)(proxy&255),
+        (unsigned)(c->cache.valid?c->cache.endpoint.port:c->exchange.offer.port),(unsigned)c->exchange.reporter.port,
+        (unsigned long)c->sent,(unsigned long)c->received,(unsigned long)c->send_errors);
+}
+#endif
 
 static uint32_t now_ms(void){return to_ms_since_boot(get_absolute_time());}
 static const char *profile_name(void){return active_profile?"AWAY":"HOME";}
@@ -92,7 +131,7 @@ static int logged_wifi_link=99,logged_tcpip_link=99;
 static const char *app_name(void){
     switch(state){case WIFI:return "WIFI";case SERVER:return "SERVER";
     case SESSION:return "SESSION";case ACTIVE:return "ACTIVE";case MENU:return "MENU";
-    case STANDBY:return "STANDBY";case RETRY:return "RETRY";default:return "UNKNOWN";}
+    case STANDBY:return "STANDBY";case RETRY:return "RETRY";case ENDPOINT:return "ENDPOINT";default:return "UNKNOWN";}
 }
 static const char *transport_name(void){
     switch(pm_net_state()){case PM_NET_DOWN:return "DOWN";case PM_NET_TCP:return "TCP";
@@ -126,6 +165,7 @@ static void log_usb_snapshot(void){
     static bool was_connected;
     static uint32_t last_ms;
     bool connected=stdio_usb_connected();
+    if(connected && !was_connected)pm_net_rx_snapshot();
     pm_stats_usb_poll(connected);
     if(!connected){was_connected=false;return;}
     uint32_t now=now_ms();
@@ -136,6 +176,9 @@ static void log_usb_snapshot(void){
     pm_logf("net status profile=%s app=%s transport=%s wifi=%s tcpip=%s ip_assigned=%u\n",
         profile_name(),app_name(),transport_name(),link_name(wifi),link_name(tcpip),
         tcpip==CYW43_LINK_UP?1u:0u);
+#if PM_AWAY_EEX1
+    endpoint_snapshot();
+#endif
     // Replay cached results for late USB attachment; never repeat radio IOCTLs.
     log_wifi_pm_status();
 }
@@ -151,7 +194,7 @@ static bool profile_ready(unsigned index){
     const pm_profile *p=&profiles[index];
     return p->ssid && p->ssid[0] && p->password && p->password[0] &&
         p->server_ip && p->server_ip[0] &&
-        (!p->socks || (p->proxy_ip && p->proxy_ip[0] && p->proxy_port &&
+        (!p->socks || (((PM_AWAY_EEX1 && index==1) || (p->proxy_ip && p->proxy_ip[0] && p->proxy_port)) &&
                        p->proxy_user && p->proxy_user[0] &&
                        p->proxy_password && p->proxy_password[0]));
 }
@@ -186,13 +229,16 @@ static void store_settings(void) {
     restore_interrupts(irq);
 }
 static void local(const char *one,const char *two) {
-    owner_epoch++;pm_reset(&assembly);have_display=false;pending_render_ack=false;
+    owner_epoch++;reset_assembly();have_display=false;pending_render_ack=false;
     pm_display_wake();pm_display_status(one,two);
 #if PM_DIAGNOSTIC_BOOT || PM_DIAGNOSTIC_STAGE
     pm_logf("lcd local: %s / %s\n",one,two);
 #endif
 }
 static void wifi_off(void){
+#if PM_AWAY_EEX1
+    endpoint_reset();
+#endif
     pm_net_close();
     if(wifi_enabled){cyw43_arch_disable_sta_mode();wifi_enabled=false;}
 }
@@ -201,7 +247,7 @@ static void standby(void){
     pm_display_standby();
     if(pm_display_busy()){
         if(!panel_standby)owner_epoch++;
-        panel_standby=true;pm_reset(&assembly);pending_render_ack=false;
+        panel_standby=true;reset_assembly();pending_render_ack=false;
         pending_standby=false;wifi_off();return;
     }
 #endif
@@ -209,10 +255,13 @@ static void standby(void){
 #if PM_DIAGNOSTIC_BOOT
     pm_logf("%s\n","lcd black: standby");
 #endif
-    owner_epoch++;pm_reset(&assembly);have_display=false;pending_render_ack=false;
+    owner_epoch++;reset_assembly();have_display=false;pending_render_ack=false;
     wifi_off();pending_standby=false;state=STANDBY;
 }
 static void start_wifi(void){
+#if PM_AWAY_EEX1
+    endpoint_reset();
+#endif
     pm_net_close();
     if(!wifi_enabled){
         cyw43_arch_enable_sta_mode();wifi_enabled=true;
@@ -241,13 +290,36 @@ static void start_wifi(void){
     }
     state=WIFI;started_ms=now_ms();
 }
-static void start_server(void){
+static void start_server_now(const pm_profile *connection){
     incarnation=0;session_epoch=0;display_epoch=0;
     await_selection=false;sub_mode=false;pending_standby=false;pending_sub_cancel=false;
-    local("SERVER","CONNECTING");pm_net_begin(&profiles[active_profile]);
+    local("SERVER","CONNECTING");pm_net_begin(connection);
     state=SERVER;started_ms=now_ms();
 }
+#if PM_AWAY_EEX1
+static void endpoint_connect(pm_endpoint e){
+    endpoint_profile=profiles[active_profile];
+    snprintf(endpoint_ip,sizeof endpoint_ip,"%u.%u.%u.%u",(unsigned)(e.ipv4>>24),
+        (unsigned)((e.ipv4>>16)&255),(unsigned)((e.ipv4>>8)&255),(unsigned)(e.ipv4&255));
+    endpoint_profile.proxy_ip=endpoint_ip;endpoint_profile.proxy_port=e.port;
+    start_server_now(&endpoint_profile);
+}
+#endif
+static void start_server(void){
+#if PM_AWAY_EEX1
+    if(active_profile){
+        pm_endpoint e;
+        (void)pm_endpoint_client_begin(&endpoint_client,PM_DEVICE_ID,endpoint_now());
+        if(pm_endpoint_client_take(&endpoint_client,endpoint_now(),&e)){endpoint_connect(e);return;}
+        local("NETWORK","AWAY");state=ENDPOINT;started_ms=now_ms();return;
+    }
+#endif
+    start_server_now(&profiles[active_profile]);
+}
 static void retry(void){
+#if PM_AWAY_EEX1
+    endpoint_result(PM_EEX_FAIL,PM_EEX_PROTOCOL_ERROR);
+#endif
     bool wifi_was_up=wifi_enabled &&
         cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)==CYW43_LINK_UP;
     log_wifi_progress();
@@ -258,6 +330,29 @@ static void retry(void){
     local(wifi_was_up?"SERVER":"WIFI",wifi_was_up?"CONNECTING":"RETRY");
     state=RETRY;started_ms=now_ms();
 }
+#if PM_AWAY_EEX1
+static void endpoint_proxy_progress(void){
+    if(!active_profile)return;
+    if(pm_net_proxy_target_connected())endpoint_result(PM_EEX_OK,PM_EEX_TARGET_CONNECTED);
+    else if(pm_net_state()==PM_NET_FAILED){
+        pm_net_failure f=pm_net_last_failure();
+        endpoint_result(PM_EEX_FAIL,f==PM_NET_FAIL_TCP?PM_EEX_TCP_FAILED:
+            f==PM_NET_FAIL_TARGET?PM_EEX_TARGET_REJECTED:PM_EEX_PROTOCOL_ERROR);
+    }
+}
+static void poll_endpoint(void){
+    if(!endpoint_initialized)return;
+    pm_endpoint_client_poll(&endpoint_client,endpoint_now());
+    bool changed=pm_endpoint_client_network_changed(&endpoint_client);
+    if(changed && endpoint_client.network.ipv4_ready && state!=WIFI && state!=MENU && state!=STANDBY){retry();return;}
+    if(state==ENDPOINT){
+        if(cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)!=CYW43_LINK_UP){start_wifi();return;}
+        pm_endpoint e;
+        if(pm_endpoint_client_take(&endpoint_client,endpoint_now(),&e))endpoint_connect(e);
+        else if(endpoint_client.failed)retry();
+    }
+}
+#endif
 static void menu(void){
     wifi_off();menu_profile=active_profile;state=MENU;
     pm_logf("net profile=%s menu_open\n",profile_name());
@@ -414,9 +509,10 @@ static void receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t
     if(state!=ACTIVE || await_selection || !pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch) ||
        !assembly.active || !pm_token_equal(assembly.token,t))return;
     bool complete;
-    if(!pm_chunk(&assembly,t,offset,bytes,count,&complete))return;
+    if(!pm_chunk(&assembly,t,offset,bytes,count,&complete)){pm_net_rx_frame_end(PM_RX_INVALID,0);return;}
+    pm_rx_progress((uint32_t)assembly.used);
     if(!complete)return;
-    pm_stats_frame_done();
+    pm_net_rx_frame_end(PM_RX_COMPLETE,0);
     pm_trace_event(PM_TRACE_CRC_OK,t.frame_id,0,PM_IMAGE_BYTES);
     if(!pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch))return;
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
@@ -509,7 +605,7 @@ static void process(uint8_t kind,const char *j){
         // A matching reply may arrive after FrameStart or between its chunks.
         // Only a genuinely newer generation invalidates an assembly.
         bool keep=assembly.active && (!has_epoch || epoch==display_epoch);
-        if(has_epoch && epoch>display_epoch){display_epoch=epoch;pm_reset(&assembly);}
+        if(has_epoch && epoch>display_epoch){display_epoch=epoch;reset_assembly();}
         await_selection=false;
         if(string_equals(j,"mode","normal"))sub_mode=false;
         else if(string_equals(j,"mode","sub"))sub_mode=true;
@@ -547,7 +643,7 @@ static void process(uint8_t kind,const char *j){
         if(strstr(j,"\"eink_refresh\"")){
             uint64_t interval;
             if(!number(j,"full_refresh_minutes",&interval) || interval<1 || interval>60 ||
-               !number(j,"minute",&clock_minute)){pm_reset(&assembly);return;}
+               !number(j,"minute",&clock_minute)){reset_assembly();return;}
             clock_minutes=(unsigned)interval;
         }
 #endif
@@ -555,14 +651,14 @@ static void process(uint8_t kind,const char *j){
         if(!number(j,"width",&w)||!number(j,"height",&h)||
            !number(j,"byte_len",&len)||!number(j,"crc32",&crc)||
            !string_equals(j,"format",PM_PIXEL_FORMAT_NAME) ||
-           !pm_start(&assembly,t,w,h,PM_PIXEL_FORMAT_NAME,len,crc))pm_reset(&assembly);
+           !pm_start(&assembly,t,w,h,PM_PIXEL_FORMAT_NAME,len,crc))reset_assembly();
         else {
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
             receiving_stream=false;
             if(strstr(j,"\"stream\"")){
                 uint64_t fps,sequence,generation;
                 if(!number(j,"fps",&fps) || fps<1 || fps>30 || !number(j,"sequence",&sequence)
-                    || !number(j,"generation",&generation)){pm_reset(&assembly);return;}
+                    || !number(j,"generation",&generation)){reset_assembly();return;}
                 receiving_stream=true;receiving_sequence=sequence;
                 pm_video_prepare(&video,t,(uint32_t)fps,generation,video_now_us());
             }else pm_video_reset(&video);
@@ -576,7 +672,7 @@ static void process(uint8_t kind,const char *j){
             if(string_equals(j,"mode","normal"))sub_mode=false;
             else if(string_equals(j,"mode","sub"))sub_mode=true;
             pm_trace_event(PM_TRACE_FRAME_START,t.frame_id,0,0);
-            pm_stats_frame_start();
+            pm_net_rx_frame_start(t.frame_id,t.session_epoch);
         }
         return;
     }
@@ -616,18 +712,18 @@ static void button(unsigned i,bool long_press){
         else if(i==2)start_wifi();
         return;
     }
-    if(state==WIFI||state==SERVER||state==SESSION||state==RETRY){
+    if(state==WIFI||state==SERVER||state==SESSION||state==RETRY||state==ENDPOINT){
         if(i==0)menu();else if(i==2)standby();
         return;
     }
     if(state!=ACTIVE)return;
     if(i==2){
         if(!send_simple(7,"power")){retry();return;}
-        if(sub_mode){pending_sub_cancel=true;await_selection=true;pm_reset(&assembly);}
-        else {pending_standby=true;await_selection=true;started_ms=now_ms();pm_reset(&assembly);}
+        if(sub_mode){pending_sub_cancel=true;await_selection=true;reset_assembly();}
+        else {pending_standby=true;await_selection=true;started_ms=now_ms();reset_assembly();}
     }else if(i==0)send_simple(14,"enter_sub");
-    else if(i==1){if(!sub_mode){await_selection=true;pm_reset(&assembly);}send_simple(15,"up");}
-    else if(i==3){if(!sub_mode){await_selection=true;pm_reset(&assembly);}send_simple(16,"down");}
+    else if(i==1){if(!sub_mode){await_selection=true;reset_assembly();}send_simple(15,"up");}
+    else if(i==3){if(!sub_mode){await_selection=true;reset_assembly();}send_simple(16,"down");}
 }
 #if PM_DIAGNOSTIC_STAGE
 static void diagnostic_hold(uint32_t duration_ms,bool watch_buttons){
@@ -652,6 +748,10 @@ static void finish_loop(uint64_t started){
 int main(void){
     stdio_init_all();
     bool net_ok=pm_net_init();
+#if PM_AWAY_EEX1
+    pm_endpoint_client_init(&endpoint_client,pm_endpoint_sdk_io());
+    endpoint_client.discovery_port=PM_EEX1_PORT;endpoint_initialized=true;
+#endif
     if(net_ok){cyw43_arch_enable_sta_mode();wifi_enabled=true;}
     // Match the working YouTube order: CYW43 power/PIO first, panel reset next.
     pm_display_init();
@@ -712,6 +812,9 @@ int main(void){
             if(event>=0)button((unsigned)event,PM_BUTTON_COUNT==2 && (event==0 || event==2));
         }
         log_usb_snapshot();
+#if PM_AWAY_EEX1
+        poll_endpoint();
+#endif
         if(state==STANDBY){finish_loop(loop_started);sleep_ms(5);continue;}
         uint64_t poll_started=pm_trace_clock();
         cyw43_arch_poll();
@@ -735,11 +838,18 @@ int main(void){
                 start_wifi();pm_stats_note(PM_STAT_LOOP,loop_started);continue;
             }
             pm_net_poll();
+#if PM_AWAY_EEX1
+            endpoint_proxy_progress();
+#endif
             if(pm_net_state()==PM_NET_FAILED){retry();pm_stats_note(PM_STAT_LOOP,loop_started);continue;}
             if(state==SERVER && pm_net_state()==PM_NET_READY){
                 if(!send_hello()){retry();pm_stats_note(PM_STAT_LOOP,loop_started);continue;}state=SESSION;
             }
-            if(state!=ACTIVE && now-started_ms>settings.app_s*1000u){retry();pm_stats_note(PM_STAT_LOOP,loop_started);continue;}
+            if(state!=ACTIVE && now-started_ms>settings.app_s*1000u){
+#if PM_AWAY_EEX1
+                endpoint_result(PM_EEX_FAIL,PM_EEX_TIMEOUT);
+#endif
+                retry();pm_stats_note(PM_STAT_LOOP,loop_started);continue;}
             uint8_t kind;
             // Bound cooperative receive work so image decoding cannot starve
             // network polling or physical input under continuous playback.

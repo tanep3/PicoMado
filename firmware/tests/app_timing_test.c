@@ -92,7 +92,16 @@ void pm_display_reference_pattern(void){assert(!"normal build must not draw diag
 bool pm_net_init(void){return true;}
 void pm_net_close(void){network_stage=PM_NET_DOWN;}
 void pm_net_begin(const pm_profile *p){
-    assert(p==&profiles[0] && !p->socks);server_begins++;network_stage=PM_NET_TCP;
+#if PM_AWAY_EEX1
+    if(p->socks){
+        assert(p==&endpoint_profile && active_profile==1);
+        assert(p->ssid==profiles[1].ssid && p->password==profiles[1].password);
+        assert(p->proxy_user==profiles[1].proxy_user && p->proxy_password==profiles[1].proxy_password);
+        assert(p->server_ip==profiles[1].server_ip && p->proxy_port>0);
+    }else
+#endif
+    {assert(p==&profiles[0] && !p->socks);}
+    server_begins++;network_stage=PM_NET_TCP;
 }
 void pm_net_poll(void){if(server_ready)network_stage=PM_NET_READY;}
 pm_net_stage pm_net_state(void){return network_stage;}
@@ -304,6 +313,10 @@ static void test_frame_pipeline(void){
     assert(frame_receipts==1 && !frame_renders && have_display && pending_render_ack);
     assert(send_pending_render_ack() && frame_renders==1 && !pending_render_ack);
     assert(send_pending_render_ack() && frame_renders==1);
+#if PM_TRACE_STATS
+    pm_rx_capture(time_us_64());pm_rx_record measured;
+    assert(pm_rx_snapshot_record(0,&measured) && measured.frame==900 && measured.reason==PM_RX_COMPLETE && measured.assembled==PM_IMAGE_BYTES);
+#endif
     for(unsigned i=0;i<100;i++)pm_trace_flush();
     const char *events[]={"event=crc_ok","event=receipt_begin","event=receipt_end", "event=spi_begin","event=spi_end","event=render_begin","event=render_end"};
     const char *last=trace_text;
@@ -367,3 +380,13 @@ int PM_APP_TEST_ENTRY(int argc,char **argv){
 #endif
     puts("app timing: production main loop PASS");return 0;
 }
+
+#if PM_TRACE_STATS
+void pm_net_rx_frame_start(uint64_t frame,uint64_t session){
+    pm_rx_state s={0};pm_stats_frame_start();pm_rx_frame_begin(frame,session,&s);
+}
+void pm_net_rx_frame_end(pm_rx_reason reason,int error){
+    pm_rx_state s={0};if(reason==PM_RX_COMPLETE)pm_stats_frame_done();pm_rx_finish(reason,error,&s);
+}
+void pm_net_rx_snapshot(void){}
+#endif

@@ -1,4 +1,5 @@
 #include "trace.h"
+#include "rx_stats.h"
 #if PM_TRACE_ENABLE
 #include <stdbool.h>
 #include <string.h>
@@ -123,6 +124,7 @@ void pm_stats_frame_done(void){
 }
 void pm_stats_usb_poll(bool connected){
     uint64_t now=pm_stats_clock();
+    pm_rx_usb(connected);
     uint32_t irq=save_and_disable_interrupts();
     bool rising=connected&&!stats.connected;
     stats.connected=connected;
@@ -130,15 +132,15 @@ void pm_stats_usb_poll(bool connected){
         memcpy(stats.snapshot,stats.active,sizeof stats.active);
         memset(stats.active,0,sizeof stats.active);
         stats.snapshot_start=stats.window_start;stats.snapshot_end=now;stats.window_start=now;
-        stats.epoch++;stats.row=0;stats.next_emit=now;stats.reporting=true;
+        stats.epoch++;stats.row=0;stats.next_emit=now;stats.reporting=true;pm_rx_capture(now);
     }
     if(!connected)stats.reporting=false;
     restore_interrupts(irq);
     if(!stats.reporting || now<stats.next_emit)return;
-    stats.next_emit=now+50000u;
+    stats.next_emit=now+20000u;
     unsigned row=stats.row++;
     if(row==0){
-        pm_logf("stats begin epoch=%lu start_us=%llu end_us=%llu metrics=%u banks=2\n",
+        pm_logf("stats begin epoch=%lu start_us=%llu end_us=%llu metrics=%u banks=2 rx_schema=2\n",
             (unsigned long)stats.epoch,(unsigned long long)stats.snapshot_start,
             (unsigned long long)stats.snapshot_end,(unsigned)PM_STAT_COUNT);
     }else if(row<=2*PM_STAT_COUNT){
@@ -147,10 +149,9 @@ void pm_stats_usb_poll(bool connected){
         pm_logf("stats epoch=%lu usb=%s metric=%s calls=%lu max_us=%lu\n",
             (unsigned long)stats.epoch,bank?"on":"off",stat_names[kind],
             (unsigned long)value.calls,(unsigned long)value.max_us);
-    }else{
+    }else if(row==2*PM_STAT_COUNT+1){
         pm_logf("stats end epoch=%lu trace_dropped=%lu\n",(unsigned long)stats.epoch,(unsigned long)pm_trace_dropped());
-        stats.reporting=false;
-    }
+    }else if(!pm_rx_emit(stats.epoch)){stats.reporting=false;}
 }
 #endif
 #endif

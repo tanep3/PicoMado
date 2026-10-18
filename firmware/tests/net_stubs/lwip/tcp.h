@@ -8,7 +8,8 @@ typedef uint16_t u16_t;
 #define SOF_KEEPALIVE 1
 #define TCP_WRITE_FLAG_COPY 1
 #define TCP_WND (16*1460)
-struct tcp_pcb { unsigned so_options,keep_idle,keep_intvl,keep_cnt; };
+#define TCP_QUEUE_OOSEQ 1
+struct tcp_pcb { unsigned so_options,keep_idle,keep_intvl,keep_cnt,rcv_wnd,rcv_ann_wnd,rcv_nxt;void *ooseq; };
 struct pbuf { unsigned tot_len;const uint8_t *payload; };
 typedef err_t (*tcp_connected_fn)(void *,struct tcp_pcb *,err_t);
 typedef err_t (*tcp_recv_fn)(void *,struct tcp_pcb *,struct pbuf *,err_t);
@@ -25,4 +26,4 @@ err_t tcp_close(struct tcp_pcb *pcb);
 void tcp_abort(struct tcp_pcb *pcb);
 void tcp_recved(struct tcp_pcb *pcb,u16_t length);
 unsigned pbuf_copy_partial(const struct pbuf *p,void *destination,unsigned length,unsigned offset);
-void pbuf_free(struct pbuf *p);
+unsigned char pbuf_free(struct pbuf *p);

@@ -129,3 +129,9 @@ LCD/E-ink_0/E-ink_1の共通通信は、能力frame-bytes-v1でraw pixel kind18�
 ## 時計のV4部分更新候補（2026-10-18）
 
 新しいE-inkファームは `eink-clock-v1` を申告し、時計だけに部分更新を許可します。初回・切替・復帰時に基準画像を作り、時計連続表示中の全面更新はサーバの端末別設定（既定10分）に従います。他プラグインとLCDは既存経路を維持します。公式V4のbase／partialとローカル横向き順序が根拠です。コード・ホスト試験・ビルドと実機受入を区別した詳細は[時計V4更新記録](clock-refresh-verification-2026-10-18.md)を参照してください。今回のサンプルUF2は書込み禁止です。
+
+## AWAY接続先のEEX1取得
+
+Androidの手動起動アプリを使う接続先交換クライアントを追加しました。HOMEは既存direct TCPのまま、`-DPM_AWAY_EEX1=ON`を指定した端末buildのAWAYだけに適用します。既定はOFF、探索UDP portは`PM_EEX1_PORT=48116`。認証成功とSOCKS CONNECT完了で検証した接続先をWi-Fi接続世代中のRAMへ保持し、TCP再接続で再利用します。取得IP/portを永続設定へ書き戻しません。
+
+[参照仕様・出典・ビルド方法・実機確認範囲](../docs/eex1-endpoint-discovery.md)を参照してください。`TARGET_CONNECTED`はSOCKSの宛先接続成功を表し、PiのWelcomeや画像描画成功は別に確認します。Androidアプリは別プロジェクトで管理します。
