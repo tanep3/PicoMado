@@ -976,8 +976,8 @@ mod tests {
         let (status, view) = call(&router, Method::PUT, "/api/plugin-settings", json!({"expected_revision":1,"settings":{"weather_fetch":{"timeout_seconds":30,"retries":2},"radar_fetch":{"timeout_seconds":20,"retries":2},"youtube_default_fps":12}})).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(view["plugins"]["youtube_default_fps"], 12);
-        assert_eq!(call(&router, Method::PUT, "/api/order", json!({"expected_revision":1,"order":["weather","youtube","caricature","rain-radar"]})).await.0, StatusCode::OK);
-        assert_eq!(call(&router, Method::PUT, "/api/order", json!({"expected_revision":1,"order":["youtube","caricature","weather","rain-radar"]})).await.0, StatusCode::CONFLICT);
+        assert_eq!(call(&router, Method::PUT, "/api/order", json!({"expected_revision":1,"order":["weather","youtube","caricature","rain-radar","clock"]})).await.0, StatusCode::OK);
+        assert_eq!(call(&router, Method::PUT, "/api/order", json!({"expected_revision":1,"order":["youtube","caricature","weather","rain-radar","clock"]})).await.0, StatusCode::CONFLICT);
         drop(router);
         let reopened = App::open(&path).unwrap();
         assert_eq!(reopened.view().plugins.youtube_default_fps, 12);

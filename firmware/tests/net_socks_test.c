@@ -129,9 +129,16 @@ int main(void){
     pm_trace_frame_context(255);output_result=-5;
     assert(pm_net_send(8,"{}") && stage==PM_NET_READY);output_result=0;
     pm_trace_frame_context(0);for(unsigned i=0;i<100;i++)pm_trace_flush();
+#if PM_TRACE_VERBOSE
     assert(strstr(trace_text,"event=tcp_output frame=255 a=-5 b=60000"));
     assert(strstr(trace_text,"event=tcp_write frame=255 a=0"));
     puts("TCP output trace: actual error and duration retained; queue acceptance != wire arrival PASS");
+#else
+    assert(!strstr(trace_text,"event=tcp_output") && !strstr(trace_text,"event=tcp_write"));
+    assert(pm_stats_read(false,PM_STAT_NET_SEND).calls>0);
+    assert(pm_stats_read(false,PM_STAT_NET_SEND).max_us>=60000);
+    puts("TCP quiet statistics: duration retained in RAM without per-message output PASS");
+#endif
 #endif
     background_receive_ownership();
     unsigned saved_room=send_room;send_room=0;

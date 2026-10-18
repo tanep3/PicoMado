@@ -33,6 +33,9 @@ static record *reserve(void){
 }
 void pm_trace_event(pm_trace_kind kind,uint64_t frame,int32_t a,uint32_t b){
     if((unsigned)kind>=sizeof names/sizeof names[0])return;
+#if !PM_TRACE_VERBOSE
+    if(kind!=PM_TRACE_BUTTON)return;
+#endif
     uint32_t irq=save_and_disable_interrupts();record *r=reserve();
     r->kind=(unsigned)kind;r->data.event.frame=frame;r->data.event.a=a;r->data.event.b=b;
     restore_interrupts(irq);
@@ -53,7 +56,7 @@ int pm_logf(const char *format,...){
     }
     restore_interrupts(irq);return n;
 }
-void pm_trace_flush(void){
+static void flush_one(void){
     // At most one bounded record/write per call. Keep partial output; never wait.
     if(!pending_length){
         uint32_t irq=save_and_disable_interrupts();
@@ -77,4 +80,77 @@ void pm_trace_flush(void){
     pending_offset+=written;
     if(pending_offset==pending_length){pending_length=0;pending_offset=0;}
 }
+void pm_trace_flush(void){
+    uint64_t started=pm_stats_clock();
+    flush_one();
+    pm_stats_note(PM_STAT_FLUSH,started);
+}
+
+#if PM_TRACE_STATS
+typedef struct {
+    pm_stat_sample active[2][PM_STAT_COUNT],snapshot[2][PM_STAT_COUNT];
+    uint64_t previous_loop,frame_started,next_emit,window_start,snapshot_start,snapshot_end;
+    uint32_t epoch;
+    unsigned row;
+    bool connected,reporting,frame_active;
+} runtime_stats;
+static runtime_stats stats;
+_Static_assert(sizeof(runtime_stats)<=512,"fixed RAM statistics budget");
+static const char *const stat_names[]={"loop","loop_gap","sdk_wait","net_poll",
+    "rx_take","net_send","process","draw","frame_rx","flush","usb_write","rx_cb"};
+size_t pm_stats_ram_bytes(void){return sizeof stats;}
+void pm_stats_note(pm_stat_kind kind,uint64_t started){
+    if((unsigned)kind>=PM_STAT_COUNT)return;
+    uint64_t now=pm_stats_clock();
+    uint32_t irq=save_and_disable_interrupts();
+    pm_stats_accumulate(&stats.active[stats.connected?1:0][kind],now>=started?now-started:0);
+    restore_interrupts(irq);
+}
+pm_stat_sample pm_stats_read(bool connected,pm_stat_kind kind){
+    pm_stat_sample value={0};
+    if((unsigned)kind>=PM_STAT_COUNT)return value;
+    uint32_t irq=save_and_disable_interrupts();value=stats.active[connected?1:0][kind];restore_interrupts(irq);
+    return value;
+}
+void pm_stats_loop_begin(uint64_t started){
+    if(stats.previous_loop)pm_stats_note(PM_STAT_LOOP_GAP,stats.previous_loop);
+    stats.previous_loop=started;
+}
+void pm_stats_frame_start(void){stats.frame_started=pm_stats_clock();stats.frame_active=true;}
+void pm_stats_frame_done(void){
+    if(stats.frame_active)pm_stats_note(PM_STAT_FRAME_RX,stats.frame_started);
+    stats.frame_active=false;
+}
+void pm_stats_usb_poll(bool connected){
+    uint64_t now=pm_stats_clock();
+    uint32_t irq=save_and_disable_interrupts();
+    bool rising=connected&&!stats.connected;
+    stats.connected=connected;
+    if(rising){
+        memcpy(stats.snapshot,stats.active,sizeof stats.active);
+        memset(stats.active,0,sizeof stats.active);
+        stats.snapshot_start=stats.window_start;stats.snapshot_end=now;stats.window_start=now;
+        stats.epoch++;stats.row=0;stats.next_emit=now;stats.reporting=true;
+    }
+    if(!connected)stats.reporting=false;
+    restore_interrupts(irq);
+    if(!stats.reporting || now<stats.next_emit)return;
+    stats.next_emit=now+50000u;
+    unsigned row=stats.row++;
+    if(row==0){
+        pm_logf("stats begin epoch=%lu start_us=%llu end_us=%llu metrics=%u banks=2\n",
+            (unsigned long)stats.epoch,(unsigned long long)stats.snapshot_start,
+            (unsigned long long)stats.snapshot_end,(unsigned)PM_STAT_COUNT);
+    }else if(row<=2*PM_STAT_COUNT){
+        unsigned bank=(row-1)/PM_STAT_COUNT,kind=(row-1)%PM_STAT_COUNT;
+        pm_stat_sample value=stats.snapshot[bank][kind];
+        pm_logf("stats epoch=%lu usb=%s metric=%s calls=%lu max_us=%lu\n",
+            (unsigned long)stats.epoch,bank?"on":"off",stat_names[kind],
+            (unsigned long)value.calls,(unsigned long)value.max_us);
+    }else{
+        pm_logf("stats end epoch=%lu trace_dropped=%lu\n",(unsigned long)stats.epoch,(unsigned long)pm_trace_dropped());
+        stats.reporting=false;
+    }
+}
+#endif
 #endif

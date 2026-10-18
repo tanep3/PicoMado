@@ -7,7 +7,9 @@
 uint8_t test_flash_sector[4096];
 cyw43_t cyw43_state;
 static uint32_t clock_ms=1000;
-static unsigned receipt_count,render_count,joins,stops,panel_stops;
+static unsigned receipt_count,render_count,joins,stops,panel_stops,clock_calls;
+static bool clock_reset;static unsigned clock_interval;static uint64_t clock_minute;
+static const char *frame_policy="";
 static bool physical_busy,result_ready,result_ok;
 absolute_time_t get_absolute_time(void){return clock_ms;}
 uint32_t to_ms_since_boot(absolute_time_t t){return (uint32_t)t;}
@@ -27,6 +29,7 @@ const char *pm_display_capability(void){return "eink";}
 void pm_display_init(void){}
 void pm_display_status(const char *a,const char *b){assert(a&&b);}
 bool pm_display_frame(uint8_t *p,size_t n){assert(p&&n==3813);physical_busy=true;return true;}
+bool pm_display_clock_frame(uint8_t *p,size_t n,unsigned m,uint64_t minute,bool reset){clock_calls++;clock_interval=m;clock_minute=minute;clock_reset=reset;return pm_display_frame(p,n);}
 void pm_display_standby(void){panel_stops++;}
 void pm_display_wake(void){}
 void pm_display_reference_pattern(void){assert(!"normal diagnostic");}
@@ -42,7 +45,7 @@ bool pm_net_send(uint8_t kind,const char *j){
     assert(j);
     if(kind==8)receipt_count++;
     if(kind==9)render_count++;
-    if(kind==1){assert(strstr(j,"\"eink\""));assert(strstr(j,PM_BUTTON_COUNT==2?"buttons2":"buttons0"));}
+    if(kind==1){assert(strstr(j,"\"eink\""));assert(strstr(j,"eink-clock-v1"));assert(strstr(j,PM_BUTTON_COUNT==2?"buttons2":"buttons0"));}
     return true;
 }
 bool pm_net_send_optional(uint8_t kind,const char *j){return pm_net_send(kind,j);}
@@ -54,6 +57,7 @@ static unsigned lwip_depth;
 void cyw43_arch_lwip_begin(void){assert(lwip_depth==0);lwip_depth=1;}
 void cyw43_arch_lwip_end(void){assert(lwip_depth==1);lwip_depth=0;}
 int cyw43_wifi_pm(cyw43_t *s,uint32_t value){assert(lwip_depth==1 && s==&cyw43_state && value==CYW43_NONE_PM);return 0;}
+int cyw43_wifi_get_pm(cyw43_t *s,uint32_t *value){assert(lwip_depth==1 && s==&cyw43_state);*value=CYW43_NONE_PM;return 0;}
 void cyw43_arch_poll(void){}
 int cyw43_arch_wifi_connect_async(const char *s,const char *p,uint32_t a){assert(s&&p&&a==CYW43_AUTH_WPA2_AES_PSK);joins++;return 0;}
 int cyw43_wifi_link_status(cyw43_t *s,int i){(void)s;(void)i;return CYW43_LINK_UP;}
@@ -62,7 +66,7 @@ static void frame(unsigned id){
     state=ACTIVE;await_selection=false;incarnation=session_epoch=display_epoch=1;
     static uint8_t pixels[3813];memset(pixels,0xff,sizeof pixels);
     char token[400];snprintf(token,sizeof token,"\"token\":{\"device_id\":\"%s\",\"incarnation\":1,\"session_epoch\":1,\"display_epoch\":1,\"screen_owner_epoch\":%llu,\"frame_id\":%u}",PM_DEVICE_ID,(unsigned long long)owner_epoch,id);
-    snprintf(json,sizeof json,"{\"type\":\"frame_start\",\"data\":{%s,\"mode\":\"normal\",\"width\":250,\"height\":122,\"format\":\"mono1\",\"byte_len\":3813,\"crc32\":%u}}",token,pm_crc32(pixels,sizeof pixels));
+    snprintf(json,sizeof json,"{\"type\":\"frame_start\",\"data\":{%s,\"mode\":\"normal\",\"width\":250,\"height\":122,\"format\":\"mono1\",\"byte_len\":3813,\"crc32\":%u%s}}",token,pm_crc32(pixels,sizeof pixels),frame_policy);
     sub_mode=true;process(12,json);assert(assembly.active&&!sub_mode);
     int n=snprintf(json,sizeof json,"{\"type\":\"frame_chunk\",\"data\":{%s,\"offset\":0,\"bytes\":[",token);
     for(unsigned i=0;i<3813;i++){memcpy(json+n,"255",3);n+=3;if(i<3812)json[n++]=',';}
@@ -81,5 +85,18 @@ int main(void){
     finish(true);assert(state==STANDBY&&!panel_standby&&!pending_render_ack&&render_count==1);
     unsigned before=joins;
     if(PM_BUTTON_COUNT==2){button(1,false);assert(joins==before);button(2,true);assert(joins==before+1&&state==WIFI);}
+    state=ACTIVE;have_display=false;
+    frame_policy=",\"eink_refresh\":{\"full_refresh_minutes\":10,\"minute\":100}";
+    frame(10);assert(clock_calls==1&&clock_interval==10&&clock_minute==100&&clock_reset);finish(true);send_pending_render_ack();
+    frame_policy=",\"eink_refresh\":{\"full_refresh_minutes\":20,\"minute\":101}";
+    frame(11);assert(clock_calls==2&&clock_interval==20&&clock_minute==101&&!clock_reset);finish(true);send_pending_render_ack();
+    have_display=false;
+    frame(12);assert(clock_calls==3&&clock_reset);finish(true);send_pending_render_ack();
+    frame_policy="";frame(13);assert(clock_calls==3);finish(true);send_pending_render_ack();
+    for(unsigned interval=0;interval<=61;interval+=61){
+        char invalid[600];snprintf(invalid,sizeof invalid,"{\"type\":\"frame_start\",\"data\":{\"token\":{\"device_id\":\"%s\",\"incarnation\":1,\"session_epoch\":1,\"display_epoch\":1,\"screen_owner_epoch\":%llu,\"frame_id\":20},\"width\":250,\"height\":122,\"format\":\"mono1\",\"byte_len\":3813,\"crc32\":0,\"eink_refresh\":{\"full_refresh_minutes\":%u,\"minute\":102}}}",PM_DEVICE_ID,(unsigned long long)owner_epoch,interval);
+        process(12,invalid);assert(!assembly.active&&clock_calls==3);
+    }
+    puts("eink app: negotiated clock metadata, interval changes, same-screen/reset routing, ordinary frame isolation, invalid policy rejection PASS");
     puts("eink app: production mono1 parse/CRC/Receipt, delayed Rendered, failed/stale completion, drain-before-standby, input capability PASS");
 }

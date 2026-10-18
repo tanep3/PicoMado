@@ -16,8 +16,10 @@ cyw43_t cyw43_state;
 static jmp_buf finished;
 static uint32_t clock_ms=1000,confirm_loop_ms;
 static int pressed=-1,wifi_link=CYW43_LINK_DOWN,ip_link=CYW43_LINK_DOWN;
-static int sdk_result,pm_result;
-static unsigned lwip_depth,pm_calls;
+static int sdk_result,pm_result,last_pm_result;
+static int pm_read_result;
+static uint32_t pm_read_value=CYW43_NONE_PM;
+static unsigned lwip_depth,pm_calls,pm_reads;
 static unsigned joins,erases,server_begins,hello_count,heartbeat_count,loops;
 static bool sta_on,server_ready,welcome_available;
 static bool usb_connected;
@@ -117,12 +119,20 @@ void cyw43_arch_lwip_begin(void){assert(lwip_depth==0);lwip_depth=1;}
 void cyw43_arch_lwip_end(void){assert(lwip_depth==1);lwip_depth=0;}
 int cyw43_wifi_pm(cyw43_t *s,uint32_t value){
     assert(sta_on && lwip_depth==1 && s==&cyw43_state && value==CYW43_NONE_PM);
-    pm_calls++;return pm_result;
+    pm_calls++;last_pm_result=pm_result;return pm_result;
+}
+int cyw43_wifi_get_pm(cyw43_t *s,uint32_t *value){
+    assert(sta_on && ip_link==CYW43_LINK_UP && lwip_depth==1 && s==&cyw43_state);
+    pm_reads++;
+    if(!pm_read_result)*value=pm_read_value;
+    return pm_read_result;
 }
 void cyw43_arch_poll(void){}
 int cyw43_arch_wifi_connect_async(const char *ssid,const char *pw,uint32_t auth){
     assert(sta_on && wifi_enabled && auth==CYW43_AUTH_WPA2_AES_PSK);
     assert(ssid==profiles[active_profile].ssid && pw==profiles[active_profile].password);
+    // Covers the real boot path where main already enabled STA before LCD init.
+    assert(pm_calls==joins+1 && wifi_pm_status==WIFI_PM_PENDING);
     joins++;wifi_link=ip_link=CYW43_LINK_JOIN;return sdk_result;
 }
 int cyw43_wifi_link_status(cyw43_t *s,int i){assert(s==&cyw43_state && i==0);return wifi_link;}
@@ -145,6 +155,7 @@ void sleep_ms(unsigned ms){
     switch(phase){
     case INITIAL:
         assert(state==WIFI && joins==1 && active_profile==0);
+        assert(pm_calls==1 && pm_reads==0);
         assembly.active=true;pending_render_ack=true;pressed=0;phase=OPEN_AWAY_MENU;break;
     case OPEN_AWAY_MENU:
         if(state==MENU){check_menu();pressed=-1;phase=SELECT_AWAY;}break;
@@ -198,6 +209,7 @@ void sleep_ms(unsigned ms){
         }break;
     case HOME_SERVER:
         assert(state==SERVER && server_begins==1);
+        assert(pm_reads==1 && wifi_pm_status==WIFI_PM_CHECKED);
         clock_ms=started_ms+settings.app_s*1000u;phase=SERVER_BOUNDARY;return;
     case SERVER_BOUNDARY:
         assert(state==SERVER);clock_ms++;phase=SERVER_TIMEOUT;return;
@@ -222,6 +234,8 @@ void sleep_ms(unsigned ms){
     case HOME_CONNECT:
         if(state==ACTIVE){
             assert(hello_count==1 && heartbeat_count==0 && server_begins==2);
+            // A server-only retry must not reapply/read PM or rejoin Wi-Fi.
+            assert(pm_reads==(drop_during_retry?2u:1u));
             puts("HOME recovery: Wi-Fi/IP, server, Hello/Welcome; no early heartbeat");
             standby();assert(state==STANDBY && !sta_on);phase=HOME_ACTIVE;
         }break;
@@ -241,6 +255,34 @@ void sleep_ms(unsigned ms){
     clock_ms+=ms;
 }
 #if PM_TRACE_ENABLE
+static void test_pm_diagnostics(void){
+    trace_output=true;
+    for(unsigned i=0;i<100;i++)pm_trace_flush();
+    trace_used=0;trace_text[0]=0;
+    // Wake has requested PM again. Read only after join, once per attempt.
+    assert(wifi_pm_status==WIFI_PM_PENDING);
+    ip_link=CYW43_LINK_UP;
+    unsigned before=pm_reads;
+    check_wifi_pm();check_wifi_pm();
+    assert(pm_reads==before+1 && wifi_pm_status==WIFI_PM_CHECKED && lwip_depth==0);
+    assert(wifi_pm_request_result==last_pm_result && wifi_pm_readback_result==pm_read_result);
+    if(!pm_read_result)assert(wifi_pm_readback==pm_read_value);
+    // Late USB and its 15-second snapshots replay cached results without IOCTLs.
+    usb_connected=false;log_usb_snapshot();usb_connected=true;log_usb_snapshot();
+    clock_ms+=15000;log_usb_snapshot();
+    assert(pm_reads==before+1);
+    for(unsigned i=0;i<100;i++)pm_trace_flush();
+    if(pm_read_result){
+        assert(strstr(trace_text,"readback_sdk_result=-8"));
+        assert(!strstr(trace_text,"raw=") && !strstr(trace_text,"none=1"));
+    }else if((pm_read_value&15u)==CYW43_NO_POWERSAVE_MODE){
+        assert(strstr(trace_text,"mode=0 none=1"));
+    }else{
+        assert(strstr(trace_text,"mode=2 none=0") && !strstr(trace_text,"none=1"));
+    }
+    if(last_pm_result)assert(strstr(trace_text,"request_sdk_result=-5"));
+    puts("Wi-Fi PM: boot/wake request, once-per-join readback, cached USB, failure/mismatch reporting PASS");
+}
 static void test_frame_pipeline(void){
     checking_frame=true;trace_used=0;trace_text[0]=0;
     state=ACTIVE;network_stage=PM_NET_READY;await_selection=false;
@@ -282,10 +324,15 @@ static void test_frame_pipeline(void){
 int PM_APP_TEST_ENTRY(int argc,char **argv){
     assert(argc==1 || (argc==2 && (!strcmp(argv[1],"sdk-error") ||
         !strcmp(argv[1],"usb-snapshot") || !strcmp(argv[1],"error-log") ||
+        !strcmp(argv[1],"pm-set-error") || !strcmp(argv[1],"pm-read-error") ||
+        !strcmp(argv[1],"pm-read-mismatch") ||
         !strcmp(argv[1],"drop-during-retry"))));
     if(argc==2 && !strcmp(argv[1],"sdk-error"))sdk_result=-7;
     if(argc==2 && !strcmp(argv[1],"usb-snapshot"))usb_connected=true;
     if(argc==2 && !strcmp(argv[1],"drop-during-retry"))drop_during_retry=true;
+    if(argc==2 && !strcmp(argv[1],"pm-set-error")){pm_result=-5;pm_read_value=0x00a11142u;}
+    if(argc==2 && !strcmp(argv[1],"pm-read-error"))pm_read_result=-8;
+    if(argc==2 && !strcmp(argv[1],"pm-read-mismatch"))pm_read_value=0x00a11142u;
     memset(test_flash_sector,0xff,sizeof test_flash_sector);
 #if PM_TRACE_ENABLE
     for(unsigned i=0;i<64;i++)pm_trace_event(PM_TRACE_SLOW_LOOP,0,0,50000);
@@ -315,6 +362,7 @@ int PM_APP_TEST_ENTRY(int argc,char **argv){
     for(unsigned i=0;i<100;i++)pm_trace_flush();
     if(!sdk_result)assert(strstr(trace_text,"event=button"));
     puts("app trace: full USB queue did not prevent button/network main-loop regression");
+    if(!sdk_result)test_pm_diagnostics();
     test_frame_pipeline();
 #endif
     puts("app timing: production main loop PASS");return 0;

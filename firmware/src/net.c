@@ -72,7 +72,7 @@ static bool send_raw(const void *p, size_t n) {
 static void error_cb(void *arg, err_t e) {
     (void)arg;pm_logf("net tcp_error sdk_result=%d\n",(int)e);pcb=NULL;socket_dead=true;
 }
-static err_t recv_cb(void *arg, struct tcp_pcb *p, struct pbuf *buf, err_t e) {
+static err_t recv_body(void *arg, struct tcp_pcb *p, struct pbuf *buf, err_t e) {
     (void)arg;(void)p;
     if (!buf) { pm_logf("%s\n","net tcp_peer_closed");socket_dead=true;return ERR_OK; }
     if (e!=ERR_OK || buf->tot_len>RX_CAP-rx_used) {
@@ -89,6 +89,12 @@ static err_t recv_cb(void *arg, struct tcp_pcb *p, struct pbuf *buf, err_t e) {
     // reserve, so receiving a partial frame never depends on parsing it first.
     if(credit)tcp_recved(p,(u16_t)credit);
     return ERR_OK;
+}
+static err_t recv_cb(void *arg,struct tcp_pcb *p,struct pbuf *buf,err_t e){
+    uint64_t started=pm_stats_clock();
+    err_t result=recv_body(arg,p,buf,e);
+    pm_stats_note(PM_STAT_RX_CALLBACK,started);
+    return result;
 }
 static bool upgrade(void) {
     char key[25];
@@ -193,8 +199,6 @@ static void process_socks(void) {
     consume(n);if(!upgrade())stage=PM_NET_FAILED;
 }
 static void poll_unlocked(void) {
-    uint64_t started=pm_trace_clock();
-    pm_trace_slow(PM_TRACE_SLOW_POLL,started,2);
     if(socket_dead){close_unlocked();stage=PM_NET_FAILED;return;}
     if(stage==PM_NET_SOCKS && rx_used)process_socks();
     if(stage==PM_NET_WS) {
@@ -310,14 +314,25 @@ again:
 // transport buffers under the SDK lock, then release it before rendering.
 void pm_net_close(void){cyw43_arch_lwip_begin();close_unlocked();cyw43_arch_lwip_end();}
 void pm_net_begin(const pm_profile *p){cyw43_arch_lwip_begin();begin_unlocked(p);cyw43_arch_lwip_end();}
-void pm_net_poll(void){cyw43_arch_poll();cyw43_arch_lwip_begin();poll_unlocked();cyw43_arch_lwip_end();}
+void pm_net_poll(void){
+    uint64_t started=pm_trace_clock();cyw43_arch_poll();
+    uint64_t waiting=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,waiting);
+    poll_unlocked();cyw43_arch_lwip_end();
+    pm_stats_note(PM_STAT_NET_POLL,started);pm_trace_slow(PM_TRACE_SLOW_POLL,started,2);
+}
 pm_net_stage pm_net_state(void){cyw43_arch_lwip_begin();pm_net_stage result=state_unlocked();cyw43_arch_lwip_end();return result;}
-bool pm_net_send(uint8_t kind,const char *json){cyw43_arch_lwip_begin();bool ok=send_unlocked(kind,json);cyw43_arch_lwip_end();return ok;}
-bool pm_net_take(uint8_t *kind,char *json,size_t cap){cyw43_arch_lwip_begin();bool ok=take_unlocked(kind,json,cap);cyw43_arch_lwip_end();return ok;}
+bool pm_net_send(uint8_t kind,const char *json){
+    uint64_t started=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,started);
+    bool ok=send_unlocked(kind,json);cyw43_arch_lwip_end();pm_stats_note(PM_STAT_NET_SEND,started);return ok;
+}
+bool pm_net_take(uint8_t *kind,char *json,size_t cap){
+    uint64_t started=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,started);
+    bool ok=take_unlocked(kind,json,cap);cyw43_arch_lwip_end();pm_stats_note(PM_STAT_RX_TAKE,started);return ok;
+}
 
 // Optional video telemetry must not turn send-buffer pressure into a retry.
 bool pm_net_send_optional(uint8_t kind,const char *json){
-    cyw43_arch_lwip_begin();
+    uint64_t started=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,started);
     bool room=stage==PM_NET_READY && pcb && strlen(json)+14<=tcp_sndbuf(pcb);
-    bool ok=room && send_unlocked(kind,json);cyw43_arch_lwip_end();return ok;
+    bool ok=room && send_unlocked(kind,json);cyw43_arch_lwip_end();pm_stats_note(PM_STAT_NET_SEND,started);return ok;
 }

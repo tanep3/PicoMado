@@ -483,12 +483,19 @@ fn enqueue_outbox(
                         guard
                             .frame_asset(&asset_handle)
                             .zip(guard.frame_mode(&frame))
-                            .map(|(asset, mode)| (asset, mode, guard.binary_frames(token)))
+                            .map(|(asset, mode)| {
+                                (
+                                    asset,
+                                    mode,
+                                    guard.binary_frames(token),
+                                    guard.frame_eink_refresh(&frame),
+                                )
+                            })
                     } else {
                         None
                     }
                 };
-                let Some((asset, mode, binary)) = asset else {
+                let Some((asset, mode, binary, eink_refresh)) = asset else {
                     continue;
                 };
                 let (width, height, format) = if asset.len() == crate::eink::FRAME_BYTES {
@@ -499,6 +506,7 @@ fn enqueue_outbox(
                     return Err(());
                 };
                 let start = WireMessage::FrameStart {
+                    eink_refresh,
                     stream: None,
                     mode: Some(mode.into()),
                     token: frame.clone(),
@@ -1179,14 +1187,14 @@ mod tests {
                 )
                 .unwrap();
             let client = reqwest::Client::new();
-            for plugin in ["caricature", "rain-radar", "youtube", "weather"] {
+            for plugin in ["caricature", "rain-radar", "clock", "youtube", "weather"] {
                 let d = app.lock().unwrap().view().devices.remove(0);
                 let response=client.put(format!("http://{address}/api/devices/desk/plugins/{plugin}"))
                     .header("Content-Type","application/json").body(serde_json::to_vec(&serde_json::json!({"incarnation":d.incarnation,"expected_revision":d.enabled_revision,"enabled":false})).unwrap()).send().await.unwrap();
                 assert!(response.status().is_success());
                 let view: serde_json::Value =
                     serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
-                if plugin == "caricature" || plugin == "rain-radar" {
+                if plugin == "caricature" || plugin == "rain-radar" || plugin == "clock" {
                     assert_eq!(view["devices"][0]["selected"], "youtube");
                     continue;
                 }
@@ -2031,7 +2039,7 @@ mod tests {
             .unwrap()
             .set_order(
                 1,
-                ["weather", "rain-radar", "youtube", "caricature"]
+                ["weather", "rain-radar", "youtube", "caricature", "clock"]
                     .map(str::to_owned)
                     .to_vec(),
             )
@@ -2679,7 +2687,7 @@ mod tests {
         for (index, (selected, display_epoch)) in responses.iter().enumerate() {
             assert_eq!(
                 selected.as_deref(),
-                Some(["caricature", "weather", "rain-radar", "youtube"][index % 4])
+                Some(["caricature", "weather", "rain-radar", "clock", "youtube"][index % 5])
             );
             assert_eq!(*display_epoch, epoch + index as u64 + 1);
         }

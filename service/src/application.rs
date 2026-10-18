@@ -197,6 +197,25 @@ impl TryFrom<StoredState> for Runtime {
             jobs: stored.jobs,
             managed_revisions: stored.managed_revisions,
         };
+        // Schema-2 installations before the clock plugin have exactly these
+        // four IDs, in any saved order. Append only; preserve all selections,
+        // enablement sets and per-device revisions. Reject malformed orders.
+        let legacy: BTreeSet<_> = ["youtube", "caricature", "weather", "rain-radar"].into();
+        if state.world.plugin_order.len() == legacy.len()
+            && state
+                .world
+                .plugin_order
+                .iter()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>()
+                == legacy
+        {
+            state.world.plugin_order.push("clock".into());
+            state.order_revision = state
+                .order_revision
+                .checked_add(1)
+                .ok_or(AppError::Conflict("order revision exhausted"))?;
+        }
         for record in state.settings.devices.values_mut() {
             record.online = false;
         }
@@ -324,6 +343,7 @@ pub struct App {
     frame_assets: BTreeMap<String, Arc<Vec<u8>>>,
     video_slots: BTreeMap<String, crate::lcd_stream::VideoSlot>,
     contents: BTreeMap<String, Box<dyn ContentPlugin>>,
+    timed_frames: BTreeMap<String, (crate::DisplayToken, i64)>,
     dispatch: tokio::sync::watch::Sender<()>,
     work_signal: tokio::sync::watch::Sender<()>,
     plugin_root: PathBuf,
@@ -398,7 +418,13 @@ impl App {
             if schema_version != 2 {
                 return Err(AppError::Conflict("unsupported database schema"));
             }
-            Runtime::try_from(serde_json::from_str::<StoredState>(&body)?)?
+            let stored = serde_json::from_str::<StoredState>(&body)?;
+            let previous_order_revision = stored.order_revision;
+            let runtime = Runtime::try_from(stored)?;
+            if runtime.order_revision != previous_order_revision {
+                Self::persist(&mut connection, &runtime)?;
+            }
+            runtime
         } else {
             let runtime = Runtime {
                 world: World::new(DEFAULT_ORDER.iter().map(|id| (*id).to_owned()).collect()),
@@ -429,6 +455,7 @@ impl App {
             frame_assets: BTreeMap::new(),
             video_slots: BTreeMap::new(),
             contents,
+            timed_frames: BTreeMap::new(),
             dispatch: tokio::sync::watch::channel(()).0,
             work_signal: tokio::sync::watch::channel(()).0,
             plugin_root: root.to_owned(),
@@ -473,6 +500,8 @@ impl App {
             .persistence_us
             .saturating_add(saving.elapsed().as_micros());
         self.runtime = next;
+        self.timed_frames
+            .retain(|id, _| self.runtime.world.devices.contains_key(id));
         for (id, slot) in &mut self.video_slots {
             let keep = self.runtime.world.devices.get(id).is_some_and(|d| {
                 session_current(d, &slot.session)
@@ -996,7 +1025,15 @@ impl App {
             mode: device.mode.clone(),
         };
         let preparing = std::time::Instant::now();
-        let pixels = self.contents.get(id).and_then(|p| {
+        let now = self.clock.unix_seconds();
+        let mut display = crate::display_token(&token.device_id, device);
+        display.settings_revision = 0; // Only a changed display, not unrelated settings, needs pixels.
+        let id = id.clone();
+        let time_key = self.contents.get(&id).and_then(|p| p.time_key(&ctx, now));
+        if let Some(plugin) = self.contents.get_mut(&id) {
+            plugin.observe_time(&ctx, now);
+        }
+        let pixels = self.contents.get(&id).and_then(|p| {
             p.current_frame(&ctx)
                 .or_else(|| include_loading.then(|| p.loading_frame()))
         });
@@ -1004,10 +1041,48 @@ impl App {
             .image_preparation_us
             .saturating_add(preparing.elapsed().as_micros());
         if let Some(pixels) = pixels {
-            let id = id.clone();
             self.queue_lcd_frame(token, &id, pixels)?;
+            if let Some(key) = time_key {
+                self.timed_frames
+                    .insert(token.device_id.clone(), (display, key));
+            }
         }
         Ok(())
+    }
+
+    /// Queue the latest minute only after the preceding frame finishes. Late
+    /// wakes never replay missed minutes and never invalidate an in-flight send.
+    pub fn refresh_timed_frames(&mut self) -> Result<usize, AppError> {
+        let now = self.clock.unix_seconds();
+        let targets: Vec<_> = self
+            .runtime
+            .world
+            .devices
+            .iter()
+            .filter_map(|(id, d)| {
+                if !d.online
+                    || d.owner != Owner::Remote
+                    || d.mode != Mode::Normal
+                    || d.pending_frame_id.is_some()
+                {
+                    return None;
+                }
+                let plugin = self.contents.get(d.selected.as_ref()?)?;
+                let ctx = PluginContext {
+                    token: crate::session_token(id, d),
+                    settings_revision: d.settings_revision,
+                    mode: d.mode.clone(),
+                };
+                let key = plugin.time_key(&ctx, now)?;
+                let mut display = crate::display_token(id, d);
+                display.settings_revision = 0;
+                (self.timed_frames.get(id) != Some(&(display, key))).then_some(ctx.token)
+            })
+            .collect();
+        for token in &targets {
+            self.queue_selected_cached_frame(token)?;
+        }
+        Ok(targets.len())
     }
 
     fn queue_logo_frame(&mut self, token: &SessionToken) -> Result<(), AppError> {
@@ -1414,6 +1489,28 @@ impl App {
             Mode::Menu => "menu",
             Mode::Standby => "standby",
         })
+    }
+
+    pub fn frame_eink_refresh(&self, token: &FrameToken) -> Option<crate::protocol::EinkRefresh> {
+        let device = self.runtime.world.devices.get(&token.device_id)?;
+        if !frame_current(device, token)
+            || device.mode != Mode::Normal
+            || !device.capabilities.contains("eink")
+            || device.capabilities.contains("lcd")
+            || !device
+                .capabilities
+                .contains(crate::protocol::EINK_CLOCK_CAPABILITY)
+        {
+            return None;
+        }
+        let ctx = PluginContext {
+            token: crate::session_token(&token.device_id, device),
+            settings_revision: device.settings_revision,
+            mode: device.mode.clone(),
+        };
+        self.contents
+            .get(device.selected.as_ref()?)?
+            .eink_refresh(&ctx)
     }
 
     pub fn frame_mode(&self, token: &FrameToken) -> Option<&'static str> {
@@ -2069,7 +2166,7 @@ mod tests {
                 "2026-10-12",
             )
             .unwrap();
-            for id in ["youtube", "caricature", "rain-radar"] {
+            for id in ["youtube", "caricature", "rain-radar", "clock"] {
                 web_enabled(&mut app, "desk", id, false);
             }
             app.button(&token, ButtonAction::Sub).unwrap();
@@ -2253,7 +2350,7 @@ mod tests {
         .unwrap();
         app.set_order(
             1,
-            ["weather", "rain-radar", "youtube", "caricature"]
+            ["weather", "rain-radar", "youtube", "caricature", "clock"]
                 .map(str::to_owned)
                 .to_vec(),
         )
@@ -2400,7 +2497,7 @@ mod tests {
             );
             app.set_order(
                 1,
-                ["weather", "youtube", "caricature", "rain-radar"]
+                ["weather", "youtube", "caricature", "rain-radar", "clock"]
                     .map(str::to_owned)
                     .to_vec(),
             )
@@ -2686,7 +2783,7 @@ mod tests {
         assert!(!app
             .terminal_event(Event::RenderedAck { token: old })
             .unwrap());
-        for _ in 0..3 {
+        for _ in 0..DEFAULT_ORDER.len() - 1 {
             assert!(app
                 .terminal_event(Event::Next {
                     token: token.clone()
@@ -2764,3 +2861,281 @@ mod tests {
 #[path = "application_jobs.rs"]
 mod managed;
 pub use managed::{PlaybackOffer, PlaybackTarget, PluginWebView};
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicI64, Ordering};
+    struct Clock(AtomicI64);
+    impl crate::fetch::Clock for Clock {
+        fn unix_seconds(&self) -> i64 {
+            self.0.load(Ordering::SeqCst)
+        }
+        fn today_jst(&self) -> String {
+            crate::clock::reading(self.unix_seconds()).unwrap().date[..10].replace('/', "-")
+        }
+    }
+    fn delivery(app: &App, id: &str) -> (FrameToken, Arc<Vec<u8>>) {
+        app.pending_effects()
+            .into_iter()
+            .find_map(|(_, effect)| match effect {
+                Effect::SendFrame {
+                    token,
+                    asset_handle,
+                } if token.device_id == id && app.frame_is_current(&token) => {
+                    Some((token, app.frame_asset(&asset_handle).unwrap()))
+                }
+                _ => None,
+            })
+            .expect("frame")
+    }
+    fn finish(app: &mut App, id: &str) {
+        let (token, _) = delivery(app, id);
+        let effect = app
+            .pending_effects()
+            .into_iter()
+            .find_map(|(id, e)| matches!(e,Effect::SendFrame{token:t,..} if t==token).then_some(id))
+            .unwrap();
+        app.complete_effect(effect).unwrap();
+        app.terminal_event(Event::ReceiptAck {
+            token: token.clone(),
+        })
+        .unwrap();
+        app.terminal_event(Event::RenderedAck { token }).unwrap();
+    }
+    fn select_clock(app: &mut App, token: &SessionToken) {
+        while app.runtime.world.devices[&token.device_id]
+            .selected
+            .as_deref()
+            != Some("clock")
+        {
+            app.button(token, ButtonAction::Next).unwrap();
+        }
+    }
+    #[test]
+    fn immediate_switch_minute_boundary_duplicates_late_wake_and_reconnect_native_frames() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now = Arc::new(Clock(AtomicI64::new(1_792_336_799)));
+        let mut app = App::open_with_clock(&tmp.path().join("db"), now.clone()).unwrap();
+        for (id, cap) in [("lcd", "lcd"), ("paper", "eink")] {
+            let token = app.hello(id, [cap.into()].into(), 1).unwrap();
+            select_clock(&mut app, &token);
+            let expected = if cap == "lcd" {
+                crate::clock::render_lcd(now.0.load(Ordering::SeqCst))
+            } else {
+                crate::clock::render_eink(now.0.load(Ordering::SeqCst))
+            };
+            assert_eq!(delivery(&app, id).1.as_ref(), &expected);
+            finish(&mut app, id);
+        }
+        assert_eq!(app.refresh_timed_frames().unwrap(), 0);
+        now.0.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(app.refresh_timed_frames().unwrap(), 2);
+        let first = delivery(&app, "paper").0;
+        assert_eq!(app.refresh_timed_frames().unwrap(), 0);
+        now.0.fetch_add(180, Ordering::SeqCst);
+        assert_eq!(app.refresh_timed_frames().unwrap(), 0);
+        finish(&mut app, "paper");
+        assert_eq!(app.refresh_timed_frames().unwrap(), 1);
+        assert_eq!(
+            delivery(&app, "paper").1.as_ref(),
+            &crate::clock::render_eink(now.0.load(Ordering::SeqCst))
+        );
+        assert!(delivery(&app, "paper").0.frame_id > first.frame_id);
+        let old = crate::session_token("paper", &app.runtime.world.devices["paper"]);
+        app.disconnect(old).unwrap();
+        now.0.fetch_add(60, Ordering::SeqCst);
+        let token = app.hello("paper", ["eink".into()].into(), 2).unwrap();
+        assert!(token.session_epoch > first.session_epoch);
+        assert_eq!(
+            delivery(&app, "paper").1.as_ref(),
+            &crate::clock::render_eink(now.0.load(Ordering::SeqCst))
+        );
+    }
+    #[test]
+    fn other_plugins_standby_menu_local_owner_and_offline_do_not_refresh_or_persist() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now = Arc::new(Clock(AtomicI64::new(1_792_336_799)));
+        let mut app = App::open_with_clock(&tmp.path().join("db"), now.clone()).unwrap();
+        for id in ["other", "sleep", "menu", "local", "offline"] {
+            let token = app.hello(id, ["lcd".into()].into(), 1).unwrap();
+            if id == "other" {
+                continue;
+            }
+            select_clock(&mut app, &token);
+            finish(&mut app, id);
+            match id {
+                "sleep" => {
+                    app.terminal_event(Event::Power { token }).unwrap();
+                }
+                "menu" => {
+                    app.runtime
+                        .world
+                        .devices
+                        .get_mut(&token.device_id)
+                        .unwrap()
+                        .mode = Mode::Menu;
+                }
+                "local" => {
+                    app.runtime
+                        .world
+                        .devices
+                        .get_mut(&token.device_id)
+                        .unwrap()
+                        .owner = Owner::Local;
+                }
+                "offline" => {
+                    app.disconnect(token).unwrap();
+                }
+                _ => unreachable!(),
+            }
+        }
+        let rev = app.runtime.world.revision;
+        let effects = app.pending_effects();
+        let assets = app.frame_assets.len();
+        now.0.fetch_add(300, Ordering::SeqCst);
+        assert_eq!(app.refresh_timed_frames().unwrap(), 0);
+        assert_eq!(app.runtime.world.revision, rev);
+        assert_eq!(app.pending_effects(), effects);
+        assert_eq!(app.frame_assets.len(), assets);
+    }
+    #[test]
+    fn legacy_order_migration_preserves_disabled_sets_and_selection_and_is_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("db");
+        let mut app = App::open(&path).unwrap();
+        let t = app.hello("old", ["lcd".into()].into(), 1).unwrap();
+        app.set_enabled("old", t.incarnation, 1, "clock", false)
+            .unwrap();
+        let selection = app.runtime.world.devices["old"].selected.clone();
+        let enabled = app.runtime.world.devices["old"].enabled.clone();
+        let settings_rev = app.runtime.world.devices["old"].settings_revision;
+        app.runtime.world.plugin_order = vec![
+            "rain-radar".into(),
+            "weather".into(),
+            "youtube".into(),
+            "caricature".into(),
+        ];
+        App::persist(&mut app.connection, &app.runtime).unwrap();
+        drop(app);
+        let mut app = App::open(&path).unwrap();
+        assert_eq!(
+            app.view().order,
+            ["rain-radar", "weather", "youtube", "caricature", "clock"]
+        );
+        assert_eq!(app.runtime.world.devices["old"].selected, selection);
+        assert_eq!(app.runtime.world.devices["old"].enabled, enabled);
+        assert_eq!(
+            app.runtime.world.devices["old"].settings_revision,
+            settings_rev
+        );
+        let rev = app.view().order_revision;
+        app.hello("old", ["lcd".into()].into(), 2).unwrap();
+        drop(app);
+        let app = App::open(&path).unwrap();
+        assert_eq!(app.view().order_revision, rev);
+        assert!(!app.runtime.world.devices["old"].enabled.contains("clock"));
+    }
+    #[test]
+    fn clock_refresh_metadata_is_negotiated_and_isolated_from_lcd_and_other_plugins() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now = Arc::new(Clock(AtomicI64::new(1_792_336_799)));
+        let mut app = App::open_with_clock(&tmp.path().join("db"), now).unwrap();
+        for (id, caps, supported) in [
+            ("old", vec!["eink"], false),
+            ("new", vec!["eink", "eink-clock-v1"], true),
+            ("lcd", vec!["lcd", "eink-clock-v1"], false),
+        ] {
+            let t = app
+                .hello(id, caps.into_iter().map(str::to_owned).collect(), 1)
+                .unwrap();
+            assert!(app.frame_eink_refresh(&delivery(&app, id).0).is_none());
+            select_clock(&mut app, &t);
+            let frame = delivery(&app, id).0;
+            let policy = app.frame_eink_refresh(&frame);
+            assert_eq!(policy.is_some(), supported);
+            if let Some(policy) = policy {
+                assert_eq!(policy.full_refresh_minutes, 10);
+                assert_eq!(policy.minute, 1_792_336_799 / 60);
+            }
+            if supported {
+                finish(&mut app, id);
+                // Non-selected plugin settings do not duplicate a minute's frame.
+                let rev = app.runtime.world.devices[id].settings_revision;
+                app.set_enabled(id, t.incarnation, rev, "weather", false)
+                    .unwrap();
+                assert_eq!(app.refresh_timed_frames().unwrap(), 0);
+                app.set_plugin_device_config(
+                    id,
+                    t.incarnation,
+                    "clock",
+                    1,
+                    serde_json::json!({"full_refresh_minutes":20}),
+                )
+                .unwrap();
+                assert_eq!(app.refresh_timed_frames().unwrap(), 1);
+                assert_eq!(
+                    app.frame_eink_refresh(&delivery(&app, id).0)
+                        .unwrap()
+                        .full_refresh_minutes,
+                    20
+                );
+            }
+            app.button(&t, ButtonAction::Next).unwrap();
+            assert!(app.frame_eink_refresh(&delivery(&app, id).0).is_none());
+        }
+    }
+
+    #[test]
+    fn refresh_config_validation_revision_persistence_and_device_deletion() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("db");
+        let mut app = App::open(&path).unwrap();
+        let token = app.hello("paper", ["eink".into()].into(), 1).unwrap();
+        assert_eq!(
+            app.plugin_device_config("paper", "clock").unwrap()["full_refresh_minutes"],
+            10
+        );
+        for value in [0, 61, -1] {
+            assert!(app
+                .set_plugin_device_config(
+                    "paper",
+                    token.incarnation,
+                    "clock",
+                    1,
+                    serde_json::json!({"full_refresh_minutes":value})
+                )
+                .is_err());
+        }
+        app.set_plugin_device_config(
+            "paper",
+            token.incarnation,
+            "clock",
+            1,
+            serde_json::json!({"full_refresh_minutes":15}),
+        )
+        .unwrap();
+        assert!(app
+            .set_plugin_device_config(
+                "paper",
+                token.incarnation,
+                "clock",
+                1,
+                serde_json::json!({"full_refresh_minutes":20})
+            )
+            .is_err());
+        drop(app);
+        let mut app = App::open(&path).unwrap();
+        assert_eq!(
+            app.plugin_device_config("paper", "clock").unwrap()["full_refresh_minutes"],
+            15
+        );
+        app.delete_device("paper", token.incarnation).unwrap();
+        let t = app.hello("paper", ["eink".into()].into(), 1).unwrap();
+        assert!(t.incarnation > token.incarnation);
+        assert_eq!(
+            app.plugin_device_config("paper", "clock").unwrap()["full_refresh_minutes"],
+            10
+        );
+    }
+}

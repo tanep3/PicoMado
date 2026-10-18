@@ -15,6 +15,7 @@ Each registered built-in plugin receives its own `data/` and `cache/` under
 | Caricature | `caricature/data/` | `caricature/cache/` |
 | Weather | `weather/data/` | `weather/cache/` |
 | Rain radar | `rain-radar/data/` | `rain-radar/cache/` |
+| Clock | `clock/data/` (settings in SQLite) | `clock/cache/` (unused) |
 
 The current weather and radar adapters render in memory and keep their latest
 transactional snapshot in the common DB. No downloaded assets are written to

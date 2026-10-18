@@ -9,7 +9,9 @@ static spi_inst_t instance;
 spi_inst_t *spi1=&instance;
 static uint32_t clock_ms;
 static bool busy,cs=true,dc;
-static uint8_t command,output[4000];
+static uint8_t command,output[4000],old_output[4000],update_mode;
+static size_t old_written;
+static unsigned full_refreshes,partial_refreshes,soft_resets;
 static size_t written,writes;
 static unsigned sleeping,refreshes,gpio_inits[30];
 absolute_time_t get_absolute_time(void){return clock_ms;}
@@ -24,8 +26,12 @@ unsigned spi_init(spi_inst_t *s,unsigned baud){assert(s==spi1&&baud==4000000);re
 void spi_set_format(spi_inst_t *s,int bits,int cp,int ph,int order){assert(s==spi1&&bits==8&&!cp&&!ph&&!order);}
 int spi_write_blocking(spi_inst_t *s,const uint8_t *p,size_t n){
     assert(s==spi1&&!cs&&n==1);writes++;
-    if(!dc){command=*p;if(command==0x24)written=0;if(command==0x20)refreshes++;}
+    if(!dc){command=*p;if(command==0x24)written=0;if(command==0x26)old_written=0;
+        if(command==0x12)soft_resets++;
+        if(command==0x20){refreshes++;if(update_mode==0xf7)full_refreshes++;else {assert(update_mode==0xff);partial_refreshes++;}}}
     else if(command==0x24){assert(written<sizeof output);output[written++]=*p;}
+    else if(command==0x26){assert(old_written<sizeof old_output);old_output[old_written++]=*p;}
+    else if(command==0x22){update_mode=*p;}
     else if(command==0x10){assert(*p==1);sleeping++;}
     return (int)n;
 }
@@ -70,6 +76,49 @@ int main(void){
         assert(refreshes==2);before=writes;poll_for(1000);assert(writes==before);
         pm_display_wake();pm_display_status("NETWORK","HOME");poll_for(1000);
         assert(refreshes==3);
+        unsigned sleep_before=sleeping,full_before=full_refreshes;
+        assert(!pm_display_clock_frame(pixels,sizeof pixels,0,100,true));
+        assert(!pm_display_clock_frame(pixels,sizeof pixels,61,100,true));
+        // First clock frame establishes both RAMs and does not deep sleep.
+        assert(pm_display_clock_frame(pixels,sizeof pixels,10,100,true));poll_for(1000);
+        assert(pm_display_take_result(&ok)&&ok);assert(full_refreshes==full_before+1);
+        assert(old_written==4000&&!memcmp(old_output,expected,4000));assert(sleeping==sleep_before);
+        uint8_t base_expected[4000];memcpy(base_expected,old_output,4000);
+        unsigned resets_before=soft_resets;
+        for(unsigned minute=101;minute<=109;minute++){
+            pixels[0]^=0x80;pm_eink_pack_landscape(pixels,expected);
+            assert(pm_display_clock_frame(pixels,sizeof pixels,10,minute,false));poll_for(1000);
+            assert(pm_display_take_result(&ok)&&ok);
+            assert(!memcmp(output,expected,4000)&&!memcmp(old_output,base_expected,4000));
+        }
+        assert(partial_refreshes==9&&soft_resets==resets_before&&full_refreshes==full_before+1);
+        // Full at exactly ten host minutes, independent of physical refresh time.
+        assert(pm_display_clock_frame(pixels,sizeof pixels,10,110,false));poll_for(1000);
+        assert(pm_display_take_result(&ok)&&ok&&full_refreshes==full_before+2);
+        assert(sleeping==sleep_before&&old_written==4000&&!memcmp(old_output,expected,4000));
+        // Ordinary plugin frames keep the full/sleep path and break the base.
+        assert(pm_display_frame(pixels,sizeof pixels));poll_for(1000);assert(pm_display_take_result(&ok)&&ok);
+        assert(full_refreshes==full_before+3&&sleeping==sleep_before+1);
+        assert(pm_display_clock_frame(pixels,sizeof pixels,15,111,false));poll_for(1000);
+        assert(pm_display_take_result(&ok)&&ok&&full_refreshes==full_before+4);
+        assert(pm_display_clock_frame(pixels,sizeof pixels,15,125,false));poll_for(1000);
+        assert(pm_display_take_result(&ok)&&ok&&partial_refreshes==10);
+        assert(pm_display_clock_frame(pixels,sizeof pixels,15,126,false));poll_for(1000);
+        assert(pm_display_take_result(&ok)&&ok&&full_refreshes==full_before+5);
+        // Backwards wall time, screen/session reset and wake all establish a base.
+        assert(pm_display_clock_frame(pixels,sizeof pixels,15,100,false));poll_for(1000);
+        assert(pm_display_take_result(&ok)&&ok&&full_refreshes==full_before+6);
+        assert(pm_display_clock_frame(pixels,sizeof pixels,15,101,true));poll_for(1000);
+        assert(pm_display_take_result(&ok)&&ok&&full_refreshes==full_before+7);
+        pm_display_standby();poll_for(1000);assert(sleeping==sleep_before+2);pm_display_wake();
+        assert(pm_display_clock_frame(pixels,sizeof pixels,15,102,false));poll_for(1000);
+        assert(pm_display_take_result(&ok)&&ok&&full_refreshes==full_before+8);
+        // BUSY timeout invalidates base; recovery cannot attempt another partial.
+        assert(pm_display_clock_frame(pixels,sizeof pixels,15,103,false));busy=true;
+        poll_for(PM_EINK_BUSY_TIMEOUT_MS+100);assert(pm_display_take_result(&ok)&&!ok);busy=false;
+        assert(pm_display_clock_frame(pixels,sizeof pixels,15,104,false));poll_for(1000);
+        assert(pm_display_take_result(&ok)&&ok&&full_refreshes==full_before+9);
+        puts("clock: V4 base/partial/full interval, old/new RAM, no SWRESET/deep sleep during partial, other-plugin isolation, reset/wake/timeout recovery PASS");
     }else assert(!ok&&writes==0);
     puts("eink: mono mapping/padding, byte-CS full refresh, bounded poll/BUSY timeout, retained standby, absent-panel PASS");
 }

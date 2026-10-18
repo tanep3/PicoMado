@@ -72,6 +72,7 @@ impl VideoTransfer {
             crate::protocol::encode(&WireMessage::FrameStart {
                 token: self.frame.token.clone(),
                 mode: Some(self.frame.mode.into()),
+                eink_refresh: None,
                 stream: Some(StreamFrame {
                     fps: self.frame.fps,
                     sequence: self.frame.sequence,

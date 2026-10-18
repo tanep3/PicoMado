@@ -55,9 +55,17 @@ static uint8_t active_profile,menu_profile;
 static uint64_t owner_epoch=1,incarnation,session_epoch,display_epoch;
 static uint32_t started_ms,retry_ms=5000,last_heartbeat_ms;
 static bool wifi_enabled,await_selection,sub_mode,have_display,pending_standby,pending_sub_cancel;
+static enum { WIFI_PM_UNREQUESTED, WIFI_PM_PENDING, WIFI_PM_CHECKED } wifi_pm_status;
+static int wifi_pm_request_result,wifi_pm_readback_result;
+static uint32_t wifi_pm_readback;
 static pm_token last_rendered;
 static pm_token pending_render_token;
 static bool pending_render_ack;
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+static unsigned receiving_clock_minutes;
+static uint64_t receiving_clock_minute;
+#endif
+
 static pm_assembly assembly;
 static char json[18000];
 _Static_assert(sizeof json>4u*PM_FRAGMENT_BYTES+1024u,"legacy JSON chunk capacity");
@@ -91,10 +99,34 @@ static const char *transport_name(void){
     case PM_NET_SOCKS:return "SOCKS";case PM_NET_WS:return "WS";case PM_NET_READY:return "READY";
     case PM_NET_FAILED:return "FAILED";default:return "UNKNOWN";}
 }
+static void log_wifi_pm_status(void){
+    if(wifi_pm_status==WIFI_PM_UNREQUESTED)return;
+    if(wifi_pm_status==WIFI_PM_PENDING){
+        pm_logf("net wifi_pm request_sdk_result=%d readback=pending\n",wifi_pm_request_result);
+    }else if(wifi_pm_readback_result){
+        pm_logf("net wifi_pm request_sdk_result=%d readback_sdk_result=%d\n",
+            wifi_pm_request_result,wifi_pm_readback_result);
+    }else{
+        unsigned mode=wifi_pm_readback&15u;
+        pm_logf("net wifi_pm request_sdk_result=%d readback_sdk_result=0 raw=0x%08lx mode=%u none=%u\n",
+            wifi_pm_request_result,(unsigned long)wifi_pm_readback,mode,
+            mode==CYW43_NO_POWERSAVE_MODE?1u:0u);
+    }
+}
+static void check_wifi_pm(void){
+    if(wifi_pm_status!=WIFI_PM_PENDING)return;
+    // Once per successful Wi-Fi join, outside the video/heartbeat hot path.
+    cyw43_arch_lwip_begin();
+    wifi_pm_readback_result=cyw43_wifi_get_pm(&cyw43_state,&wifi_pm_readback);
+    cyw43_arch_lwip_end();
+    wifi_pm_status=WIFI_PM_CHECKED;
+    log_wifi_pm_status();
+}
 static void log_usb_snapshot(void){
     static bool was_connected;
     static uint32_t last_ms;
     bool connected=stdio_usb_connected();
+    pm_stats_usb_poll(connected);
     if(!connected){was_connected=false;return;}
     uint32_t now=now_ms();
     if(was_connected && now-last_ms<15000)return;
@@ -104,6 +136,8 @@ static void log_usb_snapshot(void){
     pm_logf("net status profile=%s app=%s transport=%s wifi=%s tcpip=%s ip_assigned=%u\n",
         profile_name(),app_name(),transport_name(),link_name(wifi),link_name(tcpip),
         tcpip==CYW43_LINK_UP?1u:0u);
+    // Replay cached results for late USB attachment; never repeat radio IOCTLs.
+    log_wifi_pm_status();
 }
 static void log_wifi_progress(void){
     int wifi=cyw43_wifi_link_status(&cyw43_state,CYW43_ITF_STA);
@@ -182,14 +216,14 @@ static void start_wifi(void){
     pm_net_close();
     if(!wifi_enabled){
         cyw43_arch_enable_sta_mode();wifi_enabled=true;
-        // Match the working YouTube player: PM2 is the SDK default even in
-        // performance mode. Streaming/control use an awake radio; standby
-        // still disables STA. Change no profile or connection credentials.
-        cyw43_arch_lwip_begin();
-        int result=cyw43_wifi_pm(&cyw43_state,CYW43_NONE_PM);
-        cyw43_arch_lwip_end();
-        pm_logf("net wifi_pm requested=none sdk_result=%d\n",result);
     }
+    // main enables STA before panel init, so apply this also on first boot.
+    // Streaming/control use an awake radio; standby still disables STA.
+    cyw43_arch_lwip_begin();
+    wifi_pm_request_result=cyw43_wifi_pm(&cyw43_state,CYW43_NONE_PM);
+    cyw43_arch_lwip_end();
+    wifi_pm_status=WIFI_PM_PENDING;
+    pm_logf("net wifi_pm requested=none sdk_result=%d\n",wifi_pm_request_result);
     incarnation=0;session_epoch=0;display_epoch=0;
     await_selection=false;sub_mode=false;pending_standby=false;pending_sub_cancel=false;
     local("WIFI", "CONNECTING");
@@ -325,7 +359,7 @@ static bool send_hello(void){
         "{\"type\":\"hello\",\"data\":{\"device_id\":\"%s\","
         "\"capabilities\":[\"%s\",\"buttons%u\",\"frame-bytes-v1\"%s],\"screen_owner_epoch\":%llu}}",
         PM_DEVICE_ID,pm_display_capability(),PM_BUTTON_COUNT,
-        PM_DISPLAY_TYPE==PM_DISPLAY_LCD?",\"lcd-push-v1\"":"",(unsigned long long)owner_epoch);
+        PM_DISPLAY_TYPE==PM_DISPLAY_LCD?",\"lcd-push-v1\"":",\"eink-clock-v1\"",(unsigned long long)owner_epoch);
     return n>0 && (size_t)n<sizeof outbound_json && pm_net_send(1,outbound_json);
 }
 static void heartbeat(void){
@@ -382,6 +416,7 @@ static void receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t
     bool complete;
     if(!pm_chunk(&assembly,t,offset,bytes,count,&complete))return;
     if(!complete)return;
+    pm_stats_frame_done();
     pm_trace_event(PM_TRACE_CRC_OK,t.frame_id,0,PM_IMAGE_BYTES);
     if(!pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch))return;
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
@@ -399,7 +434,16 @@ static void receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t
         pm_display_reference_pattern();sleep_ms(500);
 #endif
         pm_trace_frame_context(t.frame_id);
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+        bool same_display=have_display && last_rendered.incarnation==t.incarnation &&
+            last_rendered.session_epoch==t.session_epoch && last_rendered.display_epoch==t.display_epoch &&
+            last_rendered.screen_owner_epoch==t.screen_owner_epoch;
+        bool drawn=receiving_clock_minutes ? pm_display_clock_frame(assembly.pixels,PM_IMAGE_BYTES,
+            receiving_clock_minutes,receiving_clock_minute,!same_display) :
+            pm_display_frame(assembly.pixels,PM_IMAGE_BYTES);
+#else
         bool drawn=pm_display_frame(assembly.pixels,PM_IMAGE_BYTES);
+#endif
         pm_trace_frame_context(0);
         if(!drawn){retry();return;}
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
@@ -498,6 +542,15 @@ static void process(uint8_t kind,const char *j){
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
         if(drawing)return;
 #endif
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+        unsigned clock_minutes=0;uint64_t clock_minute=0;
+        if(strstr(j,"\"eink_refresh\"")){
+            uint64_t interval;
+            if(!number(j,"full_refresh_minutes",&interval) || interval<1 || interval>60 ||
+               !number(j,"minute",&clock_minute)){pm_reset(&assembly);return;}
+            clock_minutes=(unsigned)interval;
+        }
+#endif
         uint64_t w,h,len,crc;
         if(!number(j,"width",&w)||!number(j,"height",&h)||
            !number(j,"byte_len",&len)||!number(j,"crc32",&crc)||
@@ -514,12 +567,16 @@ static void process(uint8_t kind,const char *j){
                 pm_video_prepare(&video,t,(uint32_t)fps,generation,video_now_us());
             }else pm_video_reset(&video);
 #endif
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+            receiving_clock_minutes=clock_minutes;receiving_clock_minute=clock_minute;
+#endif
             display_epoch=t.display_epoch;await_selection=false;
             // Web changes can leave SUB without a physical button response.
             // Only a validated current frame may replace the cached mode.
             if(string_equals(j,"mode","normal"))sub_mode=false;
             else if(string_equals(j,"mode","sub"))sub_mode=true;
             pm_trace_event(PM_TRACE_FRAME_START,t.frame_id,0,0);
+            pm_stats_frame_start();
         }
         return;
     }
@@ -587,6 +644,11 @@ static void diagnostic_hold(uint32_t duration_ms,bool watch_buttons){
     }
 }
 #endif
+static void finish_loop(uint64_t started){
+    pm_trace_flush();
+    pm_trace_slow(PM_TRACE_SLOW_LOOP,started,(uint32_t)state);
+    pm_stats_note(PM_STAT_LOOP,started);
+}
 int main(void){
     stdio_init_all();
     bool net_ok=pm_net_init();
@@ -635,11 +697,12 @@ int main(void){
     start_wifi();
     while(true){
         uint64_t loop_started=pm_trace_clock();
+        pm_stats_loop_begin(loop_started);
         uint32_t now=now_ms();
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
         bool draining=panel_standby;
         poll_display();
-        if(draining){pm_trace_flush();sleep_ms(5);continue;}
+        if(draining){finish_loop(loop_started);sleep_ms(5);continue;}
 #endif
         for(unsigned i=0;i<input_count();i++){
             bool pressed=!gpio_get(button_pins[i]);
@@ -649,7 +712,7 @@ int main(void){
             if(event>=0)button((unsigned)event,PM_BUTTON_COUNT==2 && (event==0 || event==2));
         }
         log_usb_snapshot();
-        if(state==STANDBY){pm_trace_flush();sleep_ms(5);continue;}
+        if(state==STANDBY){finish_loop(loop_started);sleep_ms(5);continue;}
         uint64_t poll_started=pm_trace_clock();
         cyw43_arch_poll();
         pm_trace_slow(PM_TRACE_SLOW_POLL,poll_started,1);
@@ -659,6 +722,7 @@ int main(void){
         if(state==WIFI){
             log_wifi_progress();
             if(cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)==CYW43_LINK_UP){
+                check_wifi_pm();
 #if PM_DIAGNOSTIC_STAGE
                 pm_display_reference_pattern();
                 pm_logf("%s\n","diag stage=wifi_up_pattern duration_ms=6000");
@@ -668,26 +732,28 @@ int main(void){
             }else if(now-started_ms>settings.wifi_s*1000u)retry();
         }else if(state==SERVER||state==SESSION||state==ACTIVE){
             if(cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)!=CYW43_LINK_UP){
-                start_wifi();continue;
+                start_wifi();pm_stats_note(PM_STAT_LOOP,loop_started);continue;
             }
             pm_net_poll();
-            if(pm_net_state()==PM_NET_FAILED){retry();continue;}
+            if(pm_net_state()==PM_NET_FAILED){retry();pm_stats_note(PM_STAT_LOOP,loop_started);continue;}
             if(state==SERVER && pm_net_state()==PM_NET_READY){
-                if(!send_hello()){retry();continue;}state=SESSION;
+                if(!send_hello()){retry();pm_stats_note(PM_STAT_LOOP,loop_started);continue;}state=SESSION;
             }
-            if(state!=ACTIVE && now-started_ms>settings.app_s*1000u){retry();continue;}
+            if(state!=ACTIVE && now-started_ms>settings.app_s*1000u){retry();pm_stats_note(PM_STAT_LOOP,loop_started);continue;}
             uint8_t kind;
             // Bound cooperative receive work so image decoding cannot starve
             // network polling or physical input under continuous playback.
             unsigned budget=video_mode()?8u:2u;
             for(unsigned messages=0;messages<budget && pm_net_take(&kind,json,sizeof json);messages++){
+                uint64_t process_started=pm_stats_clock();
                 if(kind==18)process_frame_bytes((const uint8_t *)json,pm_net_payload_length());
                 else process(kind,json);
+                pm_stats_note(PM_STAT_PROCESS,process_started);
                 if(state==ACTIVE)pm_net_poll();
             }
             // Welcome/settings handling may also advance timers and draw.
             now=now_ms();
-            if(!send_pending_render_ack()){retry();continue;}
+            if(!send_pending_render_ack()){retry();pm_stats_note(PM_STAT_LOOP,loop_started);continue;}
             poll_video();
             if(state==ACTIVE && pending_standby && now-started_ms>2000)standby();
             if(state==ACTIVE && now-last_heartbeat_ms>=settings.heartbeat_s*1000u){
@@ -702,7 +768,6 @@ int main(void){
                 if(wifi_enabled)start_server();else start_wifi();
             }
         }
-        pm_trace_slow(PM_TRACE_SLOW_LOOP,loop_started,(uint32_t)state);
-        pm_trace_flush();sleep_ms(state==ACTIVE && video_mode()?1u:5u);
+        finish_loop(loop_started);sleep_ms(state==ACTIVE && video_mode()?1u:5u);
     }
 }

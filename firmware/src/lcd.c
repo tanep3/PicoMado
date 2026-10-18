@@ -148,9 +148,11 @@ static void transfer_pixels(uint8_t *pixels) {
     pm_trace_event(PM_TRACE_SPI_END,pm_trace_current_frame(),last_transfer_bytes,last_frame_baud);
 }
 void pm_lcd_draw(uint8_t *pixels) {
+    uint64_t started=pm_stats_clock();
     pm_lcd_transform(pixels,PM_W*PM_H,
                      PM_LCD_ROTATE_180,PM_LCD_COMPENSATE_INVERT_BGR);
     transfer_pixels(pixels);
+    pm_stats_note(PM_STAT_DRAW,started);
 }
 
 static void dot(unsigned x, unsigned y, uint16_t c) {

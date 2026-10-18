@@ -137,3 +137,11 @@ InputAccepted and PluginPosition now carry an optional `input_context` containin
 ## Streaming deployment — 2026-10-14 22:21 JST
 
 LCD and E-ink admit the next shared-clock frame after RenderedAck, retaining at most one unconsumed image per device and skipping missed positions. A lost draw ACK ends only its connection after 10 s (LCD) or 15 s (E-ink); control and heartbeat continue independently. Existing socket/control write limits are unchanged. Full tests: 178 passed (173 library, 1 binary, 4 integration), external HTTPS opt-in 1 ignored; fmt, all-target clippy, and Release with `caricature-retention-delete` passed. The deployed 629afb3a server retains the actual deletion environment flag and existing unit. Initial new LCD binary transport/ACKs succeeded, but continuous playback still reproduced lost-ACK reconnects; physical acceptance remains open. See the firmware verification record for evidence and current candidates.
+
+## 時計プラグイン（2026-10-18）
+
+日本時間の日付・曜日、左アナログ時計と右24時間 `HH:MM` を秒針なしで表示します。表示切替／再接続直後と毎分境界で更新します。LCDは160×80カラー、E-inkは250×122のネイティブ白黒です。既存端末のON/OFF・選択・共通順序を保ち、時計を共通順序の末尾に追加します。既存端末ではホームから時計をONにしてください。
+
+`/plugins/clock` でE-ink端末別の全面更新間隔を保存できます（既定10分、1〜60分）。`eink-clock-v1` 対応V4ファームでは時計連続表示中だけ部分更新を使います。旧ファームは毎分全面更新し、その制約をWebに表示します。LCDと他プラグインの更新方式は変わりません。
+
+[要件](../docs/requirements/plugins/clock.md)、[検証・本番反映手順](clock-verification-2026-10-18.md)、[V4実装根拠・制約](../firmware/clock-refresh-verification-2026-10-18.md)を参照してください。`cargo run --offline --example clock-preview -- /tmp/picomado-clock-previews` でアプリDBやネットワークを使わずに描画サンプルを生成できます。

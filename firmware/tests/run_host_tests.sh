@@ -16,14 +16,25 @@ for name in core wake transform rx-flow ws-accept; do run "$name"; done
 build trace -DPM_TRACE_ENABLE=1 -Itests/trace_stubs -Itests/app_stubs -Itests/stubs \
     tests/trace_test.c src/trace.c src/trace_usb.c src/core.c
 run trace
+build stats -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 -DPM_TRACE_VERBOSE=0 \
+    -Itests/trace_stubs -Itests/app_stubs -Itests/stubs \
+    tests/stats_test.c src/trace.c src/trace_usb.c
+run stats
 build app -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 \
     '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
     -Itests/app_stubs tests/app_timing_test.c src/core.c src/video.c src/trace.c
 run app
-for mode in drop-during-retry usb-snapshot sdk-error error-log; do run app "$mode"; done
+for mode in drop-during-retry usb-snapshot sdk-error error-log pm-set-error pm-read-error pm-read-mismatch; do run app "$mode"; done
+build app-stats -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 \
+    '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
+    -Itests/app_stubs tests/app_timing_test.c src/core.c src/video.c src/trace.c
+run app-stats
 build net -DPM_TRACE_ENABLE=1 -Itests/net_stubs -Itests/app_stubs -I. \
     tests/net_socks_test.c src/ws_accept.c src/trace.c
 run net
+build net-stats -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 -DPM_TRACE_VERBOSE=0 \
+    -Itests/net_stubs -Itests/app_stubs -I. tests/net_socks_test.c src/ws_accept.c src/trace.c
+run net-stats
 build lcd-bus -DPM_TRACE_ENABLE=1 -DPM_NORMAL_BUILD=1 -DPM_LCD_FRAME_CS_HOLD=1 \
     -DPM_LCD_CONTROL_SPI_BAUD=20000000 -DPM_TEST_NORMAL_SPI_BAUD=20000000 \
     -Itests/stubs tests/lcd_bus_test.c src/lcd.c src/core.c src/video.c src/trace.c
@@ -86,6 +97,10 @@ build control-trace-off -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=0 \
     '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
     -Itests/app_stubs tests/control_reply_test.c src/core.c src/video.c src/trace.c
 run control-trace-off
+build control-stats-quiet -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 -DPM_TRACE_VERBOSE=0 \
+    '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
+    -Itests/app_stubs tests/control_reply_test.c src/core.c src/video.c src/trace.c
+run control-stats-quiet
 
 build video tests/video_test.c src/video.c src/core.c
 run video

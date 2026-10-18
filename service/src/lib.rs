@@ -2,6 +2,7 @@
 
 pub mod application;
 pub mod caricature;
+pub mod clock;
 pub mod content;
 mod display_badge;
 pub mod eink;
@@ -18,6 +19,7 @@ pub mod queue;
 pub mod radar;
 pub mod runner;
 pub mod settings;
+pub mod time_frames;
 pub mod transport;
 pub mod weather;
 pub mod web;

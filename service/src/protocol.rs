@@ -41,6 +41,16 @@ pub struct InputContext {
     pub mode: String,
 }
 
+/// Capability-negotiated clock-only partial refresh policy. Pixel bytes and
+/// render acknowledgements retain the ordinary mono1 contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EinkRefresh {
+    pub full_refresh_minutes: u16,
+    pub minute: u64,
+}
+pub const EINK_CLOCK_CAPABILITY: &str = "eink-clock-v1";
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum WireMessage {
@@ -89,6 +99,8 @@ pub enum WireMessage {
         code: String,
     },
     FrameStart {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        eink_refresh: Option<EinkRefresh>,
         token: FrameToken,
         /// Optional for legacy frames; a new frame carries its logical mode.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -461,6 +473,19 @@ impl Decoder {
 fn validate_image_message(message: &WireMessage) -> Result<(), ProtocolError> {
     match message {
         WireMessage::FrameStart {
+            eink_refresh: Some(policy),
+            width,
+            height,
+            format,
+            ..
+        } if *width != 250
+            || *height != 122
+            || format != "mono1"
+            || !(1..=60).contains(&policy.full_refresh_minutes) =>
+        {
+            Err(ProtocolError::InvalidFrame)
+        }
+        WireMessage::FrameStart {
             width,
             height,
             format,
@@ -497,6 +522,7 @@ mod tests {
             };
             let pixels: Vec<u8> = (0..length).map(|i| (i % 256) as u8).collect();
             let start = WireMessage::FrameStart {
+                eink_refresh: None,
                 stream: None,
                 token: token.clone(),
                 mode: Some("normal".into()),
@@ -635,6 +661,7 @@ mod tests {
         };
         let bytes = vec![0x5a; LCD_FRAME_BYTES];
         let start = WireMessage::FrameStart {
+            eink_refresh: None,
             stream: None,
             mode: None,
             token: token.clone(),
@@ -686,6 +713,7 @@ mod tests {
         }
         assert!(matches!(
             encode(&WireMessage::FrameStart {
+                eink_refresh: None,
                 stream: None,
                 mode: None,
                 token,
@@ -723,6 +751,7 @@ mod tests {
         let mut terminal = GatedFrameReceiver::new(screen);
         let pixels = vec![7; LCD_FRAME_BYTES];
         let start = WireMessage::FrameStart {
+            eink_refresh: None,
             stream: None,
             mode: None,
             token: token.clone(),
@@ -784,6 +813,7 @@ mod tests {
         };
         let pixels = vec![0x5a; LCD_FRAME_BYTES];
         let start = WireMessage::FrameStart {
+            eink_refresh: None,
             stream: None,
             mode: None,
             token: token.clone(),
@@ -842,6 +872,7 @@ mod tests {
         let mut fresh_receiver = GatedFrameReceiver::new(fresh_screen);
         fresh_receiver
             .accept(WireMessage::FrameStart {
+                eink_refresh: None,
                 stream: None,
                 mode: None,
                 token: fresh.clone(),

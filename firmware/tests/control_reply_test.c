@@ -3,6 +3,7 @@
 #include "app_timing_test.c"
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
 static bool panel_result;
+bool pm_display_clock_frame(uint8_t *p,size_t n,unsigned m,uint64_t minute,bool reset){(void)m;(void)minute;(void)reset;return pm_display_frame(p,n);}
 void pm_display_poll(void){}
 bool pm_display_busy(void){return false;}
 bool pm_display_take_result(bool *ok){if(!panel_result)return false;panel_result=false;*ok=true;return true;}

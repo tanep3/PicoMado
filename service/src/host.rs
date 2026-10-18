@@ -116,7 +116,8 @@ pub async fn serve_plugins_on_listener(
             tokio::try_join!(
                 crate::fetch::run_jma_periodic(app.clone(), stop.clone()),
                 crate::workers::run_work(app.clone(), executors.clone(), stop.clone()),
-                crate::playback::run_playback(app, executors, stop),
+                crate::playback::run_playback(app.clone(), executors, stop.clone()),
+                crate::time_frames::run(app, stop),
             )?;
             Ok(())
         },

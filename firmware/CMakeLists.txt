@@ -130,6 +130,9 @@ target_compile_definitions(${PM_APP_TARGET} PRIVATE PM_NETWORK_BUILD=1 PM_NORMAL
   PM_LCD_CAPTURE_ENABLE=0 PICO_STDIO_USB_STDOUT_TIMEOUT_US=0 PICO_STDIO_DEADLOCK_TIMEOUT_MS=0
   PM_EXPECTED_BOARD_ID="${PM_BOARD_ID}" PM_BUILD_DEVICE="${PM_DEVICE}"
   PICO_STACK_SIZE=0x1000)
+if(PM_APP_TARGET STREQUAL "picomado_lcd")
+  target_compile_definitions(${PM_APP_TARGET} PRIVATE PM_TRACE_STATS=1 PM_TRACE_VERBOSE=0)
+endif()
 target_link_libraries(${PM_APP_TARGET} pico_stdlib pico_unique_id pico_rand hardware_spi hardware_flash pico_cyw43_arch_lwip_threadsafe_background picomado_core)
 pico_enable_stdio_usb(${PM_APP_TARGET} 1)
 pico_enable_stdio_uart(${PM_APP_TARGET} 0)

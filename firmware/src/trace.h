@@ -1,10 +1,20 @@
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdarg.h>
 #include <stdio.h>
 #ifndef PM_TRACE_ENABLE
 #define PM_TRACE_ENABLE 0
+#endif
+#ifndef PM_TRACE_STATS
+#define PM_TRACE_STATS 0
+#endif
+#ifndef PM_TRACE_VERBOSE
+#define PM_TRACE_VERBOSE 1
+#endif
+#if PM_TRACE_STATS && !PM_TRACE_ENABLE
+#error "RAM statistics require the bounded trace backend"
 #endif
 
 typedef enum {
@@ -34,4 +44,34 @@ static inline uint64_t pm_trace_current_frame(void){return 0;}
 static inline int pm_logf(const char *format,...){va_list args;va_start(args,format);int n=vprintf(format,args);va_end(args);return n;}
 static inline void pm_trace_flush(void){}
 static inline uint32_t pm_trace_dropped(void){return 0;}
+#endif
+
+typedef enum {
+    PM_STAT_LOOP, PM_STAT_LOOP_GAP, PM_STAT_SDK_WAIT, PM_STAT_NET_POLL,
+    PM_STAT_RX_TAKE, PM_STAT_NET_SEND, PM_STAT_PROCESS, PM_STAT_DRAW,
+    PM_STAT_FRAME_RX, PM_STAT_FLUSH, PM_STAT_USB_WRITE, PM_STAT_RX_CALLBACK,
+    PM_STAT_COUNT
+} pm_stat_kind;
+typedef struct { uint32_t calls,max_us; } pm_stat_sample;
+static inline void pm_stats_accumulate(pm_stat_sample *s,uint64_t elapsed){
+    if(s->calls<UINT32_MAX)s->calls++;
+    uint32_t duration=elapsed>UINT32_MAX?UINT32_MAX:(uint32_t)elapsed;
+    if(duration>s->max_us)s->max_us=duration;
+}
+#if PM_TRACE_STATS
+static inline uint64_t pm_stats_clock(void){return pm_trace_clock();}
+void pm_stats_note(pm_stat_kind kind,uint64_t started);
+void pm_stats_loop_begin(uint64_t started);
+void pm_stats_frame_start(void);
+void pm_stats_frame_done(void);
+void pm_stats_usb_poll(bool connected);
+pm_stat_sample pm_stats_read(bool connected,pm_stat_kind kind);
+size_t pm_stats_ram_bytes(void);
+#else
+static inline uint64_t pm_stats_clock(void){return 0;}
+static inline void pm_stats_note(pm_stat_kind k,uint64_t s){(void)k;(void)s;}
+static inline void pm_stats_loop_begin(uint64_t s){(void)s;}
+static inline void pm_stats_frame_start(void){}
+static inline void pm_stats_frame_done(void){}
+static inline void pm_stats_usb_poll(bool c){(void)c;}
 #endif

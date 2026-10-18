@@ -24,4 +24,6 @@ void cyw43_arch_lwip_begin(void);
 void cyw43_arch_lwip_end(void);
 
 #define CYW43_NONE_PM 0x10u
+#define CYW43_NO_POWERSAVE_MODE 0u
 int cyw43_wifi_pm(cyw43_t *state,uint32_t value);
+int cyw43_wifi_get_pm(cyw43_t *state,uint32_t *value);

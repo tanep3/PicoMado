@@ -74,7 +74,7 @@
   <div class="shell">
     <header class="topbar">
       <a class="brand" href="/" aria-label="PicoMado ホーム"><span class="brand-mark" aria-hidden="true">▦</span>PicoMado</a>
-      <nav aria-label="メインナビゲーション"><a href="/">ホーム</a><a href="/plugins/youtube">YouTube</a><a href="/plugins/caricature">風刺画</a><a href="/plugins/weather">天気</a><a href="/plugins/rain-radar">雨雲</a></nav>
+      <nav aria-label="メインナビゲーション"><a href="/">ホーム</a><a href="/plugins/youtube">YouTube</a><a href="/plugins/caricature">風刺画</a><a href="/plugins/weather">天気</a><a href="/plugins/rain-radar">雨雲</a><a href="/plugins/clock">時計</a></nav>
     </header>
     <div class="hero"><p class="eyebrow">Device &amp; content control</p><h1 id="page-title">PicoMado</h1><p class="lead" id="page-lead">端末とプラグインの状態を確認し、設定を管理します。</p></div>
     <p id="notice" role="status" aria-live="polite"></p>
@@ -89,7 +89,7 @@
     </div>
   </dialog>
   <script>
-    const labels={youtube:'YouTube',caricature:'風刺画',weather:'天気','rain-radar':'雨雲'};
+    const labels={youtube:'YouTube',caricature:'風刺画',weather:'天気','rain-radar':'雨雲',clock:'時計'};
     const deviceFields=[
       ['wifi_timeout_seconds','Wi-Fi 試行 (秒)'],['app_timeout_seconds','Pi セッション試行 (秒)'],
       ['retry_initial_seconds','再試行開始 (秒)'],['retry_max_seconds','再試行上限 (秒)'],
@@ -194,9 +194,31 @@
       const ok=await run(()=>api(`/api/devices/${encodeURIComponent(target.id)}`,'DELETE',{incarnation:target.incarnation}),`${target.id} を削除しました`);
       if(ok)deleteDialog.close();else deleteConfirm.disabled=false;
     };
+    function renderClock(){
+      document.getElementById('page-lead').textContent='日本時間・24時間表記。上部に日付と曜日、下部にアナログ時計と HH:MM を表示します。';
+      section('時計の表示','秒針なしで毎分更新します。ホームの端末カードで時計を有効にして、共通の表示順序で切り替えられます。');
+      const s=section('E-ink の全面リフレッシュ','毎分の時刻更新とは別に、白黒反転する全面更新の間隔を端末ごとに保存します。標準は10分です。LCDには適用しません。');
+      s.append(el('p','時計を続けて表示している間だけ部分更新します。表示切替・再接続後の最初の画像は全面更新します。','plugin-note'));
+      let count=0;
+      for(const d of current.devices){
+        if(!d.capabilities.includes('eink')||d.capabilities.includes('lcd'))continue;
+        const config=d.plugin_configs.clock;if(!config)continue;count++;
+        const form=el('form',undefined,'subsection');form.append(el('h3',d.id));
+        const supported=d.capabilities.includes('eink-clock-v1');
+        form.append(el('p',supported?'部分更新対応ファーム（次の時計画像から適用）':'旧ファーム：設定は保存できますが、現行ファームでは毎分フラッシュします。V4部分更新対応ファームへの更新が必要です。','plugin-note'));
+        const fields=el('div',undefined,'field-grid');
+        const interval=field(fields,'full_refresh_minutes','全面リフレッシュ間隔（分・1〜60）',config.full_refresh_minutes);interval.min='1';interval.max='60';
+        const save=button('間隔を保存','primary');save.type='submit';form.append(fields,save);
+        form.onsubmit=async event=>{event.preventDefault();if(!form.reportValidity())return;save.disabled=true;
+          const ok=await run(()=>api(`/api/devices/${encodeURIComponent(d.id)}/plugin-config/clock`,'PUT',{incarnation:d.incarnation,expected_revision:config.revision,config:{full_refresh_minutes:Number(interval.value)}}),supported?'全面リフレッシュ間隔を保存しました':'間隔を保存しました（対応ファームへの更新が必要）');if(!ok)save.disabled=false;
+        };s.append(form);
+      }
+      if(!count)s.append(el('p','登録済みのE-ink端末はありません。','empty'));
+    }
     function renderPlugin(id){
       document.getElementById('page-title').textContent=labels[id]||id;
       document.getElementById('page-lead').textContent='このプラグインの共通設定を管理します。';
+      if(id==='clock'){renderClock();return}
       if(['youtube','caricature'].includes(id)){renderManaged(id);return}
       const s=section('プラグイン設定','設定の変更は次のジョブから反映します。','plugin-card');
       const breadcrumb=el('div',undefined,'plugin-breadcrumb'),home=el('a','← ホームへ戻る');home.href='/';breadcrumb.append(home);s.prepend(breadcrumb);

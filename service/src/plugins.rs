@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use crate::content::ContentPlugin;
 use crate::{Engine, Registry};
 
-pub const DEFAULT_ORDER: [&str; 4] = ["youtube", "caricature", "weather", "rain-radar"];
+pub const DEFAULT_ORDER: [&str; 5] = ["youtube", "caricature", "weather", "rain-radar", "clock"];
 
 pub fn engine() -> Engine {
     let mut registry = Registry::default();
@@ -22,11 +22,18 @@ pub fn engine() -> Engine {
     registry
         .register(Box::new(crate::radar::RadarPlugin))
         .expect("unique plugin");
+    registry
+        .register(Box::new(crate::clock::ClockPlugin))
+        .expect("unique plugin");
     Engine::new(registry)
 }
 
 pub fn contents() -> BTreeMap<String, Box<dyn ContentPlugin>> {
     BTreeMap::from([
+        (
+            "clock".into(),
+            Box::new(crate::clock::ClockContent::default()) as Box<dyn ContentPlugin>,
+        ),
         (
             "youtube".into(),
             Box::new(crate::plugin_adapters::YoutubeManaged::default()) as Box<dyn ContentPlugin>,

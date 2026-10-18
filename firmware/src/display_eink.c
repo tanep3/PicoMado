@@ -1,5 +1,6 @@
-// Full-refresh sequence and byte-wise CS follow the proven legacy V4 panel.
-// This backend does not use the V3 LUT/partial-refresh sequence.
+// V4 normal/base/partial refresh, following Waveshare EPD_2in13_V4.c and
+// the local EPD_2in13_V4_Landscape reference. No V3 LUT or fast init is used.
+// See ../clock-refresh-verification-2026-10-18.md for source/provenance.
 #include "display.h"
 #include "eink_transform.h"
 #include "status_bitmaps.h"
@@ -16,7 +17,7 @@
 #endif
 
 typedef enum { IDLE, RESET_HIGH, RESET_LOW, RESET_SETTLE, WAIT_RESET,
-               WAIT_SOFT_RESET, WRITE_RAM, WAIT_REFRESH, WAIT_SLEEP } phase;
+               WAIT_SOFT_RESET, WRITE_RAM, WRITE_BASE, WAIT_PARTIAL_RESET, WAIT_REFRESH, WAIT_SLEEP } phase;
 typedef enum { NONE, LOCAL, REMOTE } job;
 static phase stage;
 static job active_job,queued_job;
@@ -26,6 +27,9 @@ static uint32_t until_ms,deadline_ms;
 static bool stopped,result_ready,result_ok,status_valid;
 static char status_one[32],status_two[32];
 static uint64_t frame_context;
+static bool queued_clock,active_clock,clock_base_valid,partial_update,awake;
+static unsigned queued_minutes;
+static uint64_t queued_minute,active_minute,last_full_minute;
 static uint32_t clock_ms(void){return to_ms_since_boot(get_absolute_time());}
 static bool reached(uint32_t now,uint32_t limit){return (int32_t)(now-limit)>=0;}
 static void byte(bool data,uint8_t value){
@@ -36,9 +40,13 @@ static void cmd(uint8_t value){byte(false,value);}
 static void data(uint8_t value){byte(true,value);}
 static void finish(bool ok){
     if(active_job==REMOTE){result_ready=true;result_ok=ok;}
+    if(!ok){clock_base_valid=false;awake=false;}
     if(!ok)pm_logf("eink update failed stage=%u connected=%u\n",(unsigned)stage,PM_EINK_PANEL_CONNECTED);
-    else {cmd(0x10);data(0x01);until_ms=clock_ms()+100;}
-    active_job=NONE;stage=ok?WAIT_SLEEP:IDLE;
+    else if(active_clock){
+        clock_base_valid=true;awake=true;
+        if(!partial_update)last_full_minute=active_minute;
+    }else {clock_base_valid=false;awake=false;cmd(0x10);data(0x01);until_ms=clock_ms()+100;}
+    active_job=NONE;stage=ok&&!active_clock?WAIT_SLEEP:IDLE;
 }
 const char *pm_display_capability(void){return "eink";}
 void pm_display_init(void){
@@ -54,8 +62,14 @@ void pm_display_init(void){
 }
 bool pm_display_frame(uint8_t *pixels,size_t length){
     if(stopped || !pixels || length!=PM_IMAGE_BYTES || active_job==REMOTE || queued_job==REMOTE || result_ready)return false;
-    memcpy(queued,pixels,length);queued_job=REMOTE;status_valid=false;
+    memcpy(queued,pixels,length);queued_job=REMOTE;status_valid=false;queued_clock=false;
     frame_context=pm_trace_current_frame();return true;
+}
+bool pm_display_clock_frame(uint8_t *pixels,size_t length,unsigned minutes,uint64_t minute,bool reset_base){
+    if(minutes<1 || minutes>60 || !pm_display_frame(pixels,length))return false;
+    queued_clock=true;queued_minutes=minutes;queued_minute=minute;
+    if(reset_base)clock_base_valid=false;
+    return true;
 }
 bool pm_display_busy(void){return stage!=IDLE || queued_job!=NONE;}
 bool pm_display_take_result(bool *ok){
@@ -66,11 +80,19 @@ void pm_display_poll(void){
     uint32_t now=clock_ms();
     if(stage==IDLE){
         if(queued_job==NONE || stopped)return;
-        active_job=queued_job;queued_job=NONE;
+        active_job=queued_job;queued_job=NONE;active_clock=queued_clock;queued_clock=false;
+        active_minute=queued_minute;
+        partial_update=active_clock && clock_base_valid && awake &&
+            active_minute>=last_full_minute && active_minute-last_full_minute<queued_minutes;
+        if(!active_clock)clock_base_valid=false;
         if(!PM_EINK_PANEL_CONNECTED){finish(false);return;}
         pm_eink_pack_landscape(queued,ram);
         deadline_ms=now+PM_EINK_BUSY_TIMEOUT_MS;
-        gpio_put(PM_EINK_PIN_RESET,1);until_ms=now+20;stage=RESET_HIGH;return;
+        if(partial_update){
+            // Official V4 partial reset (no SWRESET, no deep sleep/base loss).
+            gpio_put(PM_EINK_PIN_RESET,0);until_ms=now+1;stage=WAIT_PARTIAL_RESET;
+        }else {gpio_put(PM_EINK_PIN_RESET,1);until_ms=now+20;stage=RESET_HIGH;}
+        return;
     }
     if(stage==WAIT_SLEEP){if(reached(now,until_ms))stage=IDLE;return;}
     if(reached(now,deadline_ms)){finish(false);return;}
@@ -82,6 +104,16 @@ void pm_display_poll(void){
     case RESET_SETTLE:if(reached(now,until_ms))stage=WAIT_RESET;break;
     case WAIT_RESET:
         if(!gpio_get(PM_EINK_PIN_BUSY)){cmd(0x12);until_ms=now+10;stage=WAIT_SOFT_RESET;}break;
+    case WAIT_PARTIAL_RESET:
+        if(reached(now,until_ms)){
+            gpio_put(PM_EINK_PIN_RESET,1);
+            cmd(0x3c);data(0x80);cmd(0x01);data(0xf9);data(0);data(0);
+            cmd(0x11);data(0x07);cmd(0x44);data(0);data(15);
+            cmd(0x45);data(0);data(0);data(249);data(0);
+            cmd(0x4e);data(0);cmd(0x4f);data(0);data(0);
+            cmd(0x24);ram_offset=0;stage=WRITE_RAM;
+            pm_trace_event(PM_TRACE_SPI_BEGIN,frame_context,0,0);
+        }break;
     case WAIT_SOFT_RESET:
         if(reached(now,until_ms) && !gpio_get(PM_EINK_PIN_BUSY)){
             cmd(0x01);data(0xf9);data(0);data(0);
@@ -92,11 +124,15 @@ void pm_display_poll(void){
             cmd(0x18);data(0x80);cmd(0x24);ram_offset=0;stage=WRITE_RAM;
             pm_trace_event(PM_TRACE_SPI_BEGIN,frame_context,0,0);
         }break;
-    case WRITE_RAM:
+    case WRITE_RAM:case WRITE_BASE:
         for(unsigned n=0;n<128 && ram_offset<sizeof ram;n++)data(ram[ram_offset++]);
         if(ram_offset==sizeof ram){
-            pm_trace_event(PM_TRACE_SPI_END,frame_context,sizeof ram,PM_EINK_SPI_BAUD);
-            cmd(0x22);data(0xf7);cmd(0x20);until_ms=now+10;stage=WAIT_REFRESH;
+            if(stage==WRITE_RAM && active_clock && !partial_update){
+                // Display_Base writes the same image to old/new RAM before f7.
+                cmd(0x26);ram_offset=0;stage=WRITE_BASE;break;
+            }
+            pm_trace_event(PM_TRACE_SPI_END,frame_context,active_clock&&!partial_update?2*sizeof ram:sizeof ram,PM_EINK_SPI_BAUD);
+            cmd(0x22);data(partial_update?0xff:0xf7);cmd(0x20);until_ms=now+10;stage=WAIT_REFRESH;
         }break;
     case WAIT_REFRESH:
         if(reached(now,until_ms) && !gpio_get(PM_EINK_PIN_BUSY))finish(true);
@@ -141,18 +177,20 @@ void pm_display_status(const char *one,const char *two){
         for(unsigned y=0;y<PM_STATUS_H;y++)for(unsigned x=0;x<PM_STATUS_W;x++)
             if(bitmap[y*(PM_STATUS_W/8)+x/8]&(0x80u>>(x&7)))dot(x+(PM_W-PM_STATUS_W)/2,y+48);
     }else {label(one,35);label(two,73);}
-    queued_job=LOCAL;
+    queued_job=LOCAL;queued_clock=false;clock_base_valid=false;
 }
 void pm_display_standby(void){
     // App defers this until physical refresh finishes. Never clear retained pixels.
     if(queued_job==REMOTE){result_ready=true;result_ok=false;}
-    queued_job=NONE;stopped=true;status_valid=false;
+    queued_job=NONE;stopped=true;status_valid=false;queued_clock=false;clock_base_valid=false;
+    if(awake && stage==IDLE){cmd(0x10);data(0x01);until_ms=clock_ms()+100;stage=WAIT_SLEEP;}
+    awake=false;
 }
-void pm_display_wake(void){stopped=false;}
+void pm_display_wake(void){stopped=false;clock_base_valid=false;}
 void pm_display_reference_pattern(void){
     if(stopped)return;
     memset(queued,0xff,sizeof queued);
     for(unsigned y=0;y<PM_H;y++)for(unsigned x=0;x<PM_W;x++)
         if(x==0 || y==0 || x==PM_W-1 || y==PM_H-1 || (x<18 && y<10))dot(x,y);
-    label("PICO MADO",35);queued_job=LOCAL;status_valid=false;
+    label("PICO MADO",35);queued_job=LOCAL;status_valid=false;queued_clock=false;clock_base_valid=false;
 }

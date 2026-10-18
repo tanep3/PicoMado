@@ -18,3 +18,9 @@ void pm_display_reference_pattern(void);
 void pm_display_poll(void);
 bool pm_display_busy(void);
 bool pm_display_take_result(bool *succeeded);
+
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+// Clock-only opt-in; all ordinary plugin/local frames remain full refreshes.
+bool pm_display_clock_frame(uint8_t *pixels, size_t length, unsigned minutes,
+                            uint64_t minute, bool reset_base);
+#endif

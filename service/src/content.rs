@@ -134,6 +134,17 @@ pub trait ContentPlugin: Send + Sync {
     fn eink_frame_for(&self, _ctx: &PluginContext, _lcd: &[u8]) -> Option<Vec<u8>> {
         None
     }
+    fn eink_refresh(&self, _ctx: &PluginContext) -> Option<crate::protocol::EinkRefresh> {
+        None
+    }
+    /// A wall-clock refresh key, only queried for an online selected display.
+    /// Returning None opts out of time-driven rendering entirely.
+    fn time_key(&self, _ctx: &PluginContext, _now_unix: i64) -> Option<i64> {
+        None
+    }
+    /// Snapshot host time before producing both LCD and native E-ink pixels.
+    /// This is transient display state and must not read a clock or perform IO.
+    fn observe_time(&mut self, _ctx: &PluginContext, _now_unix: i64) {}
     fn current_frame(&self, _ctx: &PluginContext) -> Option<Vec<u8>> {
         None
     }
