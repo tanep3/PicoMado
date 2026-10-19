@@ -51,6 +51,12 @@ run net
 build net-stats -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 -DPM_TRACE_VERBOSE=0 \
     -Itests/net_stubs -Itests/app_stubs -I. tests/net_socks_test.c src/ws_accept.c src/trace.c src/rx_stats.c
 run net-stats
+for device in sample-a E-ink_0 E-ink_1; do
+    cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
+        -I"devices/$device" -Isrc -Itests/net_stubs -Itests/app_stubs -I. \
+        tests/net_nagle_test.c src/ws_accept.c -o "$work/net-nagle-$device"
+    run "net-nagle-$device" "$work/net-nagle-$device.flags"
+done
 build lcd-bus -DPM_TRACE_ENABLE=1 -DPM_NORMAL_BUILD=1 -DPM_LCD_FRAME_CS_HOLD=1 \
     -DPM_LCD_CONTROL_SPI_BAUD=20000000 -DPM_TEST_NORMAL_SPI_BAUD=20000000 \
     -Itests/stubs tests/lcd_bus_test.c src/lcd.c src/core.c src/video.c src/trace.c src/rx_stats.c

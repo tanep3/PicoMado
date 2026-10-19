@@ -1,5 +1,6 @@
 #include "trace.h"
 #include "net.h"
+#include "core.h"
 #include "stream_diag.h"
 #include "ws_accept.h"
 #include "rx_flow.h"
@@ -254,6 +255,11 @@ static void begin_unlocked(const pm_profile *p) {
     }
     pcb=tcp_new_ip_type(IPADDR_TYPE_V4);
     if(!pcb){RX_OBSERVE(pm_rx_fault,PM_RX_ALLOC_ERROR,0,);stage=PM_NET_FAILED;return;}
+#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
+    // Small controls/status share the frame connection. Do not hold them
+    // (or a pending piggyback ACK) behind an earlier unacknowledged write.
+    tcp_nagle_disable(pcb);
+#endif
     pm_diag_connection(true);
     RX_OBSERVE(pm_rx_connection,);
     pcb->so_options|=SOF_KEEPALIVE;

@@ -1,5 +1,7 @@
 # PicoMado firmware (LCD / E-ink)
 
+LCD 接続で小さい制御送信が ACK 待ちに重なる条件に対し、新規 PCB の接続開始前に Nagle を無効にする候補を隔離検証しました。HOME/AWAY/再接続と E-ink の設定維持、同 SDK の送出挙動はローカル試験済みです。既知正常版も Nagle は有効だったため、実機悪化の原因確定や改善確認とは扱いません。後続の承認済み LCD 版へ反映し、ソースも保存しました。実機経過と残る制約は検証記録の末尾にあります。[候補と検証範囲](nagle-candidate-verification-2026-10-19.md)。
+
 160×80 ST7735S LCD・4 ボタンと、250×122 Waveshare Pico-ePaper V4・2／0 ボタンの Pico W 用です。`picomado_selftest` はネット資格情報を使わない LCD/ボタン診断、`picomado_lcd` は端末通信を含むファームです。既存 YouTube 端末の配線・ガンマ・180 度画素回転を照合して実装しました。
 
 通常 `picomado_lcd` は `PM_NORMAL_BUILD=1` で診断画像/段階待ち/バッファ回収を無効にします。個体configを編集せず、制御速度を `PM_LCD_SPI_BAUD` と同じ20MHz要求へ結線し、窓指定から全25,600B画素完了までCSを保持します。同速度の描画中再設定はしません。既存125MHz周辺クロックでは実速度は15.625MHzになる見込みで、起動USBの `lcd ready` がSDK読戻し値を記録します。40MHz要求は今回採用しません。通常USBログは診断画像ではありません。
