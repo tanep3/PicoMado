@@ -94,9 +94,12 @@ typedef struct {
     uint32_t epoch;
     unsigned row;
     bool connected,reporting,frame_active;
+#if PM_STREAM_DIAGNOSTICS
+    bool rx_done;
+#endif
 } runtime_stats;
 static runtime_stats stats;
-_Static_assert(sizeof(runtime_stats)<=512,"fixed RAM statistics budget");
+_Static_assert(sizeof(runtime_stats)<=1024,"fixed RAM statistics budget");
 static const char *const stat_names[]={"loop","loop_gap","sdk_wait","net_poll",
     "rx_take","net_send","process","draw","frame_rx","flush","usb_write","rx_cb"};
 size_t pm_stats_ram_bytes(void){return sizeof stats;}
@@ -125,6 +128,7 @@ void pm_stats_frame_done(void){
 void pm_stats_usb_poll(bool connected){
     uint64_t now=pm_stats_clock();
     pm_rx_usb(connected);
+    pm_diag_usb(connected);
     uint32_t irq=save_and_disable_interrupts();
     bool rising=connected&&!stats.connected;
     stats.connected=connected;
@@ -133,6 +137,9 @@ void pm_stats_usb_poll(bool connected){
         memset(stats.active,0,sizeof stats.active);
         stats.snapshot_start=stats.window_start;stats.snapshot_end=now;stats.window_start=now;
         stats.epoch++;stats.row=0;stats.next_emit=now;stats.reporting=true;pm_rx_capture(now);
+#if PM_STREAM_DIAGNOSTICS
+        stats.rx_done=false;
+#endif
     }
     if(!connected)stats.reporting=false;
     restore_interrupts(irq);
@@ -146,12 +153,20 @@ void pm_stats_usb_poll(bool connected){
     }else if(row<=2*PM_STAT_COUNT){
         unsigned bank=(row-1)/PM_STAT_COUNT,kind=(row-1)%PM_STAT_COUNT;
         pm_stat_sample value=stats.snapshot[bank][kind];
+#if PM_STREAM_DIAGNOSTICS
+        pm_logf("diag metric epoch=%lu usb=%s metric=%s total_us=%llu\n",(unsigned long)stats.epoch,bank?"on":"off",stat_names[kind],(unsigned long long)value.total_us);
+#endif
         pm_logf("stats epoch=%lu usb=%s metric=%s calls=%lu max_us=%lu\n",
             (unsigned long)stats.epoch,bank?"on":"off",stat_names[kind],
             (unsigned long)value.calls,(unsigned long)value.max_us);
     }else if(row==2*PM_STAT_COUNT+1){
         pm_logf("stats end epoch=%lu trace_dropped=%lu\n",(unsigned long)stats.epoch,(unsigned long)pm_trace_dropped());
+#if PM_STREAM_DIAGNOSTICS
+    }else if(!stats.rx_done){if(!pm_rx_emit(stats.epoch))stats.rx_done=true;
+    }else if(!pm_diag_emit(stats.epoch)){stats.reporting=false;}
+#else
     }else if(!pm_rx_emit(stats.epoch)){stats.reporting=false;}
+#endif
 }
 #endif
 #endif

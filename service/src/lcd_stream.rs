@@ -45,10 +45,17 @@ impl VideoSlot {
             self.generation = frame.generation;
         }
         self.last_issued = frame.token.frame_id;
-        self.latest.send_replace(Some(Arc::new(frame)));
+        crate::diagnostics::event(crate::diagnostics::Kind::Publish,frame.token.session_epoch,frame.token.frame_id,frame.sequence,frame.generation,0);
+        if let Some(_old)=self.latest.send_replace(Some(Arc::new(frame))) {
+            #[cfg(feature="stream-diagnostics")]
+            crate::diagnostics::event(crate::diagnostics::Kind::Replace,_old.token.session_epoch,_old.token.frame_id,_old.sequence,_old.generation,std::sync::Arc::strong_count(&_old) as u64);
+        }
     }
     pub fn clear(&mut self) {
-        self.latest.send_replace(None);
+        if let Some(_old)=self.latest.send_replace(None) {
+            #[cfg(feature="stream-diagnostics")]
+            crate::diagnostics::event(crate::diagnostics::Kind::Clear,_old.token.session_epoch,_old.token.frame_id,_old.sequence,_old.generation,std::sync::Arc::strong_count(&_old) as u64);
+        }
     }
 }
 

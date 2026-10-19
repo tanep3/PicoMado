@@ -15,6 +15,7 @@ pub async fn run_playback(
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), AppError> {
     let mut tick = tokio::time::interval(Duration::from_millis(16));
+    let mut diagnostic_tick=0;
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut sent = BTreeMap::<String, (crate::DisplayToken, String, u64, u64)>::new();
     loop {
@@ -24,7 +25,8 @@ pub async fn run_playback(
         tokio::select! {
             changed=shutdown.changed()=>if changed.is_err() || *shutdown.borrow() {return Ok(());},
             _=tick.tick()=>{
-                let (now,offers)={let guard=app.lock().map_err(|_|AppError::Conflict("application unavailable"))?;
+                crate::diagnostics::tick(crate::diagnostics::Domain::Playback,&mut diagnostic_tick);
+                let (now,offers)={let guard=crate::diagnostics::lock(&app, crate::diagnostics::Domain::Playback).map_err(|_|AppError::Conflict("application unavailable"))?;
                     (guard.monotonic_millis(),guard.playback_offers())};
                 for mut offer in offers {
                     let sequence=now.saturating_sub(offer.spec.started_mono_ms)
@@ -33,7 +35,7 @@ pub async fn run_playback(
                         != Some(&(target.token.clone(),offer.plugin.clone(),offer.spec.generation,sequence)));
                     if offer.targets.is_empty(){continue;}
                     let Some(executor)=executors.get(&offer.plugin) else{continue;};
-                    let paths=app.lock().map_err(|_|AppError::Conflict("application unavailable"))?
+                    let paths=crate::diagnostics::lock(&app, crate::diagnostics::Domain::Playback).map_err(|_|AppError::Conflict("application unavailable"))?
                         .plugin_paths(&offer.plugin).ok_or(AppError::NotFound)?;
                     let read=executor.read_frame(offer.spec.clone(),sequence%offer.spec.frame_count,paths);
                     tokio::pin!(read);
@@ -45,7 +47,7 @@ pub async fn run_playback(
                         }
                     };
                     let targets=std::mem::take(&mut offer.targets);
-                    let mut guard=app.lock().map_err(|_|AppError::Conflict("application unavailable"))?;
+                    let mut guard=crate::diagnostics::lock(&app, crate::diagnostics::Domain::Playback).map_err(|_|AppError::Conflict("application unavailable"))?;
                     for target in targets {
                         let id=target.token.device_id.clone();
                         let token=target.token.clone();

@@ -8,15 +8,16 @@ fn until_next_minute(now: Duration) -> Duration {
 }
 
 pub async fn run(app: SharedApp, mut stop: watch::Receiver<bool>) -> Result<(), AppError> {
-    let mut changes = app
-        .lock()
+    let mut changes = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Clock)
         .map_err(|_| AppError::Conflict("application unavailable"))?
         .dispatch_notifications();
+    let mut diagnostic_tick=0;
     loop {
+        crate::diagnostics::tick(crate::diagnostics::Domain::Clock,&mut diagnostic_tick);
         if *stop.borrow() {
             return Ok(());
         }
-        app.lock()
+        crate::diagnostics::lock(&app, crate::diagnostics::Domain::Clock)
             .map_err(|_| AppError::Conflict("application unavailable"))?
             .refresh_timed_frames()?;
         // Recompute from wall time after every wake, including clock adjustments.

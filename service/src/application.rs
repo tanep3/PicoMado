@@ -468,6 +468,7 @@ impl App {
     }
 
     fn persist(connection: &mut Connection, runtime: &Runtime) -> Result<(), AppError> {
+        let diagnostic_started=crate::diagnostics::mark();
         let started = std::time::Instant::now();
         let body = serde_json::to_string(&StoredState::from(runtime))?;
         let serialized = started.elapsed();
@@ -480,6 +481,7 @@ impl App {
         )?;
         transaction.commit()?;
         let elapsed = started.elapsed();
+        crate::diagnostics::duration(crate::diagnostics::Kind::Persist,diagnostic_started,0,0,0);
         if elapsed >= std::time::Duration::from_millis(50) {
             eprintln!("picomado state_persist_slow body_bytes={} serialize_us={} sqlite_us={} elapsed_us={}",
                 body_bytes, serialized.as_micros(), elapsed.saturating_sub(serialized).as_micros(), elapsed.as_micros());

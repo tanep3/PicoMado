@@ -25,22 +25,21 @@ pub async fn run_work(
     executors: Executors,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), AppError> {
-    let mut notifications = app
-        .lock()
+    let mut notifications = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Work)
         .map_err(|_| AppError::Conflict("application unavailable"))?
         .work_notifications();
     let mut tasks = JoinSet::new();
     let mut running = BTreeMap::<u64, Running>::new();
     let (progress_tx, mut progress_rx) = mpsc::channel(64);
     let mut tick = tokio::time::interval(Duration::from_secs(1));
+    let mut diagnostic_tick=0;
     let mut stopping = false;
     let mut inspect = true;
     loop {
         if inspect && !stopping {
             inspect = false;
             let jobs = {
-                let mut guard = app
-                    .lock()
+                let mut guard = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Work)
                     .map_err(|_| AppError::Conflict("application unavailable"))?;
                 for task in running.values() {
                     if guard.plugin_work_cancelled(&task.token) {
@@ -51,8 +50,7 @@ pub async fn run_work(
             };
             for job in jobs {
                 let token = job.token.clone();
-                let paths = app
-                    .lock()
+                let paths = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Work)
                     .map_err(|_| AppError::Conflict("application unavailable"))?
                     .plugin_paths(&token.plugin)
                     .ok_or(AppError::NotFound)?;
@@ -103,7 +101,8 @@ pub async fn run_work(
                 }
             }
             _ = tick.tick(), if !stopping => {
-                let mut guard = app.lock().map_err(|_| AppError::Conflict("application unavailable"))?;
+                crate::diagnostics::tick(crate::diagnostics::Domain::Work,&mut diagnostic_tick);
+                let mut guard = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Work).map_err(|_| AppError::Conflict("application unavailable"))?;
                 guard.plan_scheduled_work()?;
                 #[cfg(feature = "caricature-retention-delete")]
                 if let Err(error) = guard.run_scheduled_caricature_retention() {
@@ -117,7 +116,7 @@ pub async fn run_work(
             }
             Some((token, progress)) = progress_rx.recv() => {
                 if !stopping {
-                    app.lock().map_err(|_| AppError::Conflict("application unavailable"))?.plugin_work_progress(token, progress)?;
+                    crate::diagnostics::lock(&app, crate::diagnostics::Domain::Work).map_err(|_| AppError::Conflict("application unavailable"))?.plugin_work_progress(token, progress)?;
                 }
             }
             Some(result) = tasks.join_next(), if !tasks.is_empty() => {
@@ -127,9 +126,9 @@ pub async fn run_work(
                     // Preserve prepared metadata/source/conversion before a
                     // cancellation outcome can make further progress stale.
                     while let Ok((progress_token,progress))=progress_rx.try_recv() {
-                        app.lock().map_err(|_| AppError::Conflict("application unavailable"))?.plugin_work_progress(progress_token,progress)?;
+                        crate::diagnostics::lock(&app, crate::diagnostics::Domain::Work).map_err(|_| AppError::Conflict("application unavailable"))?.plugin_work_progress(progress_token,progress)?;
                     }
-                    app.lock().map_err(|_| AppError::Conflict("application unavailable"))?.complete_plugin_work(token, outcome)?;
+                    crate::diagnostics::lock(&app, crate::diagnostics::Domain::Work).map_err(|_| AppError::Conflict("application unavailable"))?.complete_plugin_work(token, outcome)?;
                     inspect = true;
                 }
             }

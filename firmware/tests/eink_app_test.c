@@ -41,6 +41,7 @@ void pm_net_close(void){stops++;}
 void pm_net_begin(const pm_profile *p){(void)p;}
 void pm_net_poll(void){}
 pm_net_stage pm_net_state(void){return PM_NET_READY;}
+pm_net_stage pm_net_checkpoint(void){return PM_NET_READY;}
 bool pm_net_send(uint8_t kind,const char *j){
     assert(j);
     if(kind==8)receipt_count++;

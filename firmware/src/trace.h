@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include "stream_diag.h"
 #ifndef PM_TRACE_ENABLE
 #define PM_TRACE_ENABLE 0
 #endif
@@ -52,11 +53,18 @@ typedef enum {
     PM_STAT_FRAME_RX, PM_STAT_FLUSH, PM_STAT_USB_WRITE, PM_STAT_RX_CALLBACK,
     PM_STAT_COUNT
 } pm_stat_kind;
-typedef struct { uint32_t calls,max_us; } pm_stat_sample;
+typedef struct { uint32_t calls,max_us;
+#if PM_STREAM_DIAGNOSTICS
+    uint64_t total_us;
+#endif
+} pm_stat_sample;
 static inline void pm_stats_accumulate(pm_stat_sample *s,uint64_t elapsed){
     if(s->calls<UINT32_MAX)s->calls++;
     uint32_t duration=elapsed>UINT32_MAX?UINT32_MAX:(uint32_t)elapsed;
     if(duration>s->max_us)s->max_us=duration;
+#if PM_STREAM_DIAGNOSTICS
+    s->total_us=UINT64_MAX-s->total_us<elapsed?UINT64_MAX:s->total_us+elapsed;
+#endif
 }
 #if PM_TRACE_STATS
 static inline uint64_t pm_stats_clock(void){return pm_trace_clock();}

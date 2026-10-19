@@ -105,6 +105,10 @@ void pm_net_begin(const pm_profile *p){
 }
 void pm_net_poll(void){if(server_ready)network_stage=PM_NET_READY;}
 pm_net_stage pm_net_state(void){return network_stage;}
+pm_net_stage pm_net_checkpoint(void){return network_stage;}
+#if !PM_AWAY_EEX1
+pm_net_failure pm_net_last_failure(void){return PM_NET_FAIL_PROTOCOL;}
+#endif
 bool pm_net_send(uint8_t kind,const char *j){
     assert(j && network_stage==PM_NET_READY);
     if(kind==1){hello_count++;welcome_available=true;}

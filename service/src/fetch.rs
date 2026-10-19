@@ -79,8 +79,7 @@ pub fn run_cycle(
 pub async fn run_jma_cycle(app: &crate::web::SharedApp) -> Result<FetchReport, AppError> {
     let clock = SystemClock;
     let jobs = {
-        let mut guard = app
-            .lock()
+        let mut guard = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Fetch)
             .map_err(|_| AppError::Conflict("application unavailable"))?;
         guard.plan_plugin_fetches(clock.unix_seconds(), &clock.today_jst())?
     };
@@ -106,8 +105,7 @@ pub async fn run_jma_cycle(app: &crate::web::SharedApp) -> Result<FetchReport, A
     tokio::pin!(fetched);
     while let Some((group, result, attempts)) = fetched.next().await {
         report.attempts += attempts;
-        let mut guard = app
-            .lock()
+        let mut guard = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Fetch)
             .map_err(|_| AppError::Conflict("application unavailable"))?;
         for job in group {
             if guard.complete_plugin_fetch(&job, clock.unix_seconds(), result.clone())? {
@@ -129,14 +127,16 @@ pub async fn run_jma_periodic(
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), AppError> {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+    let mut diagnostic_tick=0;
     loop {
         tokio::select! {
             _ = interval.tick() => {
+                crate::diagnostics::tick(crate::diagnostics::Domain::Fetch,&mut diagnostic_tick);
                 tokio::select! {
                     result = run_jma_cycle(&app) => { result?; }
                     changed = shutdown.changed() => {
                         if changed.is_err() || *shutdown.borrow() {
-                            let mut guard = app.lock().map_err(|_| AppError::Conflict("application unavailable"))?;
+                            let mut guard = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Fetch).map_err(|_| AppError::Conflict("application unavailable"))?;
                             guard.cancel_plugin_fetches()?;
                             return Ok(());
                         }

@@ -127,3 +127,26 @@ build app-eex -DPM_AWAY_EEX1=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 \
     -Itests/app_stubs tests/app_endpoint_test.c src/core.c src/video.c src/trace.c \
     src/eex_wire.c src/eex_exchange.c src/endpoint_policy.c src/endpoint_client.c
 run app-eex
+
+# Unified diagnostics are exercised separately; ordinary targets remain OFF.
+build stream-diag -DPM_STREAM_DIAGNOSTICS=1 -DPM_TRACE_ENABLE=1 -Itests/app_stubs tests/stream_diag_test.c
+run stream-diag "$work/stream-diag.txt"
+python3 tests/stream_diag_parser_test.py "$work/stream-diag.txt"
+printf 'PASS stream-diag-parser\n'
+build net-diag -DPM_STREAM_DIAGNOSTICS=1 -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 -DPM_TRACE_VERBOSE=0 \
+    -Itests/net_stubs -Itests/app_stubs -I. tests/net_socks_test.c src/ws_accept.c src/trace.c src/rx_stats.c src/stream_diag.c
+run net-diag
+build control-diag -DPM_STREAM_DIAGNOSTICS=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 -DPM_TRACE_VERBOSE=0 \
+    '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
+    -Itests/app_stubs tests/control_reply_test.c src/core.c src/video.c src/trace.c src/rx_stats.c src/stream_diag.c
+run control-diag
+
+build stream-diag-identity -DPM_STREAM_DIAGNOSTICS=1 -DPM_TRACE_ENABLE=1 -Itests/app_stubs tests/stream_diag_identity_test.c
+run stream-diag-identity "$work/identity.txt"
+python3 tools/parse_stream_diag.py "$work/identity.txt" --output "$work/identity.json"
+
+# Production main+net together: bounded EOF salvage, pacing, hard errors and generations.
+build net-eof-recovery -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 -DPM_TRACE_VERBOSE=0 -DPM_STREAM_DIAGNOSTICS=1 \
+    '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
+    -Itests/net_stubs -Itests/app_stubs tests/fin_recovery_test.c src/core.c src/video.c src/ws_accept.c src/trace.c src/rx_stats.c src/stream_diag.c
+for mode in {1..52}; do run net-eof-recovery "$mode"; done

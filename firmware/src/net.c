@@ -1,5 +1,6 @@
 #include "trace.h"
 #include "net.h"
+#include "stream_diag.h"
 #include "ws_accept.h"
 #include "rx_flow.h"
 #include "socks5_wire.h"
@@ -38,7 +39,8 @@ static uint8_t app_rx[APP_CAP];
 static size_t ws_remaining;
 static size_t app_used,last_payload_length;
 static bool ws_continuation;
-static bool socket_dead;
+static bool socket_dead,ws_closed;
+static uint64_t eof_started_us;
 static bool proxy_target_connected;
 static pm_net_failure last_failure;
 static char expected_accept[29];
@@ -113,20 +115,59 @@ static bool send_raw(const void *p, size_t n) {
     // Preserve existing queueing semantics; output result is diagnostic, not arrival ACK.
     return true;
 }
+// A Close reply is optional: sndbuf measures bytes, not lwIP's segment queue
+// or heap. Skip resource shortages once; never retry them or reset a failure.
+static bool send_close_reply(const void *p,size_t n){
+    if(!pcb || socket_dead){stage=PM_NET_FAILED;return false;}
+    if(n>tcp_sndbuf(pcb))return true;
+    uint64_t started=pm_trace_clock();
+    err_t result=tcp_write(pcb,p,n,TCP_WRITE_FLAG_COPY);
+    pm_trace_event(PM_TRACE_TCP_WRITE,pm_trace_current_frame(),result,
+        (uint32_t)(pm_trace_clock()-started));
+    if(socket_dead || stage==PM_NET_FAILED || !pcb)return false;
+    if(result==ERR_MEM)return true;
+    if(result==ERR_OK){
+        started=pm_trace_clock();result=tcp_output(pcb);
+        pm_trace_event(PM_TRACE_TCP_OUTPUT,pm_trace_current_frame(),result,
+            (uint32_t)(pm_trace_clock()-started));
+        if(socket_dead || stage==PM_NET_FAILED || !pcb)return false;
+        if(result==ERR_OK || result==ERR_MEM)return true;
+    }
+    pm_logf("net close_reply_failed sdk_result=%d\n",(int)result);
+    RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,(int)result,);stage=PM_NET_FAILED;return false;
+}
 static void error_cb(void *arg, err_t e) {
+    pm_diag_net_error((uint32_t)e);
     (void)arg;last_failure=stage==PM_NET_TCP?PM_NET_FAIL_TCP:PM_NET_FAIL_PROTOCOL;pm_logf("net tcp_error sdk_result=%d\n",(int)e);pcb=NULL;socket_dead=true;
+    stage=PM_NET_FAILED;
     RX_OBSERVE(pm_rx_fault,PM_RX_TCP_ERROR,(int)e,);
 }
 static err_t recv_body(void *arg, struct tcp_pcb *p, struct pbuf *buf, err_t e) {
-    (void)arg;(void)p;
-    if (!buf) { pm_logf("%s\n","net tcp_peer_closed");RX_OBSERVE(pm_rx_fault,PM_RX_PEER_CLOSED,0,);socket_dead=true;return ERR_OK; }
+    (void)arg;
+    // close/begin detach old callbacks under the SDK lock. Also reject a
+    // stale PCB defensively before touching the current connection's buffers.
+    if(p!=pcb){if(buf)pbuf_free(buf);return ERR_OK;}
+    if (!buf && e!=ERR_OK){
+        pm_diag_net_error((uint32_t)e);last_failure=PM_NET_FAIL_PROTOCOL;
+        pm_logf("net tcp_error sdk_result=%d\n",(int)e);
+        RX_OBSERVE(pm_rx_fault,PM_RX_TCP_ERROR,(int)e,);socket_dead=true;stage=PM_NET_FAILED;return ERR_OK;
+    }
+    if (!buf) {
+        pm_diag_net_error(1);pm_logf("%s\n","net tcp_peer_closed");RX_OBSERVE(pm_rx_fault,PM_RX_PEER_CLOSED,0,);
+        if(e==ERR_OK && stage==PM_NET_READY){eof_started_us=time_us_64();stage=PM_NET_DRAINING;}
+        else if(e!=ERR_OK || (stage!=PM_NET_DRAINING && stage!=PM_NET_DRAINED))socket_dead=true;
+        return ERR_OK;
+    }
+    // A validated Close ends application input, even if TCP FIN is delayed.
+    if(ws_closed && e==ERR_OK){pbuf_free(buf);return ERR_OK;}
     size_t n=buf->tot_len, credit=0;
     RX_OBSERVE(pm_rx_callback_begin,(uint32_t)n,);
     if (e!=ERR_OK || buf->tot_len>RX_CAP-rx_used) {
         pm_logf("net receive_failed sdk_result=%d used=%u incoming=%u\n",(int)e,(unsigned)rx_used,(unsigned)buf->tot_len);
         unsigned freed=pbuf_free(buf);(void)freed;
         RX_OBSERVE(pm_rx_callback_end,freed,0,);
-        RX_OBSERVE(pm_rx_fault,e==ERR_OK?PM_RX_OVERFLOW:PM_RX_TCP_ERROR,(int)e,); socket_dead=true; return ERR_OK;
+        RX_OBSERVE(pm_rx_fault,e==ERR_OK?PM_RX_OVERFLOW:PM_RX_TCP_ERROR,(int)e,);
+        last_failure=PM_NET_FAIL_PROTOCOL;socket_dead=true;stage=PM_NET_FAILED;return ERR_OK;
     }
     pbuf_copy_partial(buf,rx+rx_used,n,0);
 #if PM_TRACE_STATS
@@ -137,7 +178,7 @@ static err_t recv_body(void *arg, struct tcp_pcb *p, struct pbuf *buf, err_t e) 
     if(!pm_rx_flow_append(&rx_flow,n,RX_CAP,TCP_WND,&credit)) {
         RX_OBSERVE(pm_rx_callback_end,freed,0,);
         RX_OBSERVE(pm_rx_fault,PM_RX_OVERFLOW,0,);
-        socket_dead=true; return ERR_OK;
+        last_failure=PM_NET_FAIL_PROTOCOL;socket_dead=true;stage=PM_NET_FAILED;return ERR_OK;
     }
     // The copied bytes are safe in RX_CAP. Hold only the final window-sized
     // reserve, so receiving a partial frame never depends on parsing it first.
@@ -190,6 +231,9 @@ bool pm_net_init(void) {
     return cyw43_arch_init()==0;
 }
 static void close_unlocked(void) {
+    pm_diag_drain_error();
+    pm_diag_connection(false);
+    pm_diag_event(PM_D_CLOSE,0,0,0,0);
     RX_OBSERVE(pm_rx_closed,);
     if(pcb) {
         struct tcp_pcb *old=pcb; pcb=NULL;
@@ -197,7 +241,7 @@ static void close_unlocked(void) {
         if(tcp_close(old)!=ERR_OK)tcp_abort(old);
     }
     stage=PM_NET_DOWN;socks_step=SOCKS_METHOD;
-    pm_rx_flow_reset(&rx_flow); app_used=0; last_payload_length=0; ws_continuation=false; ws_remaining=0; socket_dead=false;
+    pm_rx_flow_reset(&rx_flow); app_used=0; last_payload_length=0; ws_continuation=false; ws_remaining=0; socket_dead=false;ws_closed=false;eof_started_us=0;
 }
 static void begin_unlocked(const pm_profile *p) {
     close_unlocked(); profile=p;proxy_target_connected=false;last_failure=PM_NET_FAIL_NONE;
@@ -210,6 +254,7 @@ static void begin_unlocked(const pm_profile *p) {
     }
     pcb=tcp_new_ip_type(IPADDR_TYPE_V4);
     if(!pcb){RX_OBSERVE(pm_rx_fault,PM_RX_ALLOC_ERROR,0,);stage=PM_NET_FAILED;return;}
+    pm_diag_connection(true);
     RX_OBSERVE(pm_rx_connection,);
     pcb->so_options|=SOF_KEEPALIVE;
     pcb->keep_idle=30000;pcb->keep_intvl=5000;pcb->keep_cnt=3;
@@ -256,8 +301,16 @@ static void process_socks(void) {
     proxy_target_connected=true;
     consume(n);if(!upgrade())stage=PM_NET_FAILED;
 }
+static void check_failure_unlocked(void){
+    bool eof_expired=(stage==PM_NET_DRAINING || stage==PM_NET_DRAINED) && time_us_64()-eof_started_us>=PM_NET_EOF_DRAIN_US;
+    if(socket_dead || eof_expired){
+        if(!socket_dead && eof_expired)last_failure=PM_NET_FAIL_EOF_TIMEOUT;
+        close_unlocked();stage=PM_NET_FAILED;return;
+    }
+}
 static void poll_unlocked(void) {
-    if(socket_dead){close_unlocked();stage=PM_NET_FAILED;return;}
+    check_failure_unlocked();
+    if(stage==PM_NET_FAILED)return;
     if(stage==PM_NET_SOCKS && rx_used)process_socks();
     if(stage==PM_NET_WS) {
         static const uint8_t end[]={"\r\n\r\n"};
@@ -295,7 +348,7 @@ static void poll_unlocked(void) {
 static pm_net_stage state_unlocked(void){return stage;}
 
 static bool send_unlocked(uint8_t kind, const char *json) {
-    if(stage!=PM_NET_READY || !pcb)return false;
+    if(ws_closed || (stage!=PM_NET_READY && stage!=PM_NET_DRAINING && stage!=PM_NET_DRAINED) || !pcb)return false;
     size_t n=strlen(json);if(n>1024)return false;
     uint8_t *packet=tx_packet;size_t k=0;
     packet[k++]=0x82;
@@ -312,10 +365,49 @@ static bool send_unlocked(uint8_t kind, const char *json) {
     return send_raw(packet,k);
 }
 
+// Close reasons use strict UTF-8: reject overlong forms, surrogates and >U+10FFFF.
+static bool close_utf8(const uint8_t *p,size_t n){
+    for(size_t i=0;i<n;){
+        unsigned c=p[i++],need,lo=0x80,hi=0xbf;
+        if(c<0x80)continue;
+        if(c>=0xc2 && c<=0xdf)need=1;
+        else if(c>=0xe0 && c<=0xef){need=2;if(c==0xe0)lo=0xa0;if(c==0xed)hi=0x9f;}
+        else if(c>=0xf0 && c<=0xf4){need=3;if(c==0xf0)lo=0x90;if(c==0xf4)hi=0x8f;}
+        else return false;
+        if(n-i<need || p[i]<lo || p[i]>hi)return false;
+        i++;
+        for(unsigned k=1;k<need;k++,i++)if(p[i]<0x80 || p[i]>0xbf)return false;
+    }
+    return true;
+}
+static bool graceful_close(size_t length){
+    if(length){
+        unsigned code=(unsigned)rx[2]<<8|rx[3];
+        // Support normal/going-away Close; protocol/error/reserved codes fail.
+        if((code!=1000 && code!=1001) || !close_utf8(rx+4,length-2)){stage=PM_NET_FAILED;return false;}
+    }
+    // Reply at a complete WS boundary when queue space is available. Do not
+    // wait for an ACK or let an optional close response extend the deadline.
+    if(stage==PM_NET_READY)eof_started_us=time_us_64();
+    size_t n=length?8:6;
+    {
+        uint8_t reply[8]={0x88,(uint8_t)(0x80|(length?2:0))};
+        uint32_t random=get_rand_32();
+        for(unsigned i=0;i<4;i++)reply[2+i]=(uint8_t)(random>>(24-8*i));
+        if(length){reply[6]=rx[2]^reply[2];reply[7]=rx[3]^reply[3];}
+        if(!send_close_reply(reply,n) || socket_dead || stage==PM_NET_FAILED)return false;
+    }
+    ws_closed=true;stage=PM_NET_DRAINED;
+    // Data after Close and incomplete app/WS state are not application input.
+    // Keep only the main-owned CRC-valid ready pixels until pacing/EOF budget.
+    pm_rx_flow_reset(&rx_flow);app_used=last_payload_length=ws_remaining=0;ws_continuation=false;
+    return false;
+}
+
 size_t pm_net_payload_length(void){return last_payload_length;}
 static bool take_unlocked(uint8_t *kind, char *json, size_t cap) {
 again:
-    if(stage!=PM_NET_READY)return false;
+    if(stage!=PM_NET_READY && stage!=PM_NET_DRAINING)return false;
     if(app_used>=4) {
         uint32_t n=(uint32_t)app_rx[0]<<24|(uint32_t)app_rx[1]<<16|
             (uint32_t)app_rx[2]<<8|app_rx[3];
@@ -336,19 +428,29 @@ again:
         memcpy(app_rx+app_used,rx,n);app_used+=n;ws_remaining-=n;consume(n);
         goto again;
     }
-    if(rx_used<2)return false;
+    if(rx_used<2){
+        // With FIN latched no second header byte can arrive. Inspect only a
+        // frame boundary; 0x88 inside an unfinished binary body is data.
+        if(rx_used && stage==PM_NET_DRAINING && (rx[0]&15)==8)stage=PM_NET_FAILED;
+        return false;
+    }
     unsigned opcode=rx[0]&15;
     bool fin=(rx[0]&0x80)!=0;
     if(rx[1]&0x80) {stage=PM_NET_FAILED;return false;}
     uint64_t length=rx[1]&127;size_t h=2;
+    if(opcode==8 && (!fin || (rx[0]&0x70) || length>125 || length==1)){stage=PM_NET_FAILED;return false;}
     if(length==126){if(rx_used<4)return false;length=((unsigned)rx[2]<<8)|rx[3];h=4;}
     else if(length==127){
         if(rx_used<10)return false;
         length=0;for(unsigned i=2;i<10;i++)length=length<<8|rx[i];h=10;
     }
     if(length>RX_CAP-10 || length+ h >RX_CAP) {stage=PM_NET_FAILED;return false;}
-    if((opcode==8 || opcode==9) && rx_used<h+length)return false;
-    if(opcode==8){stage=PM_NET_FAILED;return false;}
+    if(opcode==8){
+        if(!fin || (rx[0]&0x70) || h!=2 || length>125 || length==1){stage=PM_NET_FAILED;return false;}
+        if(rx_used<h+length){if(stage==PM_NET_DRAINING)stage=PM_NET_FAILED;return false;}
+        return graceful_close((size_t)length);
+    }
+    if(opcode==9 && rx_used<h+length)return false;
     if(opcode==9){
         // Server ping is not an application message. Reply with a masked pong.
         if(length>125){stage=PM_NET_FAILED;return false;}
@@ -379,17 +481,28 @@ void pm_net_poll(void){
 #if PM_TRACE_STATS
     if(pm_rx_sample_due()){pm_rx_state observed=rx_observe();pm_rx_sample(&observed);}
 #endif
+    pm_diag_drain_error();
+    if(pm_diag_sample_due(started))pm_diag_sample((uint32_t)rx_used,(uint32_t)app_used,(uint32_t)rx_flow.uncredited,pcb?pcb->rcv_wnd:0,pcb?pcb->rcv_nxt:0);
     cyw43_arch_lwip_end();
     pm_stats_note(PM_STAT_NET_POLL,started);pm_trace_slow(PM_TRACE_SLOW_POLL,started,2);
 }
 pm_net_stage pm_net_state(void){cyw43_arch_lwip_begin();pm_net_stage result=state_unlocked();cyw43_arch_lwip_end();return result;}
+pm_net_stage pm_net_checkpoint(void){
+    cyw43_arch_lwip_begin();check_failure_unlocked();pm_net_stage result=stage;cyw43_arch_lwip_end();return result;
+}
 bool pm_net_send(uint8_t kind,const char *json){
     uint64_t started=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,started);
     bool ok=send_unlocked(kind,json);cyw43_arch_lwip_end();pm_stats_note(PM_STAT_NET_SEND,started);return ok;
 }
 bool pm_net_take(uint8_t *kind,char *json,size_t cap){
     uint64_t started=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,started);
-    bool ok=take_unlocked(kind,json,cap);RX_OBSERVE(pm_rx_take,ok,);
+    size_t before_rx=rx_used,before_app=app_used,before_ws=ws_remaining;
+    bool ok=take_unlocked(kind,json,cap);
+    // false can mean a consumed ping, not exhaustion. Require a no-progress
+    // decoder pass; with EOF no missing header/body bytes can arrive later.
+    if(!ok && stage==PM_NET_DRAINING && before_rx==rx_used &&
+       before_app==app_used && before_ws==ws_remaining)stage=PM_NET_DRAINED;
+    RX_OBSERVE(pm_rx_take,ok,);
     if(stage==PM_NET_FAILED){RX_OBSERVE(pm_rx_fault,PM_RX_INVALID,0,);}
     cyw43_arch_lwip_end();pm_stats_note(PM_STAT_RX_TAKE,started);return ok;
 }

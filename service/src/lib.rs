@@ -1,5 +1,6 @@
 //! Pure PicoMado kernel contract. No IO is performed here.
 
+pub mod diagnostics;
 pub mod application;
 pub mod caricature;
 pub mod clock;
@@ -8,6 +9,7 @@ mod display_badge;
 pub mod eink;
 pub mod fetch;
 pub mod host;
+pub mod socket_progress;
 pub mod lcd_stream;
 mod lcd_text;
 pub mod playback;

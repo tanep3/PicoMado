@@ -55,7 +55,8 @@ where
                 }
             }
         });
-        axum::serve(listener, web::router(web_app))
+        axum::serve(crate::socket_progress::TrackedListener(listener),
+            web::router(web_app).into_make_service_with_connect_info::<crate::socket_progress::WriteProgress>())
             .with_graceful_shutdown(wait_shutdown(stop_rx))
             .await
     };
@@ -108,6 +109,7 @@ pub async fn serve_plugins_on_listener(
     app: SharedApp,
     shutdown: watch::Receiver<bool>,
 ) -> Result<(), HostError> {
+    crate::diagnostics::start_from_env();
     serve_with_runner(
         listener,
         app,
