@@ -83,11 +83,22 @@ pub async fn upgrade(State(app): State<SharedApp>, progress: Option<Extension<Co
         .on_upgrade(move |socket| serve_socket_with_progress(socket, app, progress))
 }
 
+#[cfg(test)]
 fn process(
     app: &SharedApp,
     current: &mut Option<SessionToken>,
     message: WireMessage,
     diagnostics: &mut AckDiagnostics,
+) -> Result<Option<WireMessage>, &'static str> {
+    process_on_connection(app, current, message, diagnostics, None)
+}
+
+fn process_on_connection(
+    app: &SharedApp,
+    current: &mut Option<SessionToken>,
+    message: WireMessage,
+    diagnostics: &mut AckDiagnostics,
+    accept_order: Option<std::num::NonZeroU64>,
 ) -> Result<Option<WireMessage>, &'static str> {
     let received = std::time::Instant::now();
     let received_unix_ms = std::time::SystemTime::now()
@@ -108,6 +119,7 @@ fn process(
         current,
         message,
         diagnostics,
+        accept_order,
         &mut lock_wait,
         &mut persistence_us,
         &mut image_preparation_us,
@@ -137,6 +149,7 @@ fn process_inner(
     current: &mut Option<SessionToken>,
     message: WireMessage,
     diagnostics: &mut AckDiagnostics,
+    accept_order: Option<std::num::NonZeroU64>,
     lock_wait: &mut Duration,
     persistence_us: &mut u128,
     image_preparation_us: &mut u128,
@@ -155,9 +168,14 @@ fn process_inner(
         let mut guard = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Reader).map_err(|_| "unavailable")?;
         *lock_wait = waiting.elapsed();
         let totals = guard.operation_totals();
-        let token = guard
-            .hello(&device_id, caps, screen_owner_epoch)
-            .map_err(|_| "invalid_hello")?;
+        let result = match accept_order {
+            Some(order) => guard.hello_from_connection(&device_id, caps, screen_owner_epoch, order),
+            None => guard.hello(&device_id, caps, screen_owner_epoch),
+        };
+        let token = result.map_err(|error| match error {
+            crate::application::AppError::Conflict("stale_connection") => "stale_connection",
+            _ => "invalid_hello",
+        })?;
         let after = guard.operation_totals();
         *persistence_us = after.0.saturating_sub(totals.0);
         *image_preparation_us = after.1.saturating_sub(totals.1);
@@ -932,6 +950,12 @@ where
 }
 async fn serve_split_with_progress<S,St,E>(sink:S,mut stream:St,app:SharedApp,write_progress:Option<WriteProgress>)->&'static str
 where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpin {
+    let (accept_order, order_source) = match &write_progress {
+        Some(progress) => (progress.accept_order(), "tcp_accept"),
+        // Legacy/custom in-process hosts without TrackedListener have no TCP
+        // accept metadata. Preserve them with explicit WS-start ordering.
+        None => (crate::socket_progress::next_accept_order(), "websocket_start"),
+    };
     let (tx, rx) = tokio::sync::mpsc::channel(32);
     let mut writer = tokio::spawn(writer_loop_with_progress(sink, rx, app.clone(),None,write_progress));
     let mut decoder = Decoder::default();
@@ -945,7 +969,7 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
     let mut end_reason = "read_eof";
     let mut end_detail = "none";
     let mut diagnostics = AckDiagnostics::default();
-    eprintln!("picomado websocket_open connection_id={}", connection_id);
+    eprintln!("picomado websocket_open connection_id={} accept_order={} order_source={}", connection_id, accept_order, order_source);
     loop {
         let incoming = tokio::select! {
             result = &mut writer => {
@@ -1006,7 +1030,7 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
             rx_messages += 1;
             let kind = wire_label(&message);
             let was_unbound = current.is_none();
-            match process(&app, &mut current, message, &mut diagnostics) {
+            match process_on_connection(&app, &mut current, message, &mut diagnostics, Some(accept_order)) {
                 Ok(reply) => {
                     if was_unbound {
                         if let Some(token) = &current {
@@ -4152,4 +4176,5 @@ mod tests {
     }
 
     include!("../tests/transport_recovery.rs");
+    mod hello_order { use super::*; include!("../tests/support/hello_order.rs"); }
 }

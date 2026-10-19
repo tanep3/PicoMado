@@ -18,6 +18,9 @@ The outbox cap of 1,024 effects, 4 KiB control-message cap, 64 KiB WebSocket bin
 
 ## Verification
 
+TCP accept order guards against delayed older Hello messages replacing a newer
+session. See [the invariant, regression coverage, and limitations](../docs/hello-accept-order.md).
+
 From the repository root:
 
 ```sh

@@ -1,5 +1,6 @@
 //! Connection-local positive AsyncWrite acceptance, never TCP ACK/arrival.
 use std::io::{self, IoSlice};
+use std::num::NonZeroU64;
 use std::pin::Pin;
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc};
 use std::task::{Context, Poll};
@@ -7,11 +8,29 @@ use axum::extract::connect_info::Connected;
 use axum::serve::{IncomingStream, Listener};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-#[derive(Clone, Default, Debug)]
-pub struct WriteProgress(Arc<AtomicU64>);
+// Process-local order shared by listeners; it is never persisted. Allocation
+// happens immediately after TCP accept, before HTTP/WebSocket/Hello handling.
+pub(crate) fn next_accept_order() -> NonZeroU64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let value = NEXT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+        .expect("connection acceptance order exhausted");
+    NonZeroU64::new(value).expect("acceptance order is nonzero")
+}
+
+#[derive(Clone, Debug)]
+pub struct WriteProgress {
+    bytes: Arc<AtomicU64>,
+    accept_order: NonZeroU64,
+}
+impl Default for WriteProgress {
+    fn default() -> Self {
+        Self { bytes: Arc::default(), accept_order: next_accept_order() }
+    }
+}
 impl WriteProgress {
-    pub fn bytes(&self) -> u64 { self.0.load(Ordering::Relaxed) }
-    fn accepted(&self, n: usize) { self.0.fetch_add(n as u64, Ordering::Relaxed); }
+    pub fn bytes(&self) -> u64 { self.bytes.load(Ordering::Relaxed) }
+    pub(crate) fn accept_order(&self) -> NonZeroU64 { self.accept_order }
+    fn accepted(&self, n: usize) { self.bytes.fetch_add(n as u64, Ordering::Relaxed); }
     #[cfg(test)]
     pub(crate) fn test_accept(&self, n: usize) { self.accepted(n); }
 }
@@ -58,6 +77,34 @@ impl<L:Listener> Connected<IncomingStream<'_,TrackedListener<L>>> for WriteProgr
 mod tests {
     use super::*;
     use futures_util::task::noop_waker;
+
+    struct MemoryListener(std::collections::VecDeque<tokio::io::DuplexStream>);
+    impl Listener for MemoryListener {
+        type Io = tokio::io::DuplexStream;
+        type Addr = std::net::SocketAddr;
+        async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+            (self.0.pop_front().expect("configured in-memory accepts"), self.local_addr().unwrap())
+        }
+        fn local_addr(&self) -> io::Result<Self::Addr> { Ok("127.0.0.1:0".parse().unwrap()) }
+    }
+
+    #[tokio::test]
+    async fn accept_order_precedes_handshake_and_survives_listener_restart() {
+        let (a, _peer_a) = tokio::io::duplex(64);
+        let (b, _peer_b) = tokio::io::duplex(64);
+        let mut listener = TrackedListener(MemoryListener([a, b].into()));
+        let (old, _) = listener.accept().await;
+        let (new, _) = listener.accept().await;
+        // No HTTP/WS/Hello has been polled: metadata already has the order.
+        assert!(old.progress.accept_order() < new.progress.accept_order());
+        assert_eq!(old.progress.clone().accept_order(), old.progress.accept_order());
+        let previous = new.progress.accept_order();
+        drop(listener);
+        let (next, _peer) = tokio::io::duplex(64);
+        let mut restarted = TrackedListener(MemoryListener([next].into()));
+        let (next, _) = restarted.accept().await;
+        assert!(next.progress.accept_order() > previous);
+    }
     struct Partial;
     impl AsyncWrite for Partial {
         fn poll_write(self:Pin<&mut Self>,_:&mut Context<'_>,b:&[u8])->Poll<io::Result<usize>> {

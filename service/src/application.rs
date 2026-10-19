@@ -350,6 +350,10 @@ pub struct App {
     mono_origin: std::time::Instant,
     persistence_us: u128,
     image_preparation_us: u128,
+    // High-water mark for valid transport Hello attempts. Keep after disconnect
+    // or failed Welcome; old pending sockets must not resurrect a past attempt.
+    // Runtime only: a restarted process/App starts with a fresh acceptance order.
+    hello_accept_order: BTreeMap<String, std::num::NonZeroU64>,
     #[cfg(feature = "caricature-retention-delete")]
     last_retention_day: Option<String>,
 }
@@ -462,6 +466,7 @@ impl App {
             mono_origin: std::time::Instant::now(),
             persistence_us: 0,
             image_preparation_us: 0,
+            hello_accept_order: BTreeMap::new(),
             #[cfg(feature = "caricature-retention-delete")]
             last_retention_day: None,
         })
@@ -1562,6 +1567,26 @@ impl App {
         capabilities: BTreeSet<String>,
         screen_owner_epoch: u64,
     ) -> Result<SessionToken, AppError> {
+        self.hello_impl(id, capabilities, screen_owner_epoch, None)
+    }
+
+    pub(crate) fn hello_from_connection(
+        &mut self,
+        id: &str,
+        capabilities: BTreeSet<String>,
+        screen_owner_epoch: u64,
+        accept_order: std::num::NonZeroU64,
+    ) -> Result<SessionToken, AppError> {
+        self.hello_impl(id, capabilities, screen_owner_epoch, Some(accept_order))
+    }
+
+    fn hello_impl(
+        &mut self,
+        id: &str,
+        capabilities: BTreeSet<String>,
+        screen_owner_epoch: u64,
+        accept_order: Option<std::num::NonZeroU64>,
+    ) -> Result<SessionToken, AppError> {
         if !valid_name(id, 64)
             || capabilities.is_empty()
             || capabilities.len() > 32
@@ -1569,6 +1594,15 @@ impl App {
             || (!capabilities.contains("lcd") && !capabilities.contains("eink"))
         {
             return Err(AppError::Invalid("invalid device hello"));
+        }
+        if let Some(order) = accept_order {
+            if self.hello_accept_order.get(id).is_some_and(|previous| order <= *previous) {
+                return Err(AppError::Conflict("stale_connection"));
+            }
+            // Reserve before any fallible application/storage work. The caller
+            // already holds the App lock, so comparison+reservation+Hello are
+            // atomic with respect to all competing connection handlers.
+            self.hello_accept_order.insert(id.to_owned(), order);
         }
         let token = self.change(|engine, state| {
             let decision = engine
