@@ -1040,7 +1040,7 @@ impl App {
 
     pub fn prepare_plugin_fetch(&self,job:&FetchJob)->Result<Option<crate::content::FetchPreparation>,AppError>{
         let Some(device)=self.runtime.world.devices.get(&job.device_id) else{return Ok(None);};
-        if device.incarnation!=job.incarnation || device.settings_revision!=job.settings_revision{return Ok(None);}
+        if device.incarnation!=job.incarnation || device.session_epoch!=job.session_epoch || device.settings_revision!=job.settings_revision{return Ok(None);}
         match self.contents.get(&job.plugin).ok_or(AppError::NotFound)?.fetch_preparation(job){
             Ok(prepare)=>Ok(Some(prepare)),Err(ContentError::Stale)=>Ok(None),Err(_)=>Err(AppError::Invalid("plugin fetch preparation invalid")),
         }
@@ -1060,6 +1060,7 @@ impl App {
             return Ok(false);
         };
         if device.incarnation != job.incarnation
+            || device.session_epoch != job.session_epoch
             || device.settings_revision != job.settings_revision
         {
             return Ok(false);

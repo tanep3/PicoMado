@@ -393,6 +393,7 @@ struct QueuedReply {
 }
 enum WriterCommand {Bind(SessionToken),Reply(QueuedReply),Stop}
 impl WriterCommand {
+    #[cfg(test)]
     #[inline(always)]
     fn reply(message:WireMessage)->Self {Self::reply_observed(message,None)}
     fn reply_observed(message:WireMessage,cause:Option<crate::observation::Cause>)->Self {

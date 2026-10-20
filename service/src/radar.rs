@@ -277,6 +277,9 @@ impl ContentPlugin for RadarContent {
     fn session_reset(&mut self, id: &str, incarnation: u64) {
         if let Some(slot) = self.devices.get_mut(id) {
             if slot.incarnation == incarnation {
+                if slot.in_flight.take().is_some() {
+                    slot.last_attempt_unix = None;
+                }
                 if let Some(b) = &mut slot.browse {
                     b.cancel();
                 }
@@ -357,6 +360,7 @@ impl ContentPlugin for RadarContent {
             plugin: ID.into(),
             device_id: ctx.token.device_id.clone(),
             incarnation: ctx.token.incarnation,
+            session_epoch: ctx.token.session_epoch,
             settings_revision: ctx.settings_revision,
             config_revision: 0,
             generation: slot.generation,

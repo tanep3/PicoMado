@@ -48,6 +48,7 @@ pub struct FetchJob {
     pub plugin: String,
     pub device_id: String,
     pub incarnation: u64,
+    pub session_epoch: u64,
     pub settings_revision: u64,
     pub config_revision: u64,
     pub generation: u64,

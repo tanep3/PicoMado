@@ -13,6 +13,13 @@ use crate::content::{
 };
 use crate::{Candidate, Capability, Event, Mode, Plugin, Priority, Transition, WorldQuery};
 
+#[cfg(test)]
+thread_local! {static FULL_RENDER_CALLS:std::cell::Cell<(usize,usize)>=const{std::cell::Cell::new((0,0))};}
+#[cfg(test)]
+pub(crate) fn take_full_render_calls() -> (usize, usize) {
+    FULL_RENDER_CALLS.with(|v| v.replace((0, 0)))
+}
+
 #[derive(Clone, Default)]
 pub struct WeatherContent {
     devices: BTreeMap<String, WeatherSlot>,
@@ -25,6 +32,8 @@ struct WeatherSlot {
     location_id: String,
     today_jst: Option<String>,
     browse: Option<WeatherBrowse>,
+    rendered: Vec<RenderedForecast>,
+    error_pixels: Arc<WeatherPixels>,
     last_success_unix: Option<i64>,
     last_attempt_unix: Option<i64>,
     error: bool,
@@ -52,6 +61,33 @@ struct StoredWeatherSlot {
 struct LocationChoice {
     location_id: String,
 }
+struct WeatherPixels {
+    lcd: Vec<u8>,
+    eink: Vec<u8>,
+}
+#[derive(Clone)]
+struct RenderedForecast {
+    set: Arc<ForecastSet>,
+    frames: Arc<Vec<WeatherPixels>>,
+}
+impl WeatherPixels {
+    fn error(choice: &WeatherLocation) -> Self {
+        let lcd = render_error_lcd(choice);
+        let eink = crate::eink::from_lcd(&lcd);
+        Self { lcd, eink }
+    }
+}
+fn render_set(set: &ForecastSet) -> Result<Vec<WeatherPixels>, ContentError> {
+    set.days
+        .iter()
+        .map(|day| {
+            Ok(WeatherPixels {
+                lcd: render_lcd(set, day).map_err(|_| ContentError::InvalidSource)?,
+                eink: render_eink(set, day).map_err(|_| ContentError::InvalidSource)?,
+            })
+        })
+        .collect()
+}
 impl WeatherSlot {
     fn new(incarnation: u64, settings_revision: u64) -> Self {
         Self {
@@ -61,12 +97,44 @@ impl WeatherSlot {
             location_id: "tokyo-station".into(),
             today_jst: None,
             browse: None,
+            rendered: Vec::new(),
+            error_pixels: Arc::new(WeatherPixels::error(
+                location("tokyo-station").expect("default location"),
+            )),
             last_success_unix: None,
             last_attempt_unix: None,
             error: false,
             generation: 0,
             in_flight: None,
         }
+    }
+    fn prune_rendered(&mut self) {
+        let latest = self.browse.as_ref().map(|b| Arc::as_ptr(&b.latest));
+        let pinned = self
+            .browse
+            .as_ref()
+            .and_then(|b| b.pinned.as_ref())
+            .map(Arc::as_ptr);
+        self.rendered
+            .retain(|r| Some(Arc::as_ptr(&r.set)) == latest || Some(Arc::as_ptr(&r.set)) == pinned);
+    }
+    fn install_rendered(&mut self, frames: Vec<WeatherPixels>) {
+        if let Some(b) = &self.browse {
+            self.rendered.push(RenderedForecast {
+                set: b.latest.clone(),
+                frames: Arc::new(frames),
+            });
+        }
+        self.prune_rendered();
+    }
+    fn current_pixels(&self) -> Option<&WeatherPixels> {
+        let browse = self.browse.as_ref()?;
+        let set = browse.pinned.as_deref().unwrap_or(&browse.latest);
+        self.rendered
+            .iter()
+            .find(|r| std::ptr::eq(r.set.as_ref(), set))?
+            .frames
+            .get(browse.index)
     }
     fn stored(&self) -> StoredWeatherSlot {
         StoredWeatherSlot {
@@ -109,6 +177,8 @@ impl WeatherContent {
 struct PreparedWeather {
     set: Option<ForecastSet>,
     pixels: Vec<u8>,
+    frames: Vec<WeatherPixels>,
+    error_pixels: Arc<WeatherPixels>,
 }
 impl ContentPlugin for WeatherContent {
     fn clone_box(&self) -> Box<dyn ContentPlugin> {
@@ -129,6 +199,7 @@ impl ContentPlugin for WeatherContent {
         let choice = location(&slot.location_id).ok_or(ContentError::InvalidSource)?;
         let set = ForecastSet::for_location(source, dataset_id, today_jst, choice)
             .map_err(|_| ContentError::InvalidSource)?;
+        let frames = render_set(&set)?;
         match &mut slot.browse {
             Some(b) => b.publish(set),
             None => slot.browse = Some(WeatherBrowse::new(set)),
@@ -136,6 +207,8 @@ impl ContentPlugin for WeatherContent {
         if let Some(b) = &mut slot.browse {
             b.rebase_normal(today_jst);
         }
+        slot.install_rendered(frames);
+        slot.error_pixels = Arc::new(WeatherPixels::error(choice));
         slot.error = false;
         Ok(())
     }
@@ -155,14 +228,12 @@ impl ContentPlugin for WeatherContent {
     }
     fn eink_frame_for(&self, ctx: &PluginContext, lcd: &[u8]) -> Option<Vec<u8>> {
         let slot = self.slot(ctx)?;
-        if slot.error {
-            return None;
-        }
-        let (set, day) = slot.browse.as_ref()?.current();
-        if render_lcd(set, day).ok()?.as_slice() != lcd {
-            return None;
-        }
-        render_eink(set, day).ok()
+        let pixels = if slot.error {
+            slot.error_pixels.as_ref()
+        } else {
+            slot.current_pixels()?
+        };
+        (pixels.lcd.as_slice() == lcd).then(|| pixels.eink.clone())
     }
     fn current_frame(&self, ctx: &PluginContext) -> Option<Vec<u8>> {
         let slot = self.slot(ctx)?;
@@ -172,10 +243,9 @@ impl ContentPlugin for WeatherContent {
                     && slot.today_jst.as_deref() != Some(b.current().1.date_jst.as_str())
             })
         {
-            return Some(render_error_lcd(location(&slot.location_id)?));
+            return Some(slot.error_pixels.lcd.clone());
         }
-        let (set, day) = slot.browse.as_ref()?.current();
-        render_lcd(set, day).ok()
+        Some(slot.current_pixels()?.lcd.clone())
     }
     fn observe_date(&mut self, ctx: &PluginContext, today_jst: &str) -> bool {
         let slot = self.slot_mut(ctx);
@@ -230,15 +300,6 @@ impl ContentPlugin for WeatherContent {
         };
         let (set, day) = browse.current();
         let day_available = browse.is_browsing() || today.as_deref() == Some(day.date_jst.as_str());
-        let frame = if event.is_some() && (slot.error || !day_available) {
-            Some(render_error_lcd(
-                location(&slot.location_id).ok_or(ContentError::InvalidSource)?,
-            ))
-        } else if event.is_some() {
-            Some(render_lcd(set, day).map_err(|_| ContentError::InvalidSource)?)
-        } else {
-            None
-        };
         let position = PluginPosition {
             plugin: "weather".into(),
             dataset_id: set.id.clone(),
@@ -249,6 +310,19 @@ impl ContentPlugin for WeatherContent {
             },
             index: browse.index(),
         };
+        let frame = if event.is_none() {
+            None
+        } else if slot.error || !day_available {
+            Some(slot.error_pixels.lcd.clone())
+        } else {
+            Some(
+                slot.current_pixels()
+                    .ok_or(ContentError::Unavailable)?
+                    .lcd
+                    .clone(),
+            )
+        };
+        slot.prune_rendered();
         Ok(PluginPlan {
             event,
             frame,
@@ -258,9 +332,13 @@ impl ContentPlugin for WeatherContent {
     fn session_reset(&mut self, device_id: &str, incarnation: u64) {
         if let Some(slot) = self.devices.get_mut(device_id) {
             if slot.incarnation == incarnation {
+                if slot.in_flight.take().is_some() {
+                    slot.last_attempt_unix = None;
+                }
                 if let Some(b) = &mut slot.browse {
                     b.cancel();
                 }
+                slot.prune_rendered();
             } else {
                 self.devices.remove(device_id);
             }
@@ -300,6 +378,17 @@ impl ContentPlugin for WeatherContent {
                 if let (Some(b), Some(today)) = (&mut browse, &s.today_jst) {
                     b.rebase_normal(today);
                 }
+                let rendered = if let Some(b) = &browse {
+                    vec![RenderedForecast {
+                        set: b.latest.clone(),
+                        frames: Arc::new(render_set(&b.latest)?),
+                    }]
+                } else {
+                    Vec::new()
+                };
+                let error_pixels = Arc::new(WeatherPixels::error(
+                    location(&s.location_id).ok_or(ContentError::InvalidSource)?,
+                ));
                 Ok((
                     id,
                     WeatherSlot {
@@ -309,6 +398,8 @@ impl ContentPlugin for WeatherContent {
                         location_id: s.location_id,
                         today_jst: s.today_jst,
                         browse,
+                        rendered,
+                        error_pixels,
                         last_success_unix: s.last_success_unix,
                         last_attempt_unix: if s.had_in_flight {
                             None
@@ -354,6 +445,10 @@ impl ContentPlugin for WeatherContent {
             slot.config_revision += 1;
             slot.settings_revision += 1;
             slot.browse = None;
+            slot.rendered.clear();
+            slot.error_pixels = Arc::new(WeatherPixels::error(
+                location(&slot.location_id).ok_or(ContentError::InvalidSource)?,
+            ));
             slot.today_jst = None;
             slot.last_success_unix = None;
             slot.last_attempt_unix = None;
@@ -402,6 +497,7 @@ impl ContentPlugin for WeatherContent {
             plugin: "weather".into(),
             device_id: ctx.token.device_id.clone(),
             incarnation: ctx.token.incarnation,
+            session_epoch: ctx.token.session_epoch,
             settings_revision: ctx.settings_revision,
             config_revision: slot.config_revision,
             generation: slot.generation,
@@ -433,13 +529,21 @@ impl ContentPlugin for WeatherContent {
             let set = result.ok().and_then(|bytes| {
                 ForecastSet::for_location(&bytes, &job.dataset_id, &job.today_jst, choice).ok()
             });
-            let pixels = match &set {
-                Some(set) => {
-                    render_lcd(set, &set.days[0]).map_err(|_| ContentError::InvalidSource)?
-                }
-                None => render_error_lcd(choice),
+            let frames = match &set {
+                Some(set) => render_set(set)?,
+                None => Vec::new(),
             };
-            Ok(Box::new(PreparedWeather { set, pixels }) as crate::content::PreparedFetch)
+            let error_pixels = Arc::new(WeatherPixels::error(choice));
+            let pixels = frames
+                .first()
+                .map(|f| f.lcd.clone())
+                .unwrap_or_else(|| error_pixels.lcd.clone());
+            Ok(Box::new(PreparedWeather {
+                set,
+                pixels,
+                frames,
+                error_pixels,
+            }) as crate::content::PreparedFetch)
         }))
     }
     fn complete_fetch(
@@ -472,11 +576,13 @@ impl ContentPlugin for WeatherContent {
             return Err(ContentError::Stale);
         }
         slot.in_flight = None;
+        slot.error_pixels = prepared.error_pixels;
         if let Some(set) = prepared.set {
             match &mut slot.browse {
                 Some(b) => b.publish(set),
                 None => slot.browse = Some(WeatherBrowse::new(set)),
             }
+            slot.install_rendered(prepared.frames);
             slot.today_jst = Some(job.today_jst.clone());
             if let Some(b) = &mut slot.browse {
                 b.rebase_normal(&job.today_jst);
@@ -936,10 +1042,20 @@ fn location_labels(area: &str, point: &str) -> (String, String) {
 /// Draw the 160×80 RGB565 composition with native-size Japanese glyphs.
 /// Long location labels are explicitly abbreviated without shrinking them.
 pub fn render_lcd(set: &ForecastSet, day: &ForecastDay) -> Result<Vec<u8>, WeatherError> {
+    #[cfg(test)]
+    FULL_RENDER_CALLS.with(|v| {
+        let (a, b) = v.get();
+        v.set((a + 1, b));
+    });
     render_forecast(set, day, false)
 }
 
 pub fn render_eink(set: &ForecastSet, day: &ForecastDay) -> Result<Vec<u8>, WeatherError> {
+    #[cfg(test)]
+    FULL_RENDER_CALLS.with(|v| {
+        let (a, b) = v.get();
+        v.set((a, b + 1));
+    });
     Ok(crate::eink::from_lcd(&render_forecast(set, day, true)?))
 }
 
@@ -1225,5 +1341,63 @@ mod tests {
         assert_eq!(browser.current().0.id, "new");
         assert_eq!(browser.current().1.max_c, Some(28));
         assert!(!browser.is_browsing());
+    }
+    #[test]
+    fn rendered_cache_preserves_same_id_pinned_snapshot_and_stays_bounded() {
+        let ctx = PluginContext {
+            token: crate::SessionToken {
+                device_id: "cache".into(),
+                incarnation: 1,
+                session_epoch: 1,
+            },
+            settings_revision: 1,
+            mode: Mode::Normal,
+        };
+        let mut content = WeatherContent::default();
+        content
+            .publish(&ctx, CACHE, "same-id", "2026-10-12")
+            .unwrap();
+        let original = content.current_frame(&ctx).unwrap();
+        content.plan(&ctx, ButtonAction::Sub).unwrap();
+        let sub = PluginContext {
+            mode: Mode::Sub,
+            ..ctx.clone()
+        };
+        let mut value: serde_json::Value = serde_json::from_slice(CACHE).unwrap();
+        fn change(v: &mut serde_json::Value) {
+            match v {
+                serde_json::Value::Object(map) => {
+                    for (k, v) in map {
+                        if k == "weatherCodes" {
+                            if let Some(days) = v.as_array_mut() {
+                                for day in days {
+                                    *day = serde_json::Value::String("300".into());
+                                }
+                            }
+                        } else {
+                            change(v);
+                        }
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    for item in items {
+                        change(item)
+                    }
+                }
+                _ => {}
+            }
+        }
+        change(&mut value);
+        let changed = serde_json::to_vec(&value).unwrap();
+        for _ in 0..6 {
+            content
+                .publish(&sub, &changed, "same-id", "2026-10-12")
+                .unwrap();
+            assert!(content.current_frame(&sub).unwrap()==original,"pinned pixels changed for reused dataset ID");
+            assert_eq!(content.devices["cache"].rendered.len(), 2);
+        }
+        content.plan(&sub, ButtonAction::Power).unwrap();
+        assert_eq!(content.devices["cache"].rendered.len(), 1);
+        assert!(content.current_frame(&ctx).unwrap()!=original,"cancel must select the new rain pixels");
     }
 }

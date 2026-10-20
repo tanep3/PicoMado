@@ -371,6 +371,7 @@ async fn paused_fetch_preparation_allows_other_input_video_and_revalidates_lates
             plugin: "fixture-block".into(),
             device_id: "a".into(),
             incarnation: a.incarnation,
+            session_epoch: a.session_epoch,
             settings_revision: state.runtime.world.devices["a"].settings_revision,
             config_revision: 1,
             generation: 1,
@@ -438,5 +439,206 @@ async fn paused_fetch_preparation_allows_other_input_video_and_revalidates_lates
                 .as_deref(),
             Some("fixture-video")
         );
+    }
+}
+
+struct ReviewClock;
+impl crate::fetch::Clock for ReviewClock {
+    fn unix_seconds(&self) -> i64 {
+        1791763200
+    }
+    fn today_jst(&self) -> String {
+        "2026-10-12".into()
+    }
+}
+fn select_review_plugin(app: &mut App, token: &SessionToken, plugin: &str) {
+    for _ in 0..10 {
+        if app
+            .view()
+            .devices
+            .iter()
+            .find(|d| d.id == token.device_id)
+            .unwrap()
+            .selected
+            .as_deref()
+            == Some(plugin)
+        {
+            return;
+        }
+        app.button(token, ButtonAction::Down).unwrap();
+    }
+    panic!("plugin not selectable");
+}
+fn acknowledge_review_frames(app: &mut App, device: &str) {
+    for _ in 0..10 {
+        let frame = app
+            .pending_effects()
+            .into_iter()
+            .find_map(|(id, e)| match e {
+                Effect::SendFrame { token, .. } if token.device_id == device => Some((id, token)),
+                _ => None,
+            });
+        let Some((id, token)) = frame else {
+            return;
+        };
+        app.complete_effect(id).unwrap();
+        app.terminal_event(Event::ReceiptAck {
+            token: token.clone(),
+        })
+        .unwrap();
+        app.terminal_event(Event::RenderedAck { token }).unwrap();
+    }
+    panic!("unexpected continuing frame production");
+}
+#[test]
+fn prepared_builtin_fetch_is_rejected_after_reconnect_and_fresh_job_can_start() {
+    for (plugin, bytes) in [
+        (
+            "weather",
+            include_bytes!("../assets/jma-tokyo-20261012.json").as_slice(),
+        ),
+        (
+            "rain-radar",
+            include_bytes!("../assets/jma-radar-20261012.json").as_slice(),
+        ),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = App::open_with_clock(&temp.path().join("db"), Arc::new(ReviewClock)).unwrap();
+        let token = app.hello("desk", ["lcd".into()].into(), 1).unwrap();
+        select_review_plugin(&mut app, &token, plugin);
+        let job = app
+            .plan_plugin_fetches(1791763200, "2026-10-12")
+            .unwrap()
+            .into_iter()
+            .find(|j| j.plugin == plugin)
+            .unwrap();
+        let prepared =
+            app.prepare_plugin_fetch(&job).unwrap().unwrap()(Ok(bytes.to_vec())).unwrap();
+        let next = app.hello("desk", ["lcd".into()].into(), 1).unwrap();
+        assert!(next.session_epoch > token.session_epoch);
+        assert!(!app
+            .apply_prepared_plugin_fetch(&job, 1791763201, prepared)
+            .unwrap());
+        assert!(app.prepare_plugin_fetch(&job).unwrap().is_none());
+        let fresh = app
+            .plan_plugin_fetches(1791763201, "2026-10-12")
+            .unwrap()
+            .into_iter()
+            .find(|j| j.plugin == plugin)
+            .unwrap();
+        assert_eq!(fresh.session_epoch, next.session_epoch);
+        assert!(fresh.generation > job.generation);
+    }
+}
+#[test]
+fn native_weather_completion_selects_prepared_pixels_without_full_render_under_app_lock() {
+    for sub in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state =
+            App::open_with_clock(&temp.path().join("db"), Arc::new(ReviewClock)).unwrap();
+        let token = state.hello("paper", ["eink".into()].into(), 1).unwrap();
+        select_review_plugin(&mut state, &token, "weather");
+        acknowledge_review_frames(&mut state, "paper");
+        let source = include_bytes!("../assets/jma-tokyo-20261012.json");
+        let first = state
+            .plan_plugin_fetches(1791763200, "2026-10-12")
+            .unwrap()
+            .into_iter()
+            .find(|j| j.plugin == "weather")
+            .unwrap();
+        crate::weather::take_full_render_calls();
+        let prepared =
+            state.prepare_plugin_fetch(&first).unwrap().unwrap()(Ok(source.to_vec())).unwrap();
+        let counts = crate::weather::take_full_render_calls();
+        assert!(counts.0 >= 7 && counts.1 >= 7);
+        let app = Arc::new(std::sync::Mutex::new(state));
+        {
+            let mut guard = app.lock().unwrap();
+            assert!(guard
+                .apply_prepared_plugin_fetch(&first, 1791763201, prepared)
+                .unwrap());
+            assert_eq!(crate::weather::take_full_render_calls(), (0, 0));
+            let (_, handle) = guard
+                .pending_effects()
+                .into_iter()
+                .find_map(|(_, e)| match e {
+                    Effect::SendFrame {
+                        token,
+                        asset_handle,
+                    } if token.device_id == "paper" => Some((token, asset_handle)),
+                    _ => None,
+                })
+                .unwrap();
+            let pixels = guard.frame_asset(&handle).unwrap();
+            assert_eq!(pixels.len(), 3813);
+            let set = crate::weather::ForecastSet::tokyo_from_cache(
+                source,
+                &first.dataset_id,
+                "2026-10-12",
+            )
+            .unwrap();
+            assert!(pixels.as_slice()==crate::weather::render_eink(&set,&set.days[0]).unwrap().as_slice(),"cached native pixels must match renderer");
+            acknowledge_review_frames(&mut guard, "paper");
+            if !sub {
+                continue;
+            }
+            guard.button(&token, ButtonAction::Sub).unwrap();
+            let before = guard
+                .pending_effects()
+                .into_iter()
+                .find_map(|(_, e)| match e {
+                    Effect::SendFrame {
+                        token,
+                        asset_handle,
+                    } if token.device_id == "paper" => guard.frame_asset(&asset_handle),
+                    _ => None,
+                })
+                .unwrap();
+            acknowledge_review_frames(&mut guard, "paper");
+            let next = guard
+                .plan_plugin_fetches(1791766802, "2026-10-12")
+                .unwrap()
+                .into_iter()
+                .find(|j| j.plugin == "weather")
+                .unwrap();
+            drop(guard);
+            let prepare = {
+                app.lock()
+                    .unwrap()
+                    .prepare_plugin_fetch(&next)
+                    .unwrap()
+                    .unwrap()
+            };
+            let prepared = prepare(Ok(source.to_vec())).unwrap();
+            crate::weather::take_full_render_calls();
+            let mut guard = app.lock().unwrap();
+            assert!(guard
+                .apply_prepared_plugin_fetch(&next, 1791766803, prepared)
+                .unwrap());
+            assert_eq!(crate::weather::take_full_render_calls(), (0, 0));
+            let after = guard
+                .pending_effects()
+                .into_iter()
+                .find_map(|(_, e)| match e {
+                    Effect::SendFrame {
+                        token,
+                        asset_handle,
+                    } if token.device_id == "paper" => guard.frame_asset(&asset_handle),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(before==after,"fetch completion changed pinned native pixels");
+            let d = &guard.runtime.world.devices["paper"];
+            let ctx = PluginContext {
+                token: token.clone(),
+                settings_revision: d.settings_revision,
+                mode: d.mode.clone(),
+            };
+            assert_eq!(
+                guard.contents["weather"].position(&ctx).unwrap().dataset_id,
+                first.dataset_id,
+                "new latest must not replace the pinned snapshot"
+            );
+        }
     }
 }
