@@ -2,6 +2,8 @@
 
 既存設計第2・3節の「純粋な判断→遷移適用→永続化→公開→外部効果」を保つ。D-01は取得結果のparse/render、観測保存はEV1/sourceログであり、本書のアプリ状態SQLiteとは別経路である。
 
+**レビュー状態：本書の所有権貸出だけの案は未受入。** 後続の一時入力まで保存待ちに直列化する問題、複数commitの途中成功後のerror/panic、元要件における永続選択と一時状態の違いは[追加是正契約](application-persistence-review-corrections.md)を優先する。退避した試作は採用・完了していない。
+
 ## 所有と公開
 
 変更処理はmutable Appの所有権を一つだけ借りる。共有mutexは所有権を受け渡す短区間だけで保持し、JSON serialize、SQLite transaction、plugin処理、呼出側の待機中には保持しない。並行queryと送信は、最後に保存・公開済みのimmutable App snapshotを読む。snapshotの公開lockもIO中には保持しない。
