@@ -16,6 +16,8 @@
 
 公開snapshotを読むlockと、一時入力の適用lockはDB IOを覆わない。productionのmultithread Tokioでは既存同期互換APIの保存・所有待ちをblocking区間として扱う。current-thread runtimeで同期APIを直接実行すれば呼出threadを占有し得るため、保存を実行するテスト/呼出しは別workerに置く。同期API自体がすべてのruntimeで非阻害になったとは報告しない。
 
+永続所有者への同期待機は最大64件に制限し、超過はbusyとする。既存の保存完了待ちへ新しい時間切れ・自動再送は導入しない。一時入力・query・配信はこの待機枠を使わない。
+
 ## 保存完了時の一時状態の合流
 
 mutable所有権を取得した時点の基準snapshotと、完了時の最新公開snapshotを比較する。対象deviceのincarnation/session/settings/選択と基準display世代が永続操作によって変わっていない場合に限り、その間に進んだmode、browse、ACK・pending frame、配信完了を現在のAppへ合流する。保存中に設定・選択・削除・再接続が確定した対象へ旧操作を戻さない。
