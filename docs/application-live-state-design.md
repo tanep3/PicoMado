@@ -10,6 +10,8 @@
 
 一時Appの遷移には永続投影の不変条件を置く。登録/incarnation、選択、利用設定・順序、plugin設定/保存snapshot、durable jobを変更する試みは保存せず拒否する。frame IDとeffect IDは共通の短い採番区間で予約し、二つの経路の衝突・失敗時の再使用を防ぐ。ACK進行などの純粋な一時更新はSQLiteの書込みを発生させない。
 
+観測のState/Committedはdomain遷移の確定を表し、SQLiteのfsyncと同義にしない。source factのbを`0=従来の未指定、1=永続経路、2=一時経路`として区別する。いずれも同じcause/frameに結び、既存の入力→確定→frame→draw解析を保つ。公開通知は従来どおりsnapshot公開後とする。
+
 公開snapshotを読むlockと、一時入力の適用lockはDB IOを覆わない。productionのmultithread Tokioでは既存同期互換APIの保存・所有待ちをblocking区間として扱う。current-thread runtimeで同期APIを直接実行すれば呼出threadを占有し得るため、保存を実行するテスト/呼出しは別workerに置く。同期API自体がすべてのruntimeで非阻害になったとは報告しない。
 
 ## 保存完了時の一時状態の合流
