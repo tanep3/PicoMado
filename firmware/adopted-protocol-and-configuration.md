@@ -44,3 +44,7 @@ LCDは160×80 RGB565BE/25600B、E-inkの通信画像は250×122 mono1/3813B（ce
 `nagle-fix-candidate/latest-live-result.json` の `derived180_windows.regulated_device_180` を再確認した。同一session/generationの端末時計180秒区間では描画数の標本境界から11.861111〜11.994444fpsの上下界、1秒以上の間隔0、最大間隔は既存累積値による上界461.778ms。厳密な180秒枚数や区間内最大値は復元できない。全232.089973秒区間は2447描画・10.543325fpsで、再接続に伴う8.210821秒の間隔1回を含む。定常区間は再接続を除くため元の採取窓と同じ比較ではなく、厳密なA/BでもNODELAY単独の因果証明でもない。動画の改善と、原因未特定の間欠切替遅延を分けて扱う。
 
 現在の期限は `transport.rs` の `FRAGMENT_STALL_TIMEOUT=3s`、`STREAM_FRAME_TIMEOUT=10s`、`SEND_TIMEOUT=250ms` を照合した。10-15記録の2s/5sは当時値として保持する。Wi-Fiのrequest/readbackは `app_timing_test.c`、EEX1の世代内cacheとWi-Fi世代失効は `endpoint_client_test.c` と `app_endpoint_test.c`、旧frame/旧応答・ACK混在は `control_reply_test.c` が回帰の根拠となる。
+
+## 隔離リファクタリング後の照合
+
+`52d8fdd`までの通常通信・Pico設定を上記の比較基準と照合した。[最終照合](../docs/refactor-final-acceptance-20261020.md)に受入済み/レビュー待ち/実機未検証を区別する。D04の描画中pendingと同一token再送の合流は`bae0575`で独立受入済みだが、本番や実機へ未反映。任意の観測sidecarは通常domain処理とwire互換を維持し、不正metadataは相関不明とする。固有のnative API operation factを新設したとはしない。上記の過去の動画実測値をこのcandidateの実機性能として転用しない。

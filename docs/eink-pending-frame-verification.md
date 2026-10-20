@@ -1,5 +1,7 @@
 # D-04 描画中の最新pending：実装と検証
 
+時点の区別：本文の未修正・未受入は各保存点の記録。D01〜D05の最新状態、残る設計差と実機未検証は[最終照合](refactor-final-acceptance-20261020.md)を正本とする。
+
 先行契約は`83a7ec6`と補足`eccd285`の[eink-pending-frame-contract.md](eink-pending-frame-contract.md)。D02の固定版`a6c7cf4`、D03Aの`53cb612`を保持して実装した。
 
 ## 実装

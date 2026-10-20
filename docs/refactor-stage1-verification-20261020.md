@@ -1,5 +1,7 @@
 # 契約整理・第1実装単位の検証（2026-10-20）
 
+時点の区別：本文の未修正・未受入は各保存点の記録。D01〜D05の最新状態、残る設計差と実機未検証は[最終照合](refactor-final-acceptance-20261020.md)を正本とする。
+
 これは全リファクタ完了・本番反映の報告ではない。[既存との対応](implementation-conformance-20261020.md)、[既存設計の契約明確化](contracts-observation-design.md)、[採用済み通信と設定](../firmware/adopted-protocol-and-configuration.md) に対する最初の実装単位である。正しいQuery/Rule/純粋Transition/Effectの設計を維持し、エンジン自体へIOを追加していない。
 
 ## 変更した境界

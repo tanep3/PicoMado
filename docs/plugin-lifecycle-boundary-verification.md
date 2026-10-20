@@ -1,5 +1,7 @@
 # D-03 単位A：起動復旧・保護参照の分離
 
+時点の区別：本文の未修正・未受入は各保存点の記録。D01〜D05の最新状態、残る設計差と実機未検証は[最終照合](refactor-final-acceptance-20261020.md)を正本とする。
+
 先行契約は`83a7ec6`の[plugin-lifecycle-boundary-contract.md](plugin-lifecycle-boundary-contract.md)。D-02の追加4件は`551445a`で別に固定しており、この変更へ混ぜない。
 
 `PluginStartupExecutor`を外部bootstrapとして登録する。Appは登録順でPluginPathsとSQLite接続を配送し、すべての復旧成功後に保存snapshotを読んでcontentへ復元する。共通constructorの風刺画名・保存先・削除gate分岐を除いた。風刺画のRetentionRecoveryが既存gate、artwork/cacheの相対パス、pending-delete復旧を所有する。起動エラーはAppを返さず、IOエラーを保持する。既存の端末選択・有効化・共通順序・保存schemaは変えない。

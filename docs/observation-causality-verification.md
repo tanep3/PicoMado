@@ -1,5 +1,7 @@
 # 因果追跡のソフトウェア検証（第2-B）
 
+時点の区別：本文の未修正・未受入は各保存点の記録。D01〜D05の最新状態、残る設計差と実機未検証は[最終照合](refactor-final-acceptance-20261020.md)を正本とする。
+
 設計正本は `4517d4f` の `observation-causality-contract.md`。実装より前に、任意cause、境界、保存、判定、T-01〜05を定義した。追加のsource coverageはPico0x9f・server0xebであり、server socket送出の未採取境界まで有効としない。
 
 ## 実装範囲
@@ -33,3 +35,7 @@ server socket境界の内訳、実USB/IRQ負荷、RF上の送出、実画素、E
 最終結果：追加faultを含むunit239件のうち、raspi5切断前に238件の成功を `causal-service-accepted-local-loopback.log` に確認した。再接続後にprocess不在とcompiled testの239件一覧を照合し、未完了だった `youtube::tests::complete_source_local_absolute_cuts_and_fps_reuse` だけを再実行して成功（41.80秒）。`causal-regression-resume.json` と `causal-regression-resumed-missing.log` がその証拠である。一度のrunが正常終了したという集計には置き換えない。オフライン結合4件も `causal-integration-resumed.log` で成功。feature無効の `cargo check --no-default-features --lib` 成功。
 
 fixture配置の是正：既存のinclude用 `tests/transport_recovery.rs` がCargoから独立integration testとしても自動発見されるため、`tests/support/transport_recovery.rs` に移した。実writerへのincludeとassert内容は維持し、テストを外したことにはしない。初回の独立compile失敗ログも残す。
+
+## 是正後の現在の範囲
+
+`1cbb992`の5是正は親の独立確認で解消済み。最新server回帰294/273件に関連Rust試験を含み、最終照合ではcollector21件と解析9件も再確認した。D01/D02/D03/D04の後続状態は[最終照合](refactor-final-acceptance-20261020.md)を参照する。D05のソフトウェア範囲の成功と、実USB/SDK stdout全経路/実機負荷・物理表示の未受入は別のままである。
