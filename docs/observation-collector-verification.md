@@ -25,3 +25,11 @@ Git外の証拠は `/home/tane/Documents/Codex/2026-10-18/task/architecture-refa
 全PTYは試験内の `os.openpty()` で生成し、DTRを模擬するadapterだけを注入した。実USB、Pico/E-ink、ライブサービスには接続していない。OS sandboxのPTY/Unix socket制限のためローカル試験だけ実行範囲を変更した。失敗した試験結果もログで隠さず、最終再実行で確認した。
 
 transport_completeは「この採取sourceの開始/終了境界とsequence、欠測、保存が揃った」という意味であり、操作成功・物理描画完了ではない。application_completeは未判定ならnull。SDK等の別stdout経路、実USB/割込み時間・動的高水位・実パネルはこの受入に含めない。既存Wire protocolや動画のACK/期限をこの単位で変更していない。
+
+## 独立レビューの3件（2026-10-20）
+
+契約追記 `9b67aa0` の後、K-06〜08を実装した。ownerごとのOS乱数CID seedと同ownerの単調採番、active完全送信要求のCID/state照合、空白tokenでの拒否、reply上限超過時の未送信queue取消しと通常dispatch禁止を追加した。
+
+`collector-review-fixes-local-pty.log`：19件成功（2.555秒）。既存16件に、旧ownerのCID1/旧event/正しいON境界、誤ったon flag、SIM COMMIT同等空白6表現、reply行/byte上限→queue済みB取消し→遅着A→tag付きOFFを追加した。最初のsandbox実行はUnix socket作成EPERMのため失敗し、同じテストを新規PTYとUnix IPCだけで実行可能なローカル権限に切り替えて成功した。実USB、実端末、サービス、ネットワーク機器は操作していない。
+
+これにより第2-Aの追加ブロッカー3件はソフトウェア試験上解消した。64-bit CIDは認証ではなく偶発衝突の可能性が残る。因果追跡D-05や実機間欠遅延の解消を意味しない。

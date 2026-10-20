@@ -266,7 +266,7 @@ class Tests(unittest.TestCase):
                 d.close()
 
     def test_tagged_stop_survives_late_uncorrelated_legacy_reply(self):
-        mux = ev.Commands(); first = mux.submit('SIM STATUS 1')
+        mux = ev.Commands(start_id=0); first = mux.submit('SIM STATUS 1')
         sent = bytearray()
         def write(data):
             sent.extend(data); return len(data)
@@ -281,6 +281,93 @@ class Tests(unittest.TestCase):
         self.assertFalse(stop.done())
         mux.receive(b'ev1 s 2 1 0 0 0 0 0 0\n')
         self.assertFalse(stop.result()['status']['on'])
+
+    def test_reply_overflow_cancels_queued_legacy_and_only_tagged_off_can_follow(self):
+        for mode in ['lines', 'bytes']:
+            with self.subTest(mode=mode):
+                audit, writes = [], []
+                mux = ev.Commands(start_id=0, audit=lambda **v: audit.append(v))
+                first = mux.submit('SIM STATUS 1', 'sim ', 'sim end ')
+                second = mux.submit('SIM PRESS 1 2 3 1 100', 'sim ', 'sim end ')
+                def write(data):
+                    writes.append(data); return len(data)
+                mux.tick(write, 0)
+                for _ in range(1025 if mode=='lines' else 257):
+                    mux.receive(b'sim row '+(b'x'*510 if mode=='bytes' else b'x')+b'\n')
+                self.assertTrue(mux.uncertain)
+                for future in [first, second]:
+                    with self.assertRaises(RuntimeError):
+                        future.result(timeout=0)
+                mux.tick(write, .1); mux.receive(b'sim end stale=1\n')
+                self.assertEqual(writes, [b'SIM STATUS 1\n'])
+                self.assertTrue(any(row['kind']=='command_cancelled' and row['command_id']==2 for row in audit))
+                with self.assertRaises(RuntimeError):
+                    mux.submit('SIM STATUS 1')
+                stop = mux.submit('OFF', internal=True); mux.tick(write, .2)
+                mux.receive(b'sim end stale=1\n'); self.assertFalse(stop.done())
+                mux.receive(b'ev1 s 3 1 0 0 0 0 0 0\n')
+                self.assertFalse(stop.result()['status']['on'])
+
+    def test_previous_owner_boundary_is_ignored_before_current_snapshot(self):
+        class StaleDevice(Device):
+            def run(self):
+                pending = bytearray()
+                try:
+                    while not self.stop.is_set():
+                        if not select.select([self.master], [], [], .02)[0]:
+                            continue
+                        for b in os.read(self.master, 1024):
+                            if b != 10:
+                                pending.append(b); continue
+                            command = pending.decode().strip(); pending.clear()
+                            self.commands.append(command); words = command.split()
+                            if words[1] == 'ON':
+                                self.send(b'ev1 s 1 1 0 0 0 0 1 0\n')
+                                self.send(packet(1)); self.send(packet(2))
+                                # Correct CID with the wrong state is not an ON receipt.
+                                self.send(('ev1 s %s 1 0 0 0 0 0 0\n' % words[2]).encode())
+                                self.send(('ev1 s %s 1 2 0 0 0 1 0\n' % words[2]).encode())
+                            elif words[1] == 'OFF':
+                                self.send(('ev1 s %s 1 2 0 0 0 0 0\n' % words[2]).encode())
+                except OSError as error:
+                    if not self.stop.is_set():
+                        self.errors.append(error)
+        from unittest.mock import patch
+        with patch.object(ev.secrets, 'randbelow', side_effect=[100, 1000]):
+            for seed in [101, 1001]:
+                d = StaleDevice(events=[], initial_sequence=2)
+                try:
+                    result, rows = self.capture(d)
+                    self.assertTrue(result['transport_complete'], result)
+                    self.assertEqual(result['segments'][0]['start']['sequence'], 2)
+                    self.assertEqual(result['segments'][0]['received'], 0)
+                    self.assertEqual(int(d.commands[0].split()[2], 16), seed+1)
+                    reasons = [r['reason'] for r in rows if r['kind']=='boundary_reply_ignored']
+                    self.assertEqual(reasons, ['cid_mismatch', 'control_state_mismatch'])
+                finally:
+                    d.close()
+
+    def test_equivalent_detached_commit_and_capture_commands_never_reach_wire(self):
+        d = Device(events=[]); answers, threads = [], []
+        commands = ['SIM COMMIT 1 2 3', 'SIM  COMMIT 1 2 3', '  SIM   COMMIT 1 2 3  ',
+                    'sim CoMmIt 1 2 3', 'SIM\tCOMMIT 1 2 3', ' EV1  OFF']
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            def ready(status):
+                def client():
+                    for command in commands:
+                        answers.append(rpc(root/'owner', {'command':command}))
+                    answers.append(rpc(root/'owner', {'op':'stop'}))
+                thread = threading.Thread(target=client); threads.append(thread); thread.start()
+            try:
+                result = ev.collect('new-PTY-only', root/'events', root/'owner', 2, port_factory=d.open, ready=ready)
+                threads[0].join(2); self.assertFalse(threads[0].is_alive())
+                self.assertTrue(result['transport_complete'], result)
+                self.assertEqual(len(answers), len(commands)+1)
+                self.assertTrue(all('cannot be forwarded' in a.get('error', '') for a in answers[:-1]))
+                self.assertEqual([c.split()[1] for c in d.commands], ['ON', 'OFF'])
+            finally:
+                d.close()
 
     def test_partial_command_never_appends_a_stop_or_delimiter(self):
         mux = ev.Commands(); future = mux.submit('SIM STATUS 1')

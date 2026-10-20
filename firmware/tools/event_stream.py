@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import queue
 import selectors
+import secrets
 import socket
 import struct
 import termios
@@ -255,11 +256,14 @@ class Journal:
 
 
 class Commands:
-    def __init__(self, capacity=8, start_id=0, audit=None):
+    def __init__(self, capacity=8, start_id=None, audit=None):
         self.queue = queue.Queue(capacity)
         self.internal = None
         self.active = None
-        self.next_id = start_id
+        # Cold owner nonce; preserve it across reconnects, never seed from CID1.
+        self.next_id = secrets.randbelow(MAX_U64-65536)+1 if start_id is None else start_id
+        if not 0 <= self.next_id <= MAX_U64:
+            raise ValueError('invalid command ID seed')
         self.uncertain = False
         self.dirty = False
         self.audit = audit or (lambda **value: None)
@@ -285,7 +289,7 @@ class Commands:
         end = (end_prefix or prefix.decode('ascii')).encode('ascii')
         wire = ('EV1 %s %x' % (line, self.next_id)).encode() if internal else raw
         request = dict(id=self.next_id, raw=wire+b'\n', offset=0, prefix=prefix,
-                       end=end, result=result, replies=[], size=0, deadline=0, internal=internal)
+                       end=end, result=result, replies=[], size=0, deadline=0, internal=internal, control=line if internal else None)
         if internal:
             self.internal = request
         else:
@@ -298,7 +302,16 @@ class Commands:
             request['result'].set_exception(RuntimeError(reason))
         self.audit(kind='command_uncertain' if request['offset'] else 'command_cancelled', command_id=request['id'], reason=reason)
 
+    def _poison_legacy(self):
+        self.uncertain = True
+        while not self.queue.empty():
+            self._fail(self.queue.get_nowait(), 'prior response uncertain; cancelled before dispatch')
+
     def tick(self, write, now):
+        if self.dirty:
+            return
+        if self.uncertain:
+            self._poison_legacy()
         if self.active is None:
             if self.internal is not None:
                 self.active, self.internal = self.internal, None
@@ -316,9 +329,7 @@ class Commands:
             self.dirty = 0 < q['offset'] < len(q['raw'])
             self.active = None
             if not q['internal'] and q['offset']:
-                self.uncertain = True
-                while not self.queue.empty():
-                    self._fail(self.queue.get_nowait(), 'prior response uncertain')
+                self._poison_legacy()
         elif q['offset'] < len(q['raw']):
             try:
                 n = write(q['raw'][q['offset']:q['offset']+64])
@@ -336,7 +347,13 @@ class Commands:
             return
         if q['internal']:
             status = parse_status(line)
-            if status is None or status['cid'] != q['id']:
+            if status is None:
+                return
+            if status['cid'] != q['id']:
+                self.audit(kind='boundary_reply_ignored', reason='cid_mismatch', command_id=q['id'], reply_cid=status['cid'])
+                return
+            if q['control'] in ('ON', 'OFF') and status['on'] != (q['control'] == 'ON'):
+                self.audit(kind='boundary_reply_ignored', reason='control_state_mismatch', command_id=q['id'])
                 return
             q['result'].set_result(dict(id=q['id'], status=status, replies=[line.decode().rstrip()]))
             self.active = None
@@ -347,7 +364,7 @@ class Commands:
         if q['size'] > 128*1024 or len(q['replies']) >= 1024:
             self._fail(q, 'reply limit')
             self.active = None
-            self.uncertain = True
+            self._poison_legacy()
             return
         q['replies'].append(line.decode('ascii', errors='replace').rstrip())
         if line.startswith(q['end']):
@@ -553,7 +570,8 @@ class Collector:
                     command = request['command']
                     if not isinstance(command, str) or not command.split():
                         raise ValueError('command required')
-                    if command.split()[0].upper() == 'EV1' or command.upper().startswith('SIM COMMIT'):
+                    tokens = command.upper().split()
+                    if tokens[0] == 'EV1' or tokens[:2] == ['SIM', 'COMMIT']:
                         raise ValueError('capture lifecycle or detached COMMIT cannot be forwarded')
                     if self.port is None or self.stop_requested:
                         raise RuntimeError('capture link unavailable or stopping')
