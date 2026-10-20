@@ -1,0 +1,29 @@
+# D-02 独立レビュー後の追加契約
+
+7ff1480 の自動テストは通過したが、独立レビューで次の4件を再現した。D-02の受入を再開する。D-03/D-04の契約は83a7ec6のまま保持し、この修正で本番・実機へ操作を加えない。
+
+## 内容更新中の未完了フレーム
+
+保存中にReceiptAckだけ、または送信完了だけが進んだ場合、古いフレームは描画待ちのままになる。内容更新による新latestの再描画義務を、そのpendingの合流で消してはならない。現在のincarnation/session/settings/選択/表示所有者に束縛した端末単位の一時的な更新義務を保持する。古いRenderedAckでpendingが解消した際、最新内容を一度だけ生成する。ReceiptAckや送信完了は描画完了として扱わない。
+
+義務は永続schemaに追加しない。内容更新は端末ごとに最新1件へまとめ、設定・選択・接続・所有者の変更で古い義務を無効にする。新しい内容を失わず、古いACKが新セッションや別プラグインへ画像を発行しないことをLCD/E-inkで検証する。
+
+## 同一payload内の重複確認とACK
+
+実readerはwire順序を保つ。すでに確定したHeartbeatとSettingsStoredが永続状態を変えない場合、世代とrevisionを検証して保存なしの経路で完了する。SQLite待ち中に同じpayloadの先行重複確認が後続ReceiptAck/RenderedAckを止めてはならない。新しい永続確認は従来の保存成功後の公開を守る。不正・将来revision・旧sessionを重複として受理しない。
+
+actual serve_split readerへ一つのbinary payloadを渡し、実SQLite transactionの有限停止中に後続ACKが公開されることを確認する。単独process呼出しだけでは代用しない。
+
+## 実際のプラグイン画像の不変共有
+
+公開・一時snapshotの作成は、実CaricatureContentのlatest/一時結果/SUB開始画像/表示中画像を含め、既存のPNG・LCD画素を深く複製しない。画像は不変の共有所有権とし、viewの変更は他snapshotを変えない。既存の保存JSON形式とArtwork公開APIは維持する。
+
+実際にAppへ導入した大きなArtworkについて、公開snapshotと一時snapshotでPNG/LCD両方のアドレス共有を検証する。Runtime.plugin_statesのArcのみのテストではこの契約を満たさない。
+
+## StreamStatusの公開
+
+正当なStreamStatusでlast_received_frame/last_rendered_frameが変わる場合、一時snapshotを公開してqueryへ反映する。同一progressの重複は通知も追加保存も生まない。旧session/範囲外frame/異なるgenerationを拒否し、送信creditや永続状態は変えない。
+
+## 検証と報告
+
+上記の再現ケースと旧D-02のSQLite成功/失敗・部分成功・panic・構造変更・時計・旧/native/static/videoの回帰を実施する。通常featureと全featureのローカルテストを実施し、実機の間欠遅延解消とは区別して報告する。
