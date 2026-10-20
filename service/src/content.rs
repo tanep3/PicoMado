@@ -61,6 +61,7 @@ pub struct FetchJob {
 
 /// Plugin-owned result, computed without the shared application lock.
 pub type PreparedFetch = Box<dyn std::any::Any + Send>;
+pub type TransientView = Box<dyn std::any::Any + Send + Sync>;
 pub type FetchPreparation =
     Box<dyn FnOnce(Result<Vec<u8>, String>) -> Result<PreparedFetch, ContentError> + Send>;
 
@@ -159,6 +160,13 @@ pub trait ContentPlugin: Send + Sync {
     /// the clock inside a Rule or inventing a missing day's data.
     fn observe_date(&mut self, _ctx: &PluginContext, _today_jst: &str) -> bool {
         false
+    }
+    /// Opt in only when input can use prepared data without changing durable
+    /// settings, snapshots or jobs. Unknown extensions retain the durable path.
+    fn transient_input_ready(&self, _ctx: &PluginContext, _today: &str) -> bool { false }
+    fn transient_view(&self, _ctx: &PluginContext) -> Option<TransientView> { None }
+    fn merge_transient_view(&mut self, _ctx: &PluginContext, _view: &dyn std::any::Any) -> Result<(), ContentError> {
+        Err(ContentError::Unsupported)
     }
     fn plan(
         &mut self,

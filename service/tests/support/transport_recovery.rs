@@ -30,7 +30,7 @@ impl Sink<Message> for RecoverySink {
 }
 async fn recovery_fixture(hold:Duration,progress:bool,control:bool,replace_session:bool)->(&'static str,Duration){
     let tmp=tempfile::tempdir().unwrap();
-    let app=Arc::new(std::sync::Mutex::new(app_at_fixture_date(&tmp.path().join("recovery.db"))));
+    let app=Arc::new(crate::shared::Application::new(app_at_fixture_date(&tmp.path().join("recovery.db"))));
     let caps=std::collections::BTreeSet::from(["lcd".into(),crate::protocol::FRAME_BYTES_CAPABILITY.into(),crate::protocol::LCD_PUSH_CAPABILITY.into()]);
     let token=app.lock().unwrap().hello("recovery",caps.clone(),1).unwrap();
     let recorded=Arc::new(std::sync::Mutex::new(Vec::new()));let count=Arc::new(AtomicUsize::new(0));

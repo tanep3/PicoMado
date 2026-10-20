@@ -32,7 +32,7 @@ where
 {
     #[cfg(feature="boundary-observation")]
     let _observation_capture=std::env::var_os("PICOMADO_OBSERVATION_PATH").and_then(|path|{
-        let source=app.lock().ok()?.observation_source();
+        let source=app.read().ok()?.observation_source();
         match crate::observation::Capture::start(source,std::path::Path::new(&path)) {
             Ok(capture)=>Some(capture),
             Err(error)=>{eprintln!("picomado observation_start_failed {error}");None}
@@ -145,7 +145,7 @@ mod tests {
     use crate::content::FetchJob;
     use crate::fetch::{run_cycle, Clock, SourceFetcher};
     use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use std::time::Duration;
 
     struct FakeClock(AtomicI64);
@@ -178,7 +178,7 @@ mod tests {
     #[tokio::test]
     async fn loopback_host_runs_initial_and_repeated_fetch_then_stops() {
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(Mutex::new(
+        let app = Arc::new(crate::shared::Application::new(
             App::open(&temp.path().join("state.db")).unwrap(),
         ));
         app.lock()
@@ -244,7 +244,7 @@ mod tests {
     #[tokio::test]
     async fn worker_failure_stops_listener_and_returns_error() {
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(Mutex::new(
+        let app = Arc::new(crate::shared::Application::new(
             App::open(&temp.path().join("state.db")).unwrap(),
         ));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

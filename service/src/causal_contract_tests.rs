@@ -227,7 +227,7 @@ fn actual_rust_to_c_causal_input_frame_draw_in_lcd_and_button_eink() {
             plugins,
         )
         .unwrap();
-        let app = Arc::new(std::sync::Mutex::new(state));
+        let app = Arc::new(crate::shared::Application::new(state));
         let mut current = None;
         process_with_observation(
             &app,

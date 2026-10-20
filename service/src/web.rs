@@ -1,7 +1,7 @@
 //! In-process Web/API router. Deployment must supply restricted LAN/Tailnet
 //! bind addresses; this library never starts a listener.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::StatusCode;
@@ -16,7 +16,7 @@ use crate::application::{App, AppError, AppView};
 use crate::application::DEFAULT_ORDER;
 use crate::settings::{DeviceSettings, PluginSettings};
 
-pub type SharedApp = Arc<Mutex<App>>;
+pub type SharedApp = Arc<crate::shared::Application>;
 
 pub fn router(app: SharedApp) -> Router {
     Router::new()
@@ -86,12 +86,16 @@ fn with_app<T>(
     f(&mut guard).map_err(ApiError)
 }
 
+fn with_read_app<T>(app:&SharedApp,f:impl FnOnce(&App)->Result<T,AppError>)->Result<T,ApiError>{
+    let view=app.read().map_err(|_|ApiError(AppError::Conflict("application unavailable")))?;f(&view).map_err(ApiError)
+}
+
 async fn home() -> Html<&'static str> {
     Html(include_str!("ui.html"))
 }
 
 async fn plugin_page(State(app): State<SharedApp>, Path(plugin): Path<String>) -> Result<Html<&'static str>, StatusCode> {
-    if app.lock().map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?.has_plugin(&plugin) {
+    if app.read().map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?.has_plugin(&plugin) {
         Ok(Html(include_str!("ui.html")))
     } else {
         Err(StatusCode::NOT_FOUND)
@@ -102,7 +106,7 @@ async fn plugin_options(
     State(app): State<SharedApp>,
     Path(plugin): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    with_app(&app, |app| {
+    with_read_app(&app, |app| {
         app.plugin_options(&plugin)
             .map(Json)
             .ok_or(AppError::NotFound)
@@ -113,7 +117,7 @@ async fn plugin_state(
     State(app): State<SharedApp>,
     Path(plugin): Path<String>,
 ) -> Result<Json<crate::application::PluginWebView>, ApiError> {
-    with_app(&app, |app| {
+    with_read_app(&app, |app| {
         app.plugin_web_view(&plugin)
             .map(Json)
             .ok_or(AppError::NotFound)
@@ -134,7 +138,7 @@ fn protection_error(error: crate::caricature::CaricatureError) -> ApiError {
 async fn caricature_protections(
     State(app): State<SharedApp>,
 ) -> Result<Json<crate::caricature::retention::ProtectionSnapshot>, ApiError> {
-    let paths = with_app(&app, |app| {
+    let paths = with_read_app(&app, |app| {
         app.plugin_paths("caricature").ok_or(AppError::NotFound)
     })?;
     tokio::task::spawn_blocking(move || {
@@ -159,7 +163,7 @@ async fn update_caricature_protections(
     State(app): State<SharedApp>,
     Json(body): Json<ProtectionChange>,
 ) -> Result<Json<crate::caricature::retention::ProtectionSnapshot>, ApiError> {
-    let paths = with_app(&app, |app| {
+    let paths = with_read_app(&app, |app| {
         app.plugin_paths("caricature").ok_or(AppError::NotFound)
     })?;
     tokio::task::spawn_blocking(move || {
@@ -201,7 +205,7 @@ async fn plugin_asset(
     Path((plugin, id)): Path<(String, String)>,
     headers: axum::http::HeaderMap,
 ) -> Result<Response, ApiError> {
-    let (paths, descriptor) = with_app(&app, |app| {
+    let (paths, descriptor) = with_read_app(&app, |app| {
         app.plugin_asset(&plugin, &id).ok_or(AppError::NotFound)
     })?;
     let content_type = descriptor.content_type.clone();
@@ -295,7 +299,7 @@ async fn caricature_original(
     State(app): State<SharedApp>,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let paths = with_app(&app, |app| {
+    let paths = with_read_app(&app, |app| {
         app.plugin_asset("caricature", &id)
             .map(|(paths, _)| paths)
             .ok_or(AppError::NotFound)
@@ -357,7 +361,7 @@ async fn update_plugin_device_config(
 }
 
 async fn state(State(app): State<SharedApp>) -> Result<Json<AppView>, ApiError> {
-    with_app(&app, |app| Ok(Json(app.view())))
+    with_read_app(&app, |app| Ok(Json(app.view())))
 }
 
 #[derive(Deserialize)]
@@ -485,7 +489,7 @@ mod tests {
     async fn caricature_catalog_api_edits_adds_deletes_and_survives_reopening() {
         let temp = tempfile::tempdir().unwrap();
         let database = temp.path().join("state.db");
-        let router = super::router(Arc::new(Mutex::new(App::open(&database).unwrap())));
+        let router = super::router(Arc::new(crate::shared::Application::new(App::open(&database).unwrap())));
         let route = "/api/plugins/caricature";
         let mut view = call(&router, Method::GET, route, json!({})).await.1;
         let old = view.clone();
@@ -538,7 +542,7 @@ mod tests {
             old["data"]["default_styles"]
         );
         drop(router);
-        let reopened = super::router(Arc::new(Mutex::new(App::open(&database).unwrap())));
+        let reopened = super::router(Arc::new(crate::shared::Application::new(App::open(&database).unwrap())));
         let saved = call(&reopened, Method::GET, route, json!({})).await.1;
         assert_eq!(saved["data"], view["data"]);
         let response = reopened
@@ -579,7 +583,7 @@ mod tests {
             lcd_rgb565be: vec![0; 160 * 80 * 2],
         };
         store.publish(art, 0).unwrap();
-        let router = router(Arc::new(Mutex::new(app)));
+        let router = router(Arc::new(crate::shared::Application::new(app)));
         let route = "/api/plugins/caricature/protections";
         assert_eq!(
             call(&router, Method::GET, route, json!({})).await.1["revision"],
@@ -599,7 +603,7 @@ mod tests {
             StatusCode::BAD_REQUEST
         );
         drop(router);
-        let reopened = super::router(Arc::new(Mutex::new(App::open(&database).unwrap())));
+        let reopened = super::router(Arc::new(crate::shared::Application::new(App::open(&database).unwrap())));
         assert_eq!(
             call(&reopened, Method::GET, route, json!({})).await.1["protected_ids"][0],
             "protected-1"
@@ -658,7 +662,7 @@ mod tests {
         let mut content = CaricatureContent::default();
         crate::content::ContentPlugin::load_state(&mut content, snapshot).unwrap();
         app.replace_test_content("caricature", Box::new(content));
-        let router = router(Arc::new(Mutex::new(app)));
+        let router = router(Arc::new(crate::shared::Application::new(app)));
         for (id, mime, expected) in [
             ("recent-1", "image/webp", original.as_slice()),
             ("legacy-1", "image/png", canonical.as_slice()),
@@ -717,7 +721,7 @@ mod tests {
         let a = app.hello("a", ["lcd".into()].into(), 1).unwrap();
         let b = app.hello("b", ["lcd".into()].into(), 1).unwrap();
         app.disconnect(b.clone()).unwrap();
-        let router = router(Arc::new(Mutex::new(app)));
+        let router = router(Arc::new(crate::shared::Application::new(app)));
         let (status, options) = call(
             &router,
             Method::GET,
@@ -837,7 +841,7 @@ mod tests {
         let mut app = App::open(&path).unwrap();
         let token = app.hello("desk", ["lcd".into()].into(), 1).unwrap();
         app.disconnect(token.clone()).unwrap();
-        let router = router(Arc::new(Mutex::new(app)));
+        let router = router(Arc::new(crate::shared::Application::new(app)));
         let mut settings = serde_json::to_value(DeviceSettings::default()).unwrap();
         settings["wifi_timeout_seconds"] = json!(25);
         let payload =
@@ -898,7 +902,7 @@ mod tests {
         for (id, _) in app.pending_effects() {
             app.complete_effect(id).unwrap();
         }
-        let shared = Arc::new(Mutex::new(app));
+        let shared = Arc::new(crate::shared::Application::new(app));
         let router = router(shared.clone());
         assert_eq!(
             call(
@@ -950,7 +954,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("state.db");
         let app = App::open(&path).unwrap();
-        let router = router(Arc::new(Mutex::new(app)));
+        let router = router(Arc::new(crate::shared::Application::new(app)));
         let request = Request::builder().uri("/").body(Body::empty()).unwrap();
         let response = router.clone().oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);

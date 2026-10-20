@@ -124,7 +124,7 @@ pub async fn complete_fetched_source(
     source: Result<Vec<u8>, String>,
 ) -> Result<bool, AppError> {
     let prepare = {
-        let guard = crate::diagnostics::lock(app, crate::diagnostics::Domain::Fetch)
+        let guard = crate::diagnostics::read(app, crate::diagnostics::Domain::Fetch)
             .map_err(|_| AppError::Conflict("application unavailable"))?;
         guard.prepare_plugin_fetch(job)?
     };

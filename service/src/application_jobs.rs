@@ -151,7 +151,7 @@ impl App {
         let snapshot = content.save_state();
         self.change(|engine, state| {
             state.jobs = next_jobs;
-            state.plugin_states.insert(plugin.into(), snapshot);
+            state.plugin_states.insert(plugin.into(), Arc::new(snapshot));
             let revision = state.managed_revisions.entry(plugin.into()).or_insert(1);
             *revision = revision
                 .checked_add(1)
@@ -478,6 +478,13 @@ impl App {
         let pixels = self.compose_lcd_frame(&session.device_id, pixels);
         self.frame_assets.insert(handle, Arc::new(pixels));
         Ok(frame)
+    }
+    pub(crate) fn playback_target_context(&self,offer:&PlaybackOffer,target:&PlaybackTarget)->Option<PluginContext>{
+        let device=self.runtime.world.devices.get(&target.token.device_id)?;
+        if !crate::frame_display_current(device,&target.token)||device.selected.as_deref()!=Some(&offer.plugin){return None;}
+        let ctx=PluginContext{token:crate::session_token(&target.token.device_id,device),settings_revision:device.settings_revision,mode:device.mode.clone()};
+        if self.contents.get(&offer.plugin).and_then(|p|p.playback(&ctx)).as_ref()!=Some(&offer.spec){return None;}
+        Some(ctx)
     }
     pub fn accept_playback_pixels(
         &mut self,
@@ -962,7 +969,7 @@ mod tests {
         state
             .plugin_command("youtube", 1, serde_json::json!({}))
             .unwrap();
-        let app = Arc::new(std::sync::Mutex::new(state));
+        let app = Arc::new(crate::shared::Application::new(state));
         let entered = Arc::new(AtomicBool::new(false));
         let release = Arc::new(Notify::new());
         let reads = Arc::new(std::sync::Mutex::new(Vec::new()));

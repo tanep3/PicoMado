@@ -2,7 +2,7 @@
 //! by importing the library, and accepts only the requested trial address.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use picomado_core::{application::App, host::serve_jma_on_listener};
 
@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if db.as_os_str().is_empty() {
         return Err("database path required".into());
     }
-    let app = Arc::new(Mutex::new(
+    let app = Arc::new(picomado_core::shared::Application::new(
         App::open(&db).map_err(|e| format!("database open failed: {e:?}"))?,
     ));
     let listener = tokio::net::TcpListener::bind(&args[3]).await?;

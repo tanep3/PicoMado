@@ -1,6 +1,7 @@
 //! Optional bounded stream diagnostics. No network or application state changes.
 //! Disabled builds inline to the original lock and empty hooks.
-use std::sync::{LockResult, Mutex, MutexGuard};
+#[cfg(feature="stream-diagnostics")]
+use std::sync::Mutex;
 #[derive(Clone, Copy)]
 #[repr(u8)]
 pub enum Domain {
@@ -51,9 +52,12 @@ pub fn event(_: Kind, _: u64, _: u64, _: u64, _: u64, _: u64) {}
 pub fn duration(_: Kind, _: u64, _: u64, _: u64, _: u64) {}
 #[cfg(not(feature = "stream-diagnostics"))]
 #[inline(always)]
-pub fn lock<T>(m: &Mutex<T>, _: Domain) -> LockResult<MutexGuard<'_, T>> {
-    m.lock()
-}
+pub fn lock(m:&crate::shared::Application,_:Domain)->Result<crate::shared::Lease<'_>,crate::shared::AccessError>{m.lock()}
+#[cfg(not(feature="stream-diagnostics"))]
+pub(crate) fn input_lock<'a>(m:&'a crate::shared::Application,token:&crate::SessionToken,message:&crate::protocol::WireMessage,_:Domain)->Result<crate::shared::InputGuard<'a>,crate::shared::AccessError>{m.input_lock(token,message)}
+/// Immutable queries never wait for the mutable application owner or storage.
+pub fn read(m:&crate::shared::Application,_:Domain)->Result<std::sync::Arc<crate::application::App>,crate::shared::AccessError>{m.read()}
+
 #[cfg(not(feature = "stream-diagnostics"))]
 pub fn start_from_env() {}
 
@@ -65,7 +69,7 @@ mod enabled {
     use std::ops::{Deref, DerefMut};
     use std::sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        OnceLock, PoisonError,
+        OnceLock,
     };
     use std::time::{Duration, Instant, SystemTime};
     const CAP: usize = 128;
@@ -271,43 +275,17 @@ mod enabled {
             CONTENDED.fetch_add(1, Ordering::Relaxed);
         }
     }
-    pub struct Guard<'a, T> {
-        guard: MutexGuard<'a, T>,
-        domain: Domain,
-        start: u64,
+    pub struct Guard<'a> {guard:Option<crate::shared::InputGuard<'a>>,domain:Domain,start:u64}
+    impl Deref for Guard<'_>{type Target=crate::application::App;fn deref(&self)->&Self::Target{self.guard.as_ref().expect("application lease")}}
+    impl DerefMut for Guard<'_>{fn deref_mut(&mut self)->&mut Self::Target{self.guard.as_mut().expect("application lease")}}
+    impl Drop for Guard<'_>{fn drop(&mut self){drop(self.guard.take());duration(Kind::LockHold,self.start,0,0,self.domain as u64);}}
+    pub fn lock(m:&crate::shared::Application,domain:Domain)->Result<Guard<'_>,crate::shared::AccessError>{
+        let before=mark();let result=m.lock();duration(Kind::LockWait,before,0,0,domain as u64);
+        result.map(|guard|Guard{guard:Some(crate::shared::InputGuard::Durable(guard)),domain,start:mark()})
     }
-    impl<T> Deref for Guard<'_, T> {
-        type Target = T;
-        fn deref(&self) -> &T {
-            &self.guard
-        }
-    }
-    impl<T> DerefMut for Guard<'_, T> {
-        fn deref_mut(&mut self) -> &mut T {
-            &mut self.guard
-        }
-    }
-    impl<T> Drop for Guard<'_, T> {
-        fn drop(&mut self) {
-            duration(Kind::LockHold, self.start, 0, 0, self.domain as u64);
-        }
-    }
-    pub fn lock<T>(m: &Mutex<T>, domain: Domain) -> LockResult<Guard<'_, T>> {
-        let before = mark();
-        let result = m.lock();
-        duration(Kind::LockWait, before, 0, 0, domain as u64);
-        match result {
-            Ok(guard) => Ok(Guard {
-                guard,
-                domain,
-                start: mark(),
-            }),
-            Err(e) => Err(PoisonError::new(Guard {
-                guard: e.into_inner(),
-                domain,
-                start: mark(),
-            })),
-        }
+    pub fn input_lock<'a>(m:&'a crate::shared::Application,token:&crate::SessionToken,message:&crate::protocol::WireMessage,domain:Domain)->Result<Guard<'a>,crate::shared::AccessError>{
+        let before=mark();let result=m.input_lock(token,message);duration(Kind::LockWait,before,0,0,domain as u64);
+        result.map(|guard|Guard{guard:Some(guard),domain,start:mark()})
     }
     pub fn start_from_env() {
         let Some(path) = std::env::var_os("PICOMADO_DIAGNOSTICS_PATH") else {
@@ -447,6 +425,8 @@ mod enabled {
 }
 #[cfg(feature = "stream-diagnostics")]
 pub use enabled::{duration, event, lock, mark, start_from_env};
+#[cfg(feature="stream-diagnostics")]
+pub(crate) use enabled::input_lock;
 
 #[cfg(all(test, feature = "stream-diagnostics"))]
 pub use enabled::{test_count, test_enable, test_hist};

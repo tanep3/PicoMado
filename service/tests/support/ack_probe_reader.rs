@@ -7,7 +7,7 @@ async fn switch_probe_static_socket_for(device_id:&str) -> (
     tempfile::TempDir,
 ) {
     let temp = tempfile::tempdir().unwrap();
-    let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+    let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
         &temp.path().join("state.db"),
     )));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

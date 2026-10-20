@@ -111,7 +111,7 @@ fn restart_reloads_session_epoch_but_not_process_local_accept_order() {
 fn concurrent_valid_hellos_end_with_newest_accept_order() {
     for _ in 0..24 {
         let tmp = tempfile::tempdir().unwrap();
-        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+        let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
             &tmp.path().join("state.db"),
         )));
         let barrier = Arc::new(std::sync::Barrier::new(2));
@@ -143,7 +143,7 @@ fn concurrent_valid_hellos_end_with_newest_accept_order() {
 #[tokio::test]
 async fn failed_newest_welcome_does_not_let_an_older_socket_revive() {
     let tmp = tempfile::tempdir().unwrap();
-    let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+    let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
         &tmp.path().join("state.db"),
     )));
     let old = WriteProgress::default();

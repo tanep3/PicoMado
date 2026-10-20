@@ -180,12 +180,38 @@ struct PreparedWeather {
     frames: Vec<WeatherPixels>,
     error_pixels: Arc<WeatherPixels>,
 }
+struct WeatherView {
+    pinned: Option<Arc<ForecastSet>>,
+    index: usize,
+    start_index: usize,
+    rendered: Vec<RenderedForecast>,
+}
 impl ContentPlugin for WeatherContent {
     fn clone_box(&self) -> Box<dyn ContentPlugin> {
         Box::new(self.clone())
     }
     fn id(&self) -> &'static str {
         "weather"
+    }
+    fn transient_input_ready(&self, ctx:&PluginContext, today:&str)->bool {
+        self.slot(ctx).is_some_and(|s|s.browse.is_some() && s.today_jst.as_deref()==Some(today))
+    }
+    fn transient_view(&self,ctx:&PluginContext)->Option<crate::content::TransientView>{
+        let slot=self.slot(ctx)?;let b=slot.browse.as_ref()?;
+        Some(Box::new(WeatherView{pinned:b.pinned.clone(),index:b.index,start_index:b.start_index,rendered:slot.rendered.clone()}))
+    }
+    fn merge_transient_view(&mut self,ctx:&PluginContext,view:&dyn std::any::Any)->Result<(),ContentError>{
+        let view=view.downcast_ref::<WeatherView>().ok_or(ContentError::Stale)?;
+        let slot=self.devices.get_mut(&ctx.token.device_id).ok_or(ContentError::Stale)?;
+        let b=slot.browse.as_mut().ok_or(ContentError::Stale)?;
+        if let Some(pin)=&view.pinned {
+            b.pinned=Some(pin.clone());b.index=view.index;b.start_index=view.start_index;
+            if !slot.rendered.iter().any(|r|Arc::ptr_eq(&r.set,pin)) {
+                let pixels=view.rendered.iter().find(|r|Arc::ptr_eq(&r.set,pin)).ok_or(ContentError::Stale)?;
+                slot.rendered.push(pixels.clone());
+            }
+        } else { b.cancel(); }
+        slot.prune_rendered();Ok(())
     }
     fn publish(
         &mut self,

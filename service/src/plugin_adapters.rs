@@ -1043,7 +1043,7 @@ mod tests {
             .join("videos/abcdefghijk/thumbnail.jpg");
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         std::fs::write(&file, b"old").unwrap();
-        let router = crate::web::router(std::sync::Arc::new(std::sync::Mutex::new(app)));
+        let router = crate::web::router(std::sync::Arc::new(crate::shared::Application::new(app)));
         let get = |etag: Option<&str>| {
             let mut request =
                 Request::builder().uri("/api/plugins/youtube/assets/thumbnail-abcdefghijk");
@@ -1083,7 +1083,7 @@ mod tests {
         use http_body_util::BodyExt;
         use tower::ServiceExt;
         let temp = tempfile::tempdir().unwrap();
-        let app = std::sync::Arc::new(std::sync::Mutex::new(
+        let app = std::sync::Arc::new(crate::shared::Application::new(
             crate::application::App::open(&temp.path().join("state.db")).unwrap(),
         ));
         let router = crate::web::router(app.clone());

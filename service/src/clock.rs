@@ -201,6 +201,11 @@ impl ContentPlugin for ClockContent {
     fn id(&self) -> &'static str {
         "clock"
     }
+    fn transient_view(&self,ctx:&PluginContext)->Option<crate::content::TransientView>{Some(Box::new(self.time(ctx)?))}
+    fn merge_transient_view(&mut self,ctx:&PluginContext,view:&dyn std::any::Any)->Result<(),ContentError>{
+        let now=view.downcast_ref::<i64>().ok_or(ContentError::Stale)?;
+        self.times.insert(ctx.token.device_id.clone(),(ctx.token.incarnation,*now));Ok(())
+    }
     fn publish(
         &mut self,
         _: &PluginContext,

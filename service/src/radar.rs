@@ -4,7 +4,7 @@
 //! precipitation and no-data layers are fetched together for each generation.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use image::{ImageFormat, RgbaImage};
@@ -58,15 +58,15 @@ struct RadarSet {
 }
 #[derive(Clone, Debug)]
 struct RadarBrowse {
-    latest: RadarSet,
-    pinned: Option<RadarSet>,
+    latest: Arc<RadarSet>,
+    pinned: Option<Arc<RadarSet>>,
     index: usize,
 }
 impl RadarBrowse {
     fn new(set: RadarSet) -> Self {
         let index = set.latest_observed;
         Self {
-            latest: set,
+            latest: Arc::new(set),
             pinned: None,
             index,
         }
@@ -76,7 +76,7 @@ impl RadarBrowse {
         (set, &set.frames[self.index])
     }
     fn publish(&mut self, set: RadarSet) {
-        self.latest = set;
+        self.latest = Arc::new(set);
         if self.pinned.is_none() {
             self.index = self.latest.latest_observed;
         }
@@ -135,7 +135,7 @@ impl RadarSlot {
         StoredSlot {
             incarnation: self.incarnation,
             settings_revision: self.settings_revision,
-            latest: self.browse.as_ref().map(|b| b.latest.clone()),
+            latest: self.browse.as_ref().map(|b| b.latest.as_ref().clone()),
             last_success_unix: self.last_success_unix,
             last_attempt_unix: self.last_attempt_unix,
             error: self.error,
@@ -182,12 +182,23 @@ struct PreparedRadar {
     set: Option<RadarSet>,
     pixels: Vec<u8>,
 }
+struct RadarView {pinned:Option<Arc<RadarSet>>,index:usize}
 impl ContentPlugin for RadarContent {
     fn clone_box(&self) -> Box<dyn ContentPlugin> {
         Box::new(self.clone())
     }
     fn id(&self) -> &'static str {
         ID
+    }
+    fn transient_input_ready(&self,ctx:&PluginContext,_:&str)->bool{self.slot(ctx).is_some_and(|s|s.browse.is_some())}
+    fn transient_view(&self,ctx:&PluginContext)->Option<crate::content::TransientView>{
+        let b=self.slot(ctx)?.browse.as_ref()?;Some(Box::new(RadarView{pinned:b.pinned.clone(),index:b.index}))
+    }
+    fn merge_transient_view(&mut self,ctx:&PluginContext,view:&dyn std::any::Any)->Result<(),ContentError>{
+        let view=view.downcast_ref::<RadarView>().ok_or(ContentError::Stale)?;
+        let slot=self.devices.get_mut(&ctx.token.device_id).ok_or(ContentError::Stale)?;
+        let b=slot.browse.as_mut().ok_or(ContentError::Stale)?;
+        if let Some(pin)=&view.pinned {b.pinned=Some(pin.clone());b.index=view.index;}else{b.cancel();}Ok(())
     }
     fn publish(
         &mut self,

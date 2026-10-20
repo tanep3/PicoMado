@@ -195,7 +195,7 @@ fn process_inner(
     }
     let token = current.as_ref().ok_or("hello_required")?;
     let waiting = std::time::Instant::now();
-    let mut guard = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Reader).map_err(|_| "unavailable")?;
+    let mut guard = crate::diagnostics::input_lock(&app,token,&message,crate::diagnostics::Domain::Reader).map_err(|_| "unavailable")?;
     *lock_wait = waiting.elapsed();
     if !guard.session_is_current(token) {
         return Err("stale_session");
@@ -541,7 +541,7 @@ async fn send_frame_packet<S>(
                 Some(command)=>{*pending=Some(command);control=Some(tokio::time::Instant::now()+SEND_TIMEOUT);},
             },
             _=tick.tick()=>{
-                if session.is_some_and(|(app,t)|!crate::diagnostics::lock(app,crate::diagnostics::Domain::Writer).is_ok_and(|a|a.session_is_current(t))){return Err(FrameWriteFailure::Session);}
+                if session.is_some_and(|(app,t)|!crate::diagnostics::read(app,crate::diagnostics::Domain::Writer).is_ok_and(|a|a.session_is_current(t))){return Err(FrameWriteFailure::Session);}
             },
         }
     }
@@ -554,7 +554,7 @@ fn enqueue_outbox(
     next_packet_id: &mut u64,
     plans: &mut std::collections::BTreeMap<u64, FramePlan>,
 ) -> Result<bool, ()> {
-    let effects = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).map_err(|_| ())?.pending_effects();
+    let effects = crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).map_err(|_| ())?.pending_effects();
     let pending: std::collections::BTreeSet<_> = effects.iter().map(|(id, _)| *id).collect();
     queue.retain_effects(&pending);
     plans.retain(|id, _| pending.contains(id));
@@ -589,9 +589,7 @@ fn enqueue_outbox(
                 controls += 1;
             }
             Effect::CloseSession(target) if target == *token => {
-                crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer)
-                    .map_err(|_| ())?
-                    .complete_effect(id)
+                app.complete_delivery_effect(id)
                     .map_err(|_| ())?;
                 return Ok(true);
             }
@@ -601,9 +599,7 @@ fn enqueue_outbox(
                 ..
             } if incarnation == token.incarnation => {
                 queue.drop_video_through(&token.device_id, incarnation, through_display_epoch);
-                crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer)
-                    .map_err(|_| ())?
-                    .complete_effect(id)
+                app.complete_delivery_effect(id)
                     .map_err(|_| ())?;
             }
             Effect::SendFrame {
@@ -616,7 +612,7 @@ fn enqueue_outbox(
                 && frame.session_epoch == token.session_epoch =>
             {
                 let asset = {
-                    let guard = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).map_err(|_| ())?;
+                    let guard = crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).map_err(|_| ())?;
                     if guard.frame_is_current(&frame) {
                         guard
                             .frame_asset(&asset_handle)
@@ -747,7 +743,7 @@ async fn writer_loop_with_progress<S>(
     let mut next_packet_id = 1;
     let mut plans = std::collections::BTreeMap::<u64, FramePlan>::new();
     let mut progress = std::collections::BTreeMap::<u64, FrameProgress>::new();
-    let mut changes = match crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer) {
+    let mut changes = match crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer) {
         Ok(guard) => guard.dispatch_notifications(),
         Err(_) => return "application_unavailable",
     };
@@ -765,11 +761,11 @@ async fn writer_loop_with_progress<S>(
             command=async {if pending_command.is_some(){pending_command.take()}else{rx.recv().await}}=>match command {
                 #[cfg(test)]
                 Some(WriterCommand::Bind(token))=>{
-                    video_rx=crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).ok().and_then(|mut a|a.subscribe_lcd_video(&token));
+                    video_rx=crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).ok().and_then(|a|a.published_video_receiver(&token));
                     current=Some(token);refresh=true;video_pending=true;
                 },
                 Some(WriterCommand::BoundReply(token,reply))=>{
-                    video_rx=crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).ok().and_then(|mut a|a.subscribe_lcd_video(&token));
+                    video_rx=crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).ok().and_then(|a|a.published_video_receiver(&token));
                     current=Some(token);refresh=true;video_pending=true;
                     // This internal reply is ready before every refresh branch,
                     // independent of when the producer next gets scheduled.
@@ -813,7 +809,7 @@ async fn writer_loop_with_progress<S>(
             _=tick.tick()=>{
                 refresh=true;
                 if let (Some(token),Some((frame_id,deadline)))=(&current,awaiting_render) {
-                    if !crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).is_ok_and(|guard|guard.frame_waiting_for_render(token,frame_id)) { awaiting_render=None; }
+                    if !crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).is_ok_and(|guard|guard.frame_waiting_for_render(token,frame_id)) { awaiting_render=None; }
                     else if tokio::time::Instant::now()>=deadline {
                         eprintln!("picomado render_ack_timeout id={} incarnation={} session_epoch={} frame_id={}",token.device_id,token.incarnation,token.session_epoch,frame_id);
                         break "render_ack_timeout";
@@ -823,14 +819,14 @@ async fn writer_loop_with_progress<S>(
             _=std::future::ready(()),if refresh && current.is_some()=>{
                 refresh=false;
                 let token=current.as_ref().expect("bound");
-                if !crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).is_ok_and(|guard|guard.session_is_current(token)) {break "session_not_current";}
+                if !crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).is_ok_and(|guard|guard.session_is_current(token)) {break "session_not_current";}
                 match enqueue_outbox(&app,token,&mut queue,&mut next_packet_id,&mut plans) {
                     Ok(true)=>break "close_session_effect",
                     Err(())=>break "enqueue_failed",
                     Ok(false)=>{},
                 }
                 let stale: Vec<_> = progress.keys().copied().filter(|id|
-                    !crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).is_ok_and(|guard|guard.effect_pending(*id))).collect();
+                    !crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).is_ok_and(|guard|guard.effect_pending(*id))).collect();
                 for id in stale {
                     if let Some(frame)=progress.remove(&id) {
                         log_frame_end(&token.device_id,id,frame,"effect_cancelled");
@@ -841,7 +837,7 @@ async fn writer_loop_with_progress<S>(
                 video_pending=false;
                 let latest=video_rx.as_mut().and_then(|r|r.borrow_and_update().clone());
                 if let Some(frame)=latest {
-                    if crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).is_ok_and(|a|a.lcd_video_is_current(&frame)) {
+                    if crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).is_ok_and(|a|a.lcd_video_is_current(&frame)) {
                         // A new video supersedes the initial static placeholder;
                         // no application ACK may hold streaming or its connection.
                         awaiting_render=None;
@@ -850,7 +846,7 @@ async fn writer_loop_with_progress<S>(
                         crate::diagnostics::duration(crate::diagnostics::Kind::LogIo,diagnostic_log,0,0,0);
                         crate::diagnostics::event(crate::diagnostics::Kind::FrameStart,frame.token.session_epoch,frame.token.frame_id,frame.sequence,frame.generation,0);
                         #[cfg(feature="boundary-observation")]
-                        let cause=crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).ok().and_then(|a|{
+                        let cause=crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).ok().and_then(|a|{
                             let cause=a.frame_observation_cause(&frame.token);
                             a.observation_source().record_context(crate::observation::Component::Frame,crate::observation::Phase::Pending,0,0,0,0,frame.token.frame_id,cause);
                             cause
@@ -863,7 +859,7 @@ async fn writer_loop_with_progress<S>(
             },
             _=tokio::task::yield_now(),if video_active.is_some()=>{
                 let token=current.as_ref().expect("bound stream");
-                if !crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).is_ok_and(|a|a.session_is_current(token)) {break "session_not_current";}
+                if !crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).is_ok_and(|a|a.session_is_current(token)) {break "session_not_current";}
                 let active=video_active.as_mut().expect("active stream");
                 // Once started, finish all chunks. Selection controls can be
                 // interleaved only at complete application/WS message boundaries.
@@ -890,7 +886,7 @@ async fn writer_loop_with_progress<S>(
             _=tokio::task::yield_now(),if video_active.is_none() && current.as_ref().is_some_and(|t|queue.bytes(&t.device_id)>0)=>{
                 let token=current.as_ref().expect("bound");
                 let Some(packet)=queue.pop_for(&token.device_id) else {continue;};
-                let valid={let Ok(guard)=crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer) else {break "application_unavailable";};
+                let valid={let Ok(guard)=crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer) else {break "application_unavailable";};
                     if !guard.session_is_current(token) {false} else {
                         guard.pending_effects().into_iter().find(|(id,_)|*id==packet.outbox_id)
                             .is_some_and(|(_,effect)|match effect {
@@ -938,15 +934,9 @@ async fn writer_loop_with_progress<S>(
                 if packet.finish_effect {
                     let io_complete = std::time::Instant::now();
                     let waiting = std::time::Instant::now();
-                    let mut lock_wait = Duration::ZERO;
-                    let mut completion_time = Duration::ZERO;
-                    let completed=crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).ok().and_then(|mut guard| {
-                        lock_wait = waiting.elapsed();
-                        let started = std::time::Instant::now();
-                        let result = guard.complete_effect(packet.outbox_id).ok();
-                        completion_time = started.elapsed();
-                        result
-                    });
+                    let outcome=app.complete_delivery_effect(packet.outbox_id);
+                    let completion_time=waiting.elapsed();
+                    let (completed,lock_wait)=match outcome {Ok((changed,wait))=>(Some(changed),wait),Err(_)=>(None,Duration::ZERO)};
                     if let Some(frame) = progress.get(&packet.outbox_id) {
                         eprintln!("picomado frame_socket_sent id={} effect_id={} frame_id={} socket_elapsed_us={} completion_lock_wait_us={} completion_us={}",
                             token.device_id, packet.outbox_id, frame.plan.frame_id,
@@ -1021,7 +1011,7 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
     let mut end_detail = "none";
     let mut diagnostics = AckDiagnostics::default();
     #[cfg(feature="boundary-observation")]
-    let observations=app.lock().ok().map(|app|app.observation_source());
+    let observations=app.read().ok().map(|app|app.observation_source());
     #[cfg(not(feature="boundary-observation"))]
     let observations:Option<crate::observation::Source>=None;
     eprintln!("picomado websocket_open connection_id={} accept_order={} order_source={}", connection_id, accept_order, order_source);
@@ -1200,7 +1190,7 @@ mod tests {
     #[tokio::test]
     async fn real_websocket_lcd_video_continues_without_any_frame_ack() {
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+        let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
             &temp.path().join("state.db"),
         )));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1300,7 +1290,7 @@ mod tests {
     #[test]
     fn lcd_and_eink_dispatch_use_independent_dimensions_format_crc_and_bytes() {
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(std::sync::Mutex::new(
+        let app = Arc::new(crate::shared::Application::new(
             crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap(),
         ));
         for (id, cap, size, dimensions, format) in [
@@ -1359,7 +1349,7 @@ mod tests {
     async fn http_settings_push_weather_and_logo_to_lcd_and_eink_without_reconnect() {
         for cap in ["lcd", "eink"] {
             let temp = tempfile::tempdir().unwrap();
-            let app = Arc::new(std::sync::Mutex::new(
+            let app = Arc::new(crate::shared::Application::new(
                 App::open_with_clock(&temp.path().join("state.db"), Arc::new(FixtureClock))
                     .unwrap(),
             ));
@@ -1502,7 +1492,7 @@ mod tests {
     fn input_context_tracks_current_mode_generation_and_keeps_legacy_wire_compatible() {
         for cap in ["lcd", "eink"] {
             let temp = tempfile::tempdir().unwrap();
-            let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+            let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
                 &temp.path().join("state.db"),
             )));
             let mut current = None;
@@ -1624,7 +1614,7 @@ mod tests {
     async fn binary_negotiation_delivers_lcd_and_eink_pixels_and_both_acks() {
         for cap in ["lcd", "eink"] {
             let temp = tempfile::tempdir().unwrap();
-            let app = Arc::new(std::sync::Mutex::new(
+            let app = Arc::new(crate::shared::Application::new(
                 App::open_with_clock(&temp.path().join("state.db"), Arc::new(FixtureClock))
                     .unwrap(),
             ));
@@ -1711,7 +1701,7 @@ mod tests {
         let frame = state
             .queue_lcd_frame(&session, "youtube", vec![0; 25600])
             .unwrap();
-        let app = Arc::new(std::sync::Mutex::new(state));
+        let app = Arc::new(crate::shared::Application::new(state));
         let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
         let count = Arc::new(AtomicUsize::new(0));
         let (tx, rx) = tokio::sync::mpsc::channel(32);
@@ -1823,7 +1813,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let mut state = crate::test_support::manual_frames_app(&temp.path().join("db")).unwrap();
         let token = state.hello("welcome", ["lcd".into()].into(), 1).unwrap();
-        let app = Arc::new(std::sync::Mutex::new(state));
+        let app = Arc::new(crate::shared::Application::new(state));
         let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
         let count = Arc::new(AtomicUsize::new(0));
         let (tx, rx) = tokio::sync::mpsc::channel(1);
@@ -1876,7 +1866,7 @@ mod tests {
     #[tokio::test]
     async fn non_reading_writer_times_out_without_delaying_fast_peer_input() {
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(std::sync::Mutex::new(
+        let app = Arc::new(crate::shared::Application::new(
             crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap(),
         ));
         let (slow, fast) = {
@@ -2001,7 +1991,7 @@ mod tests {
     fn dispatch_fragments_obey_receiver_generation_during_owner_transitions() {
         for scenario in ["switch", "cancel", "standby", "reconnect"] {
             let temp = tempfile::tempdir().unwrap();
-            let app = Arc::new(std::sync::Mutex::new(
+            let app = Arc::new(crate::shared::Application::new(
                 crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap(),
             ));
             let token = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer)
@@ -2140,7 +2130,7 @@ mod tests {
     #[tokio::test]
     async fn blocked_terminal_still_processes_input_while_other_terminal_gets_two_frames() {
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(std::sync::Mutex::new(
+        let app = Arc::new(crate::shared::Application::new(
             crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap(),
         ));
         let (slow_tx, mut slow_rx) = tokio::sync::mpsc::channel(16);
@@ -2304,7 +2294,7 @@ mod tests {
     #[tokio::test]
     async fn failed_writer_ends_reader_session_and_reconnect_resends_cached_image() {
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+        let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
             &temp.path().join("state.db"),
         )));
         crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer)
@@ -2507,7 +2497,7 @@ mod tests {
         ];
         for (messages, expected) in cases {
             let temp = tempfile::tempdir().unwrap();
-            let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+            let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
                 &temp.path().join("state.db"),
             )));
             let reason = serve_split(
@@ -2527,7 +2517,7 @@ mod tests {
     #[tokio::test]
     async fn future_ack_is_a_protocol_error_not_a_delayed_ack() {
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+        let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
             &temp.path().join("state.db"),
         )));
         let mut bound = None;
@@ -2580,7 +2570,7 @@ mod tests {
         // Use a fresh real reader/writer pair to verify the fatal response and
         // session shutdown, rather than merely checking the classifier.
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+        let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
             &temp.path().join("state.db"),
         )));
         let (input, mut incoming) = tokio::sync::mpsc::channel(4);
@@ -2696,7 +2686,7 @@ mod tests {
     #[tokio::test]
     async fn video_blocked_writer_finishes_started_frame_then_latest_and_does_not_block_peer() {
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+        let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
             &temp.path().join("state.db"),
         )));
         let caps = std::collections::BTreeSet::from([
@@ -2837,7 +2827,7 @@ mod tests {
     #[tokio::test]
     async fn burst_switch_inputs_keep_ordered_responses_while_old_image_is_blocked() {
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+        let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
             &temp.path().join("state.db"),
         )));
         let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -3009,7 +2999,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let mut state = app_at_fixture_date(&temp.path().join("state.db"));
         let session = state.hello("desk", ["lcd".into()].into(), 1).unwrap();
-        let app = Arc::new(std::sync::Mutex::new(state));
+        let app = Arc::new(crate::shared::Application::new(state));
         let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
         let count = Arc::new(AtomicUsize::new(0));
         let open = Arc::new(AtomicBool::new(false));
@@ -3136,7 +3126,7 @@ mod tests {
     #[tokio::test]
     async fn delayed_and_duplicate_acks_keep_the_current_session_alive() {
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+        let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
             &temp.path().join("state.db"),
         )));
         let (input, mut incoming) = tokio::sync::mpsc::channel(16);
@@ -3307,7 +3297,7 @@ mod tests {
     #[tokio::test]
     async fn mock_terminal_hello_settings_input_reconnect_and_old_session_guard() {
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(std::sync::Mutex::new(
+        let app = Arc::new(crate::shared::Application::new(
             crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap(),
         ));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -3499,7 +3489,7 @@ mod tests {
     #[tokio::test]
     async fn cached_weather_frame_reaches_fast_mock_with_both_acks_despite_slow_peer() {
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+        let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
             &temp.path().join("state.db"),
         )));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -3716,7 +3706,7 @@ mod tests {
     #[tokio::test]
     async fn weather_buttons_pin_browse_stop_at_edges_and_cancel_to_latest_today() {
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+        let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
             &temp.path().join("state.db"),
         )));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -3921,7 +3911,7 @@ mod tests {
     #[tokio::test]
     async fn radar_mock_terminal_browses_real_hourly_frames_and_cancels_to_latest_observation() {
         let temp = tempfile::tempdir().unwrap();
-        let app = Arc::new(std::sync::Mutex::new(
+        let app = Arc::new(crate::shared::Application::new(
             crate::test_support::manual_frames_app(&temp.path().join("state.db")).unwrap(),
         ));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -4177,7 +4167,7 @@ mod tests {
     async fn audit_writer(hold:Duration,per_packet:bool,with_reply:bool)->(&'static str,Duration,usize,Option<Duration>){
         crate::diagnostics::start_from_env();
         let tmp=tempfile::tempdir().unwrap();
-        let app=Arc::new(std::sync::Mutex::new(app_at_fixture_date(&tmp.path().join("audit.db"))));
+        let app=Arc::new(crate::shared::Application::new(app_at_fixture_date(&tmp.path().join("audit.db"))));
         let caps=["lcd".into(),crate::protocol::FRAME_BYTES_CAPABILITY.into(),crate::protocol::LCD_PUSH_CAPABILITY.into()].into();
         let token=app.lock().unwrap().hello("cache-audit",caps,1).unwrap();
         let recorded=Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -4252,7 +4242,7 @@ mod tests {
         let _serial=DIAGNOSTIC_FIXTURE.lock().unwrap();
         crate::diagnostics::start_from_env();
         let tmp=tempfile::tempdir().unwrap();
-        let app=Arc::new(std::sync::Mutex::new(app_at_fixture_date(&tmp.path().join("err.db"))));
+        let app=Arc::new(crate::shared::Application::new(app_at_fixture_date(&tmp.path().join("err.db"))));
         let caps=["lcd".into(),crate::protocol::FRAME_BYTES_CAPABILITY.into(),crate::protocol::LCD_PUSH_CAPABILITY.into()].into();
         let token=app.lock().unwrap().hello("cache-error",caps,1).unwrap();
         let (tx,rx)=tokio::sync::mpsc::channel(32);
@@ -4284,7 +4274,7 @@ mod tests {
         let _serial=DIAGNOSTIC_FIXTURE.lock().unwrap();crate::diagnostics::test_enable();
         crate::diagnostics::start_from_env();
         let tmp=tempfile::tempdir().unwrap();
-        let app=Arc::new(std::sync::Mutex::new(app_at_fixture_date(&tmp.path().join("late.db"))));
+        let app=Arc::new(crate::shared::Application::new(app_at_fixture_date(&tmp.path().join("late.db"))));
         let caps=["lcd".into(),crate::protocol::FRAME_BYTES_CAPABILITY.into(),crate::protocol::LCD_PUSH_CAPABILITY.into()].into();
         let token=app.lock().unwrap().hello("late-poll",caps,1).unwrap();
         app.lock().unwrap().queue_lcd_video(&token,12,1,1,vec![0;25600]).unwrap();
@@ -4306,7 +4296,7 @@ mod tests {
         let _serial=DIAGNOSTIC_FIXTURE.lock().unwrap();crate::diagnostics::test_enable();
         crate::diagnostics::start_from_env();
         let tmp=tempfile::tempdir().unwrap();
-        let app=Arc::new(std::sync::Mutex::new(app_at_fixture_date(&tmp.path().join("reply.db"))));
+        let app=Arc::new(crate::shared::Application::new(app_at_fixture_date(&tmp.path().join("reply.db"))));
         let token=app.lock().unwrap().hello("reply-error",["lcd".into()].into(),1).unwrap();
         let (tx,rx)=tokio::sync::mpsc::channel(32);
         tx.send(WriterCommand::Bind(token)).await.unwrap();
@@ -4328,6 +4318,7 @@ mod tests {
     include!("../tests/support/transport_recovery.rs");
     mod hello_order { use super::*; include!("../tests/support/hello_order.rs"); }
     include!("../tests/support/ack_probe_reader.rs");
+    include!("persistence_contract_tests.rs");
 
     #[cfg(feature="boundary-observation")]
     include!("causal_contract_tests.rs");

@@ -25,7 +25,7 @@ pub async fn run_work(
     executors: Executors,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), AppError> {
-    let mut notifications = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Work)
+    let mut notifications = crate::diagnostics::read(&app, crate::diagnostics::Domain::Work)
         .map_err(|_| AppError::Conflict("application unavailable"))?
         .work_notifications();
     let mut tasks = JoinSet::new();
@@ -50,7 +50,7 @@ pub async fn run_work(
             };
             for job in jobs {
                 let token = job.token.clone();
-                let paths = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Work)
+                let paths = crate::diagnostics::read(&app, crate::diagnostics::Domain::Work)
                     .map_err(|_| AppError::Conflict("application unavailable"))?
                     .plugin_paths(&token.plugin)
                     .ok_or(AppError::NotFound)?;

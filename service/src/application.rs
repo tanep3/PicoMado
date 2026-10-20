@@ -57,7 +57,7 @@ struct Runtime {
     order_revision: u64,
     outbox: BTreeMap<u64, Effect>,
     next_effect_id: u64,
-    plugin_states: BTreeMap<String, serde_json::Value>,
+    plugin_states: BTreeMap<String, Arc<serde_json::Value>>,
     jobs: crate::plugin_jobs::JobState,
     managed_revisions: BTreeMap<String, u64>,
 }
@@ -141,7 +141,7 @@ impl From<&Runtime> for StoredState {
             order_revision: state.order_revision,
             outbox: state.outbox.clone(),
             next_effect_id: state.next_effect_id,
-            plugin_states: state.plugin_states.clone(),
+            plugin_states: state.plugin_states.iter().map(|(k,v)|(k.clone(),v.as_ref().clone())).collect(),
             jobs: state.jobs.clone(),
             managed_revisions: state.managed_revisions.clone(),
         }
@@ -199,7 +199,7 @@ impl Runtime {
             order_revision: stored.order_revision,
             outbox: stored.outbox,
             next_effect_id: stored.next_effect_id,
-            plugin_states: stored.plugin_states,
+            plugin_states: stored.plugin_states.into_iter().map(|(k,v)|(k,Arc::new(v))).collect(),
             jobs: stored.jobs,
             managed_revisions: stored.managed_revisions,
         };
@@ -288,6 +288,23 @@ impl Runtime {
     }
 }
 
+fn same_durable_projection(a:&Runtime,b:&Runtime)->bool {
+    a.world.next_incarnation==b.world.next_incarnation && a.world.plugin_order==b.world.plugin_order
+        && a.order_revision==b.order_revision && a.settings==b.settings
+        && a.plugin_states.len()==b.plugin_states.len() && a.plugin_states.iter().all(|(k,v)|b.plugin_states.get(k).is_some_and(|w|Arc::ptr_eq(v,w)||v.as_ref()==w.as_ref())) && a.jobs==b.jobs && a.managed_revisions==b.managed_revisions
+        && a.world.devices.len()==b.world.devices.len()
+        && a.world.devices.iter().all(|(id,x)|b.world.devices.get(id).is_some_and(|y|
+            x.incarnation==y.incarnation && x.capabilities==y.capabilities && x.enabled==y.enabled
+            && x.selected==y.selected && x.session_epoch==y.session_epoch && x.settings_revision==y.settings_revision
+            && x.requests==y.requests && x.datasets==y.datasets))
+}
+
+struct InputClock {unix:i64,today:String}
+impl crate::fetch::Clock for InputClock {
+    fn unix_seconds(&self)->i64{self.unix}
+    fn today_jst(&self)->String{self.today.clone()}
+}
+
 fn effect_current(world: &World, settings: &SettingsStore, effect: &Effect) -> bool {
     match effect {
         Effect::CloseSession(_) | Effect::DropQueuedFrames { .. } => true,
@@ -341,9 +358,18 @@ fn valid_order(order: &[String], catalog: &[String]) -> bool {
         && order.iter().all(|id| catalog.contains(id))
 }
 
+#[cfg(test)]
+type PersistenceHook=Box<dyn FnOnce()->Result<(),AppError>+Send>;
+
 pub struct App {
-    connection: Connection,
-    engine: Engine,
+    connection: Arc<std::sync::Mutex<Connection>>,
+    engine: Arc<Engine>,
+    frame_counter: Arc<std::sync::Mutex<u64>>,
+    effect_counter: Arc<std::sync::Mutex<u64>>,
+    transient_only: bool,
+    transient_changed: bool,
+    input_fences: BTreeMap<String,u64>,
+    #[cfg(test)] persistence_hook:Arc<std::sync::Mutex<Option<PersistenceHook>>>,
     plugin_catalog: Vec<String>,
     observations: crate::observation::Source,
     observation_parent: u64,
@@ -356,11 +382,11 @@ pub struct App {
     clock: Arc<dyn crate::fetch::Clock + Send + Sync>,
     /// Completed LCD pixels are transient; only validated handles enter the sender.
     frame_assets: BTreeMap<String, Arc<Vec<u8>>>,
-    video_slots: BTreeMap<String, crate::lcd_stream::VideoSlot>,
+    video_slots: BTreeMap<String, Arc<std::sync::Mutex<crate::lcd_stream::VideoSlot>>>,
     contents: BTreeMap<String, Box<dyn ContentPlugin>>,
     timed_frames: BTreeMap<String, (crate::DisplayToken, i64)>,
-    dispatch: tokio::sync::watch::Sender<()>,
-    work_signal: tokio::sync::watch::Sender<()>,
+    dispatch: crate::shared::Signal,
+    work_signal: crate::shared::Signal,
     plugin_root: PathBuf,
     mono_origin: std::time::Instant,
     persistence_us: u128,
@@ -471,13 +497,21 @@ impl App {
         for (id, value) in &runtime.plugin_states {
             if let Some(plugin) = contents.get_mut(id) {
                 plugin
-                    .load_state(value.clone())
+                    .load_state(value.as_ref().clone())
                     .map_err(|_| AppError::Conflict("invalid plugin state"))?;
             }
         }
+        let frame_counter=Arc::new(std::sync::Mutex::new(runtime.world.next_frame_id));
+        let effect_counter=Arc::new(std::sync::Mutex::new(runtime.next_effect_id));
         Ok(Self {
-            connection,
-            engine: plugins.engine,
+            connection:Arc::new(std::sync::Mutex::new(connection)),
+            engine: Arc::new(plugins.engine),
+            frame_counter,
+            effect_counter,
+            transient_only:false,
+            transient_changed:false,
+            input_fences:BTreeMap::new(),
+            #[cfg(test)] persistence_hook:Arc::new(std::sync::Mutex::new(None)),
             plugin_catalog: plugins.order,
             observations: crate::observation::Source::default(),
             observation_parent: 0,
@@ -492,8 +526,8 @@ impl App {
             video_slots: BTreeMap::new(),
             contents,
             timed_frames: BTreeMap::new(),
-            dispatch: tokio::sync::watch::channel(()).0,
-            work_signal: tokio::sync::watch::channel(()).0,
+            dispatch: crate::shared::Signal::new(),
+            work_signal: crate::shared::Signal::new(),
             plugin_root: root.to_owned(),
             mono_origin: std::time::Instant::now(),
             persistence_us: 0,
@@ -504,7 +538,53 @@ impl App {
         })
     }
 
-    fn persist(connection: &mut Connection, runtime: &Runtime) -> Result<(), AppError> {
+    #[cfg(test)]
+    pub(crate) fn pause_next_persistence(&self,hook:PersistenceHook){*self.persistence_hook.lock().unwrap()=Some(hook);}
+    pub(crate) fn published_snapshot(&self)->Self {
+        Self {
+            connection:self.connection.clone(),
+            engine:self.engine.clone(),
+            frame_counter:self.frame_counter.clone(),
+            effect_counter:self.effect_counter.clone(),
+            transient_only:self.transient_only,
+            transient_changed:false,
+            input_fences:self.input_fences.clone(),
+            #[cfg(test)] persistence_hook:self.persistence_hook.clone(),
+            plugin_catalog:self.plugin_catalog.clone(),
+            observations:self.observations.clone(),
+            observation_parent:self.observation_parent.clone(),
+            observation_cause:self.observation_cause.clone(),
+            runtime:self.runtime.clone(),
+            clock:self.clock.clone(),
+            frame_assets:self.frame_assets.clone(),
+            video_slots:self.video_slots.clone(),
+            contents:self.contents.clone(),
+            timed_frames:self.timed_frames.clone(),
+            dispatch:self.dispatch.clone(),
+            work_signal:self.work_signal.clone(),
+            plugin_root:self.plugin_root.clone(),
+            mono_origin:self.mono_origin.clone(),
+            persistence_us:self.persistence_us.clone(),
+            image_preparation_us:self.image_preparation_us.clone(),
+            hello_accept_order:self.hello_accept_order.clone(),
+            #[cfg(feature="boundary-observation")] frame_causes:self.frame_causes.clone(),
+            #[cfg(feature="boundary-observation")] view_causes:self.view_causes.clone(),
+            #[cfg(feature="caricature-retention-delete")] last_retention_day:self.last_retention_day.clone(),
+        }
+    }
+    pub(crate) fn defer_publication_signals(&self){self.dispatch.defer();self.work_signal.defer();}
+    pub(crate) fn resume_publication_signals(&self){self.dispatch.resume();self.work_signal.resume();}
+    pub(crate) fn reconcile_video_slots(&self){
+        for (id,slot) in &self.video_slots {
+            if let Ok(mut slot)=slot.lock(){
+                let keep=self.runtime.world.devices.get(id).is_some_and(|d|session_current(d,&slot.session) && d.owner==Owner::Remote && matches!(d.mode,Mode::Normal|Mode::Sub));
+                let stale=!keep || slot.latest.borrow().as_ref().is_some_and(|f|!frame_current(&self.runtime.world.devices[id],&f.token));
+                if stale{slot.clear();}
+            }
+        }
+    }
+    fn persist(connection:&mut Connection,runtime:&Runtime)->Result<(),AppError>{Self::persist_with_hook(connection,runtime,||Ok(()))}
+    fn persist_with_hook(connection:&mut Connection,runtime:&Runtime,before_commit:impl FnOnce()->Result<(),AppError>)->Result<(),AppError>{
         let diagnostic_started=crate::diagnostics::mark();
         let started = std::time::Instant::now();
         let body = serde_json::to_string(&StoredState::from(runtime))?;
@@ -516,6 +596,7 @@ impl App {
              ON CONFLICT(id) DO UPDATE SET body = excluded.body",
             params![body],
         )?;
+        before_commit()?;
         transaction.commit()?;
         let elapsed = started.elapsed();
         crate::diagnostics::duration(crate::diagnostics::Kind::Persist,diagnostic_started,0,0,0);
@@ -535,6 +616,10 @@ impl App {
         let operation = self.record_observation(Component::State, Phase::Received, 0, self.observation_parent, before, 0);
         let first_effect = self.runtime.next_effect_id;
         let mut next = self.runtime.clone();
+        let mut frame_counter=self.frame_counter.lock().map_err(|_|AppError::Conflict("frame allocator unavailable"))?;
+        let mut effect_counter=self.effect_counter.lock().map_err(|_|AppError::Conflict("effect allocator unavailable"))?;
+        next.world.next_frame_id=next.world.next_frame_id.max(*frame_counter);
+        next.next_effect_id=next.next_effect_id.max(*effect_counter);
         let result = match action(&self.engine, &mut next) {
             Ok(value) => value,
             Err(error) => {
@@ -542,17 +627,45 @@ impl App {
                 return Err(error);
             }
         };
+        *frame_counter=(*frame_counter).max(next.world.next_frame_id);drop(frame_counter);
+        *effect_counter=(*effect_counter).max(next.next_effect_id);drop(effect_counter);
         next.prune_stale_effects();
         self.record_observation(Component::State, Phase::Dispatched, operation, 0, next.world.revision, next.outbox.len() as u64);
+        let next_fences=if !self.transient_only {
+            let mut fences=self.input_fences.clone();
+            for (id,after) in &next.world.devices {
+                if self.runtime.world.devices.get(id).is_none_or(|before|
+                    before.incarnation!=after.incarnation || before.session_epoch!=after.session_epoch
+                    || before.settings_revision!=after.settings_revision || before.selected!=after.selected
+                    || before.enabled!=after.enabled || before.capabilities!=after.capabilities
+                    || before.mode!=after.mode || before.owner!=after.owner || before.online!=after.online
+                    || before.screen_owner_epoch!=after.screen_owner_epoch) {
+                    let fence=fences.entry(id.clone()).or_default();*fence=fence.checked_add(1).ok_or(AppError::Conflict("input fence exhausted"))?;
+                }
+            }
+            Some(fences)
+        }else{None};
         let saving = std::time::Instant::now();
-        if let Err(error) = Self::persist(&mut self.connection, &next) {
+        if self.transient_only && !same_durable_projection(&self.runtime,&next) {
+            return Err(AppError::Conflict("transient operation requires persistence"));
+        }
+        let persisted=if self.transient_only {Ok(())}else{crate::shared::blocking(||{
+            let mut connection=self.connection.lock().map_err(|_|AppError::Conflict("storage unavailable"))?;
+            Self::persist_with_hook(&mut connection,&next,||{
+                #[cfg(test)] if let Some(hook)=self.persistence_hook.lock().map_err(|_|AppError::Conflict("storage hook unavailable"))?.take(){hook()?;}
+                Ok(())
+            })
+        })};
+        if let Err(error) = persisted {
             self.record_observation(Component::State, Phase::Error, operation, 0, before, 0);
             return Err(error);
         }
-        self.persistence_us = self.persistence_us.saturating_add(saving.elapsed().as_micros());
+        if !self.transient_only {self.persistence_us = self.persistence_us.saturating_add(saving.elapsed().as_micros());}
         let revision = next.world.revision;
+        if let Some(fences)=next_fences{self.input_fences=fences;}
         self.runtime = next;
-        self.record_observation(Component::State, Phase::Committed, operation, 0, revision, 0);
+        if self.transient_only{self.transient_changed=true;}
+        self.record_observation(Component::State, Phase::Committed, operation, 0, revision, if self.transient_only {2}else{1});
         #[cfg(feature="boundary-observation")]
         for (_, effect) in self.runtime.outbox.range(first_effect..) {
             if let Effect::SendFrame{token,..}=effect {
@@ -572,27 +685,12 @@ impl App {
         }
         self.timed_frames
             .retain(|id, _| self.runtime.world.devices.contains_key(id));
-        for (id, slot) in &mut self.video_slots {
-            let keep = self.runtime.world.devices.get(id).is_some_and(|d| {
-                session_current(d, &slot.session)
-                    && d.owner == Owner::Remote
-                    && matches!(d.mode, Mode::Normal | Mode::Sub)
-            });
-            let stale = !keep
-                || slot
-                    .latest
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|f| !frame_current(&self.runtime.world.devices[id], &f.token));
-            if stale {
-                slot.clear();
-            }
-        }
+        self.reconcile_video_slots();
         self.frame_assets.retain(|handle, _| {
             self.runtime.outbox.values().any(|effect|
             matches!(effect, Effect::SendFrame { asset_handle, .. } if asset_handle == handle))
         });
-        self.dispatch.send_replace(());
+        if !self.transient_only {self.dispatch.send_replace(());}
         Ok(result)
     }
 
@@ -665,7 +763,7 @@ impl App {
                     let snapshot = content.save_state();
                     begin_pending_delete(&root, &id)?;
                     self.change(|_, state| {
-                        state.plugin_states.insert("caricature".into(), snapshot);
+                        state.plugin_states.insert("caricature".into(), Arc::new(snapshot));
                         let revision = state
                             .managed_revisions
                             .entry("caricature".into())
@@ -677,7 +775,8 @@ impl App {
                     })
                     .map_err(|_| crate::caricature::CaricatureError::Io)?;
                     self.contents.insert("caricature".into(), content);
-                    finish_pending_delete(&ledger, &cache, &self.connection, &id)?;
+                    let connection=self.connection.lock().map_err(|_|crate::caricature::CaricatureError::Io)?;
+                    finish_pending_delete(&ledger,&cache,&connection,&id)?;
                     removed += 1;
                     Ok(())
                 })
@@ -906,7 +1005,7 @@ impl App {
             .map_err(|_| AppError::Invalid("invalid plugin source"))?;
         let snapshot = content.save_state();
         self.change(|_, state| {
-            state.plugin_states.insert(plugin.into(), snapshot);
+            state.plugin_states.insert(plugin.into(), Arc::new(snapshot));
             Ok(())
         })?;
         self.contents.insert(plugin.into(), content);
@@ -974,7 +1073,7 @@ impl App {
             if !state.accept(decision)? {
                 return Err(AppError::Conflict("stale plugin config"));
             }
-            state.plugin_states.insert(plugin.into(), snapshot);
+            state.plugin_states.insert(plugin.into(), Arc::new(snapshot));
             Ok(())
         })?;
         self.contents.insert(plugin.into(), content);
@@ -1013,7 +1112,7 @@ impl App {
         }
         if !jobs.is_empty() {
             self.change(|_, state| {
-                state.plugin_states.extend(states);
+                state.plugin_states.extend(states.into_iter().map(|(k,v)|(k,Arc::new(v))));
                 Ok(())
             })?;
             self.contents = contents;
@@ -1031,7 +1130,7 @@ impl App {
             })
             .collect();
         self.change(|_, state| {
-            state.plugin_states.extend(states);
+            state.plugin_states.extend(states.into_iter().map(|(k,v)|(k,Arc::new(v))));
             Ok(())
         })?;
         self.contents = contents;
@@ -1088,7 +1187,7 @@ impl App {
                 )
                 .map_err(|_| AppError::Conflict("plugin data rejected"))?;
             state.accept(decision)?;
-            state.plugin_states.insert(job.plugin.clone(), snapshot);
+            state.plugin_states.insert(job.plugin.clone(), Arc::new(snapshot));
             Ok(())
         })?;
         self.contents.insert(job.plugin.clone(), content);
@@ -1175,9 +1274,10 @@ impl App {
 
     /// Queue the latest minute only after the preceding frame finishes. Late
     /// wakes never replay missed minutes and never invalidate an in-flight send.
-    pub fn refresh_timed_frames(&mut self) -> Result<usize, AppError> {
-        let now = self.clock.unix_seconds();
-        let targets: Vec<_> = self
+    pub(crate) fn timed_refresh_due(&self)->bool{!self.timed_frame_targets().is_empty()}
+    fn timed_frame_targets(&self)->Vec<SessionToken>{
+        let now=self.clock.unix_seconds();
+        self
             .runtime
             .world
             .devices
@@ -1201,10 +1301,11 @@ impl App {
                 display.settings_revision = 0;
                 (self.timed_frames.get(id) != Some(&(display, key))).then_some(ctx.token)
             })
-            .collect();
-        for token in &targets {
-            self.queue_selected_cached_frame(token)?;
-        }
+            .collect()
+    }
+    pub fn refresh_timed_frames(&mut self) -> Result<usize, AppError> {
+        let targets=self.timed_frame_targets();
+        for token in &targets {self.queue_selected_cached_frame(token)?;}
         Ok(targets.len())
     }
 
@@ -1417,7 +1518,7 @@ impl App {
                     .is_some_and(|id| states.contains_key(id));
             let selected = device.selected.clone();
             self.change(|engine, state| {
-                state.plugin_states.extend(states);
+                state.plugin_states.extend(states.into_iter().map(|(k,v)|(k,Arc::new(v))));
                 if changed_selected {
                     let id = selected.as_ref().expect("selected plugin");
                     let decision = engine
@@ -1471,7 +1572,8 @@ impl App {
         let slot = self
             .video_slots
             .entry(token.device_id.clone())
-            .or_insert_with(|| crate::lcd_stream::VideoSlot::new(token.clone()));
+            .or_insert_with(|| Arc::new(std::sync::Mutex::new(crate::lcd_stream::VideoSlot::new(token.clone()))));
+        let mut slot=slot.lock().ok()?;
         if slot.session != *token {
             *slot = crate::lcd_stream::VideoSlot::new(token.clone());
         }
@@ -1489,59 +1591,23 @@ impl App {
             })
     }
 
-    pub(super) fn queue_lcd_video(
-        &mut self,
-        session: &SessionToken,
-        fps: u32,
-        sequence: u64,
-        generation: u64,
-        pixels: Vec<u8>,
-    ) -> Result<(), AppError> {
-        if !self.supports_lcd_push(session) || fps == 0 || fps > crate::lcd_stream::MAX_FPS {
-            return Err(AppError::Invalid("unsupported LCD stream"));
-        }
-        let d = self
-            .runtime
-            .world
-            .devices
-            .get(&session.device_id)
-            .ok_or(AppError::NotFound)?;
-        let mode = match d.mode {
-            Mode::Normal => "normal",
-            Mode::Sub => "sub",
-            _ => return Err(AppError::Conflict("not remote")),
-        };
-        let token = FrameToken {
-            device_id: session.device_id.clone(),
-            incarnation: d.incarnation,
-            session_epoch: d.session_epoch,
-            display_epoch: d.display_epoch,
-            screen_owner_epoch: d.screen_owner_epoch,
-            frame_id: self.runtime.world.next_frame_id,
-        };
-        self.runtime.world.next_frame_id = self
-            .runtime
-            .world
-            .next_frame_id
-            .checked_add(1)
-            .ok_or(AppError::Conflict("frame counter exhausted"))?;
-        let pixels = Arc::new(self.compose_lcd_frame(&session.device_id, pixels));
-        let slot = self
-            .video_slots
-            .entry(session.device_id.clone())
-            .or_insert_with(|| crate::lcd_stream::VideoSlot::new(session.clone()));
-        if slot.session != *session {
-            *slot = crate::lcd_stream::VideoSlot::new(session.clone());
-        }
-        slot.publish(crate::lcd_stream::VideoFrame {
-            token,
-            fps,
-            sequence,
-            generation,
-            mode,
-            pixels,
-        });
-        Ok(())
+    pub(super) fn queue_lcd_video(&mut self,session:&SessionToken,fps:u32,sequence:u64,generation:u64,pixels:Vec<u8>)->Result<(),AppError>{
+        self.subscribe_lcd_video(session).ok_or(AppError::Invalid("unsupported LCD stream"))?;
+        {let mut counter=self.frame_counter.lock().map_err(|_|AppError::Conflict("frame allocator unavailable"))?;*counter=(*counter).max(self.runtime.world.next_frame_id);}
+        self.queue_published_lcd_video(session,fps,sequence,generation,pixels)?;
+        self.runtime.world.next_frame_id=self.runtime.world.next_frame_id.max(*self.frame_counter.lock().map_err(|_|AppError::Conflict("frame allocator unavailable"))?);Ok(())
+    }
+    pub(crate) fn queue_published_lcd_video(&self,session:&SessionToken,fps:u32,sequence:u64,generation:u64,pixels:Vec<u8>)->Result<(),AppError>{
+        if !self.supports_lcd_push(session)||fps==0||fps>crate::lcd_stream::MAX_FPS{return Err(AppError::Invalid("unsupported LCD stream"));}
+        let d=self.runtime.world.devices.get(&session.device_id).ok_or(AppError::NotFound)?;
+        let mode=match d.mode{Mode::Normal=>"normal",Mode::Sub=>"sub",_=>return Err(AppError::Conflict("not remote"))};
+        let frame_id={let mut counter=self.frame_counter.lock().map_err(|_|AppError::Conflict("frame allocator unavailable"))?;let id=*counter;*counter=counter.checked_add(1).ok_or(AppError::Conflict("frame counter exhausted"))?;id};
+        let token=FrameToken{device_id:session.device_id.clone(),incarnation:d.incarnation,session_epoch:d.session_epoch,display_epoch:d.display_epoch,screen_owner_epoch:d.screen_owner_epoch,frame_id};
+        let pixels=Arc::new(self.compose_lcd_frame(&session.device_id,pixels));
+        let slot=self.video_slots.get(&session.device_id).ok_or(AppError::Conflict("video slot unavailable"))?;
+        let mut slot=slot.lock().map_err(|_|AppError::Conflict("video slot unavailable"))?;
+        if slot.session!=*session{return Err(AppError::Conflict("stale video slot"));}
+        slot.publish(crate::lcd_stream::VideoFrame{token,fps,sequence,generation,mode,pixels});Ok(())
     }
 
     pub fn lcd_stream_status(&mut self, token: &FrameToken, generation: u64) -> bool {
@@ -1551,9 +1617,8 @@ impl App {
         if !frame_current(d, token) {
             return false;
         }
-        let Some(slot) = self.video_slots.get_mut(&token.device_id) else {
-            return false;
-        };
+        let Some(slot) = self.video_slots.get(&token.device_id) else {return false;};
+        let Ok(mut slot)=slot.lock()else{return false;};
         if slot.session.incarnation != token.incarnation
             || slot.session.session_epoch != token.session_epoch
             || slot.generation != generation
@@ -1662,7 +1727,7 @@ impl App {
     /// any allocated frame/display/owner generation are protocol violations.
     pub fn frame_ack_within_known_generations(&self, token: &FrameToken) -> bool {
         token.frame_id > 0
-            && token.frame_id < self.runtime.world.next_frame_id
+            && token.frame_id < self.frame_counter.lock().map(|n|*n).unwrap_or(self.runtime.world.next_frame_id)
             && self
                 .runtime
                 .world
@@ -1759,6 +1824,7 @@ impl App {
         }
         let today = self.clock.today_jst();
         self.observe_plugin_date(&token, &today)?;
+        if self.supports_lcd_push(&token){self.subscribe_lcd_video(&token);}
         self.queue_selected_cached_frame(&token)?;
         eprintln!(
             "picomado device_hello id={} incarnation={} session_epoch={}",
@@ -1824,7 +1890,7 @@ impl App {
             .map(|(name, plugin)| (name.clone(), plugin.save_state()))
             .collect();
         self.change(|_, state| {
-            state.plugin_states.extend(snapshots);
+            state.plugin_states.extend(snapshots.into_iter().map(|(k,v)|(k,Arc::new(v))));
             Ok(())
         })?;
         Ok(())
@@ -1866,7 +1932,7 @@ impl App {
                 }
                 state
                     .plugin_states
-                    .extend(contents.iter().map(|(id, p)| (id.clone(), p.save_state())));
+                    .extend(contents.iter().map(|(id, p)| (id.clone(), Arc::new(p.save_state()))));
             }
             Ok((reselected, token))
         })?;
@@ -2391,10 +2457,10 @@ mod tests {
             .change(|_, state| {
                 state
                     .plugin_states
-                    .insert("youtube".into(), serde_json::Value::Null);
+                    .insert("youtube".into(), Arc::new(serde_json::Value::Null));
                 state
                     .plugin_states
-                    .insert("caricature".into(), serde_json::Value::Null);
+                    .insert("caricature".into(), Arc::new(serde_json::Value::Null));
                 Ok(())
             })
             .unwrap();
@@ -2461,7 +2527,7 @@ mod tests {
             })
             .unwrap());
         let changes = |app: &App| {
-            app.connection
+            app.connection.lock().unwrap()
                 .query_row("SELECT total_changes()", [], |row| row.get::<_, u64>(0))
                 .unwrap()
         };
@@ -3180,7 +3246,7 @@ mod clock_tests {
             "youtube".into(),
             "caricature".into(),
         ];
-        App::persist(&mut app.connection, &app.runtime).unwrap();
+        App::persist(&mut app.connection.lock().unwrap(), &app.runtime).unwrap();
         drop(app);
         let mut app = App::open(&path).unwrap();
         assert_eq!(
@@ -3307,3 +3373,5 @@ mod clock_tests {
 #[cfg(test)]
 #[path="application_contract_tests.rs"]
 mod contract_tests;
+
+include!("application_live.rs");

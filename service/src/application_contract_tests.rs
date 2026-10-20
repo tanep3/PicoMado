@@ -381,7 +381,7 @@ async fn paused_fetch_preparation_allows_other_input_video_and_revalidates_lates
             timeout_seconds: 3,
             retries: 0,
         };
-        let app = Arc::new(std::sync::Mutex::new(state));
+        let app = Arc::new(crate::shared::Application::new(state));
         let worker_app = app.clone();
         let task = tokio::spawn(async move {
             crate::fetch::complete_fetched_source(&worker_app, &job, 100, Ok(vec![])).await
@@ -674,7 +674,7 @@ fn commit_prefix_fixture(path: &Path, root: &Path) -> (App, SessionToken) {
 
 fn assert_commit_prefix(app: &App, path: &Path, root: &Path, revision: u64) {
     let body: String = app
-        .connection
+        .connection.lock().unwrap()
         .query_row("SELECT body FROM app_state WHERE id=1", [], |r| r.get(0))
         .unwrap();
     let durable: serde_json::Value = serde_json::from_str(&body).unwrap();
@@ -715,7 +715,7 @@ fn multiple_commits_keep_successful_prefix_when_later_sqlite_save_fails() {
     let (mut app, token) = commit_prefix_fixture(&path, temp.path());
     let mut notifications = app.dispatch_notifications();
     let before = app.runtime.world.revision;
-    app.connection
+    app.connection.lock().unwrap()
         .execute_batch(
             "CREATE TEMP TABLE persist_count(n INTEGER NOT NULL);
              INSERT INTO persist_count VALUES(0);
@@ -731,7 +731,7 @@ fn multiple_commits_keep_successful_prefix_when_later_sqlite_save_fails() {
     let error = app.button(&token, ButtonAction::Down).unwrap_err();
     assert!(matches!(error, AppError::Internal(_)));
     let writes: i64 = app
-        .connection
+        .connection.lock().unwrap()
         .query_row("SELECT n FROM persist_count", [], |r| r.get(0))
         .unwrap();
     assert_eq!(writes, 1, "the second transaction must roll back");
@@ -774,3 +774,5 @@ fn multiple_commits_keep_successful_prefix_and_notification_after_later_panic() 
     notifications.borrow_and_update();
     assert!(!notifications.has_changed().unwrap());
 }
+
+include!("application_shared_contract_tests.rs");

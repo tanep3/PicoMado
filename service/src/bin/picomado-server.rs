@@ -3,7 +3,7 @@
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use picomado_core::{application::App, host::serve_plugins_on_listener};
 use serde::Deserialize;
@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::create_dir_all(config.plugins_root.join(plugin).join("data"))?;
         std::fs::create_dir_all(config.plugins_root.join(plugin).join("cache"))?;
     }
-    let app = Arc::new(Mutex::new(
+    let app = Arc::new(picomado_core::shared::Application::new(
         App::open_with_plugin_root(&config.database_path, &config.plugins_root)
             .map_err(|e| format!("database open failed: {e:?}"))?,
     ));

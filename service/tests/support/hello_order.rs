@@ -75,7 +75,7 @@ impl Sink<Message> for FailingReplySink {
 #[tokio::test]
 async fn delayed_older_hello_with_failed_reply_does_not_evict_active_video() {
     let temp = tempfile::tempdir().unwrap();
-    let app = Arc::new(std::sync::Mutex::new(app_at_fixture_date(
+    let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
         &temp.path().join("state.db"),
     )));
     // The progress handles are created at simulated TCP accept. Older HTTP/WS

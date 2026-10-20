@@ -24,6 +24,7 @@ pub mod queue;
 pub mod radar;
 pub mod runner;
 pub mod settings;
+pub mod shared;
 pub mod time_frames;
 pub mod transport;
 pub mod weather;

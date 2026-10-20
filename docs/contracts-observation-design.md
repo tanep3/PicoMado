@@ -57,7 +57,7 @@ Pico は既存 trace の32件キューを共用する。EV1 有効後は通常�
 | 追跡項目 | 修正範囲・完了条件 |
 | --- | --- |
 | D-01 取得完了の重い処理 | 組込みweather/radarのprepare/apply分離を実装。独立レビュー後にsession束縛とnative E-inkの事前生成を追加し、245件unit成功。待機中の別端末入力・動画packet生成、設定/削除/取消し/再接続後着拒否、apply中full render 0回を確認。fetch-completion-isolation-verification.md参照。legacy拡張defaultと保存経路の限界を明記し、実機の遅延解消とはしない。 |
-| D-02 全状態の同期保存 | 未修正。設計第3節の原子性を保ち、serialize/commit/公開、競合改訂、失敗、crash/replayを先に設計する。ディスク待ちを注入しても他端末を不必要に止めず、未保存状態を公開しない試験と実負荷測定で閉じる。background化だけでは閉じない。 |
+| D-02 全状態の同期保存 | 保存成功後の選択公開を維持し、query/HTTP、frame ACK、組込みbrowse、static/旧・push動画、時計分更新を一時経路へ分離。実SQLite待ち、合流、途中成功後のerror/panic等を含む全feature272件成功。application-live-state-verification.md参照。永続操作のserialize/writer待ち、同期互換/lifecycle経路、未知pluginの限界と実機未検証を明記する。独立レビュー・本番受入は別。 |
 | D-03 共通Appの風刺画固有処理 | 未修正。固有保存・保護・期限・削除をプラグインへ戻す。表示中・進行中jobの保持、途中削除からの再開試験を維持し、共通実行経路から具体ID判断が消えたことを確認して閉じる。 |
 | D-04 E-inkの描画中受信 | 未修正。「描画中FrameStartを無視」を要件化しない。pendingの所有世代、完了後の最新画面、取消し・切断・旧ACK拒否をモデルと実main試験で確認する。実パネル受入は別とする。 |
 | D-05 実用的な切替追跡 | 第2-Bのソフトウェア因果追跡を実装・239件unit等で検証。詳細は observation-causality-verification.md。実USB/IRQ/RF/物理描画とserver socket内訳の未採取境界は残り、全体未受入。 |

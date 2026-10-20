@@ -4,10 +4,10 @@
 async fn public_tokyo_fetch_reaches_lcd_asset() {
     use picomado_core::content::ButtonAction;
     use picomado_core::Effect;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     let temp = tempfile::tempdir().unwrap();
-    let app = Arc::new(Mutex::new(
+    let app = Arc::new(picomado_core::shared::Application::new(
         picomado_core::application::App::open(&temp.path().join("state.db")).unwrap(),
     ));
     {
