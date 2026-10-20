@@ -4,6 +4,9 @@
 #include "device_api.h"
 #include "input_rules.h"
 #include "observation.h"
+#if PM_EVENT_STREAM
+#include "observation_json.h"
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -486,10 +489,9 @@ static bool send_simple(uint8_t kind,const char *type){
 }
 static uint64_t observed_parent(const char *j){
 #if PM_EVENT_STREAM
-    uint64_t version,boot,operation;
+    uint64_t operation;
     pm_observation_status observed=pm_observation_read();
-    if(observed.enabled && number(j,"version",&version) && version==1 &&
-       number(j,"boot",&boot) && boot==observed.boot && number(j,"operation",&operation))return operation;
+    if(observed.enabled && (strstr(j,"observation") || strstr(j,"\\u")) && pm_observation_json_cause(j,observed.boot,&operation))return operation;
 #else
     (void)j;
 #endif

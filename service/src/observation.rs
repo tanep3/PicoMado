@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Cause {
     pub version: u8,
     pub boot: u64,

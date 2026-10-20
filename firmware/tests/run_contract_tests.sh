@@ -15,3 +15,6 @@ cc "${base[@]}" -DPM_USE_SAMPLE_CONFIG=1 -DPM_ACK_PATH_PROBE=1 -DPM_USB_BUTTON_S
 "$work/compat"
 cc "${base[@]}" -DPM_EVENT_STREAM=1 -DPM_TRACE_ENABLE=1 -DPM_USE_SAMPLE_CONFIG=1 -Idevices/sample-a -Itests/app_stubs tests/observation_limits_test.c src/usb_control.c -o "$work/limits"
 "$work/limits"
+
+cc "${base[@]}" tests/observation_json_test.c -o "$work/metadata"
+"$work/metadata"

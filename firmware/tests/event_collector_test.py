@@ -308,6 +308,47 @@ class Tests(unittest.TestCase):
                 mux.receive(b'ev1 s 3 1 0 0 0 0 0 0\n')
                 self.assertFalse(stop.result()['status']['on'])
 
+    def test_real_collector_jsonl_and_summary_feed_causal_analysis(self):
+        sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
+        import event_causality as causal
+        def record(seq,component,phase,parent=0,frame=0,a=0,b=0):
+            body=ev.BODY.pack(component,1,phase,1,seq,seq*1000,seq,parent,1,frame,0,a,b)
+            return b'ev1 '+body.hex().encode()+b' '+('%08x'%zlib.crc32(body)).encode()+b'\n'
+        class CatalogDevice(Device):
+            def run(self):
+                pending=bytearray()
+                try:
+                    while not self.stop.is_set():
+                        if not select.select([self.master],[],[],.02)[0]:continue
+                        for byte in os.read(self.master,1024):
+                            if byte!=10:pending.append(byte);continue
+                            command=pending.decode().strip();pending.clear();self.commands.append(command);words=command.split()
+                            if words[1]=='ON':
+                                self.seq=1;self.send(record(1,8,1,a=2,b=0x9f))
+                                self.send(('ev1 s %s 1 1 0 0 0 1 0\n'%words[2]).encode())
+                                for event in [record(2,1,1),record(3,3,3,parent=2),record(4,4,1,parent=2,frame=8),record(5,4,4,frame=8),record(6,5,4,frame=8)]:self.send(event)
+                                self.seq=6
+                            elif words[1]=='OFF':
+                                self.seq=7;self.send(record(7,8,4,a=2,b=0x9f));self.send(('ev1 s %s 1 7 0 0 0 0 0\n'%words[2]).encode())
+                except OSError as error:
+                    if not self.stop.is_set():self.errors.append(error)
+        device=CatalogDevice(events=[])
+        try:
+            with tempfile.TemporaryDirectory() as temp:
+                root=Path(temp);path=root/'events'
+                result=ev.collect('new-PTY-only',path,root/'owner',.12,port_factory=device.open)
+                self.assertTrue(result['transport_complete'],result)
+                parsed=causal.device_source(path);self.assertTrue(parsed[1],parsed)
+                cause=dict(version=1,boot=1,operation=2)
+                server=([dict(component=c,phase=p,frame=f,cause=cause) for c,p,f in [('Api','Dispatched',0),('State','Committed',0),('Frame','Pending',8)]],True,[])
+                self.assertEqual(causal.analyze(parsed,server)['results'][0]['status'],'rendered')
+                summary=Path(str(path)+'.summary.json');saved=summary.read_bytes();summary.unlink()
+                self.assertFalse(causal.device_source(path)[1]);summary.write_bytes(saved)
+                rows=[json.loads(line) for line in path.read_text().splitlines()];rows[0]['host_sequence']=0
+                path.write_text(''.join(json.dumps(row,separators=(',',':'))+'\n' for row in rows))
+                parsed=causal.device_source(path);self.assertFalse(parsed[1]);self.assertIn('collector_host_sequence_or_time',parsed[2])
+        finally:device.close()
+
     def test_rng_failure_acquires_no_writer_fd_or_selector(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as temp:

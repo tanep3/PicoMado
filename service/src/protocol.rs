@@ -416,11 +416,11 @@ impl Decoder {
     pub fn push(&mut self,bytes:&[u8])->Result<Vec<WireMessage>,ProtocolError>{self.push_parsed(bytes,|message,_|message)}
     pub fn push_observed(&mut self,bytes:&[u8])->Result<Vec<ObservedMessage>,ProtocolError>{
         self.push_parsed(bytes,|message,payload|{
-            #[derive(Deserialize)]struct Metadata{#[serde(default)]observation:Option<serde_json::Value>}
+            #[derive(Deserialize)]struct Metadata{#[serde(default)]observation:Option<crate::observation::Cause>}
             let metadata=serde_json::from_slice::<Metadata>(payload);
             let (cause,invalid)=match metadata {
-                Ok(Metadata{observation:Some(value)})=>match serde_json::from_value::<crate::observation::Cause>(value){
-                    Ok(cause) if cause.valid()=>(Some(cause),false),_ =>(None,true)},
+                Ok(Metadata{observation:Some(cause)}) if cause.valid()=>(Some(cause),false),
+                Ok(Metadata{observation:Some(_)})=>(None,true),
                 Ok(_) =>(None,false),Err(_) =>(None,payload.iter().copied().find(|b|!b.is_ascii_whitespace())==Some(b'{')),
             };
             ObservedMessage{message,cause,invalid_cause:invalid}
@@ -964,4 +964,22 @@ mod observation_contract_tests {
             assert!(matches!(result[0].message,WireMessage::Up{incarnation:1,session_epoch:2}));
         }
     }
+    #[test]
+    fn duplicate_or_out_of_scope_metadata_never_correlates_or_rejects_domain(){
+        let metadata=[
+            r#"{"version":1,"version":99,"boot":9,"operation":3}"#,
+            r#"{"version":1,"boot":9,"boot":9,"operation":3}"#,
+            r#"{"version":1,"boot":9,"\u0062oot":9,"operation":3}"#,
+            r#"{"version":1,"boot":9,"operation":3,"operation":3}"#,
+        ];
+        let mut cases:Vec<String>=metadata.into_iter().map(|m|format!(r#"{{"type":"up","data":{{"incarnation":1,"session_epoch":2}},"observation":{m}}}"#)).collect();
+        cases.push(r#"{"type":"up","data":{"incarnation":1,"session_epoch":2,"version":1,"boot":9,"operation":3}}"#.into());
+        cases.push(r#"{"type":"up","data":{"incarnation":1,"session_epoch":2},"observation":{"version":1,"boot":9,"operation":3},"observation":{"version":1,"boot":9,"operation":3}}"#.into());
+        for json in cases {
+            let mut bytes=((json.len()+2)as u32).to_be_bytes().to_vec();bytes.extend([VERSION,15]);bytes.extend(json.as_bytes());
+            let result=Decoder::default().push_observed(&bytes).unwrap();assert_eq!(result.len(),1);assert_eq!(result[0].cause,None);
+            assert_eq!(result[0].message,WireMessage::Up{incarnation:1,session_epoch:2});
+        }
+    }
+
 }

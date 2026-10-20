@@ -394,25 +394,26 @@ struct QueuedReply {
 enum WriterCommand {Bind(SessionToken),Reply(QueuedReply),Stop}
 impl WriterCommand {
     #[inline(always)]
-    fn reply(message:WireMessage)->Self {
-        Self::Reply(QueuedReply{message,cause:None,#[cfg(feature="stream-diagnostics")] enqueued_at:crate::diagnostics::mark()})
+    fn reply(message:WireMessage)->Self {Self::reply_observed(message,None)}
+    fn reply_observed(message:WireMessage,cause:Option<crate::observation::Cause>)->Self {
+        Self::Reply(QueuedReply{message,cause,#[cfg(feature="stream-diagnostics")] enqueued_at:crate::diagnostics::mark()})
     }
 }
 async fn enqueue_observed_reply(tx:&tokio::sync::mpsc::Sender<WriterCommand>,message:WireMessage,session:u64,cause:Option<crate::observation::Cause>)->Result<(),()> {
-    if cause.is_none(){return enqueue_reply(tx,message,session).await;}
-    let mut reply=match WriterCommand::reply(message){WriterCommand::Reply(reply)=>reply,_=>unreachable!()};
-    reply.cause=cause;
-    tokio::time::timeout(SEND_TIMEOUT,tx.send(WriterCommand::Reply(reply))).await.map_err(|_|())?.map_err(|_|())
+    enqueue_reply_common(tx,message,session,cause).await
 }
-async fn enqueue_reply(tx:&tokio::sync::mpsc::Sender<WriterCommand>,message:WireMessage,_session:u64)->Result<(),()> {
+async fn enqueue_reply(tx:&tokio::sync::mpsc::Sender<WriterCommand>,message:WireMessage,session:u64)->Result<(),()> {
+    enqueue_reply_common(tx,message,session,None).await
+}
+async fn enqueue_reply_common(tx:&tokio::sync::mpsc::Sender<WriterCommand>,message:WireMessage,_session:u64,cause:Option<crate::observation::Cause>)->Result<(),()> {
     #[cfg(not(feature="stream-diagnostics"))]
-    {tx.send(WriterCommand::reply(message)).await.map_err(|_|())}
+    {tx.send(WriterCommand::reply_observed(message,cause)).await.map_err(|_|())}
     #[cfg(feature="stream-diagnostics")]
     {
         let start=crate::diagnostics::mark();
         let permit=tx.reserve().await.map_err(|_|())?;
         crate::diagnostics::duration(crate::diagnostics::Kind::ReplyCapacity,start,_session,0,0);
-        permit.send(WriterCommand::reply(message));Ok(())
+        permit.send(WriterCommand::reply_observed(message,cause));Ok(())
     }
 }
 const SEND_TIMEOUT: Duration = Duration::from_millis(250);

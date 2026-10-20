@@ -372,3 +372,17 @@ fn actual_rust_to_c_causal_input_frame_draw_in_lcd_and_button_eink() {
         }
     }
 }
+
+#[tokio::test]
+async fn observation_cause_preserves_reply_queue_waiting_semantics(){
+    for cause in [None,Some(crate::observation::Cause{version:1,boot:9,operation:3})]{
+        let (tx,mut rx)=tokio::sync::mpsc::channel(1);
+        tx.send(WriterCommand::reply(WireMessage::Welcome{incarnation:1,session_epoch:1})).await.unwrap();
+        let expected=WireMessage::InputAccepted{input_context:None,selected:None,display_epoch:1};let message=expected.clone();
+        let worker=tokio::spawn(async move{enqueue_observed_reply(&tx,message,1,cause).await});
+        tokio::time::sleep(Duration::from_millis(350)).await;
+        assert!(!worker.is_finished(),"cause must not introduce a queue deadline");
+        rx.recv().await.unwrap();worker.await.unwrap().unwrap();
+        match rx.recv().await.unwrap(){WriterCommand::Reply(reply)=>{assert_eq!(reply.message,expected);assert_eq!(reply.cause,cause);},_=>panic!("reply expected")}
+    }
+}

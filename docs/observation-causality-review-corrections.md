@@ -9,3 +9,7 @@
 5. observationはtop-levelの単一objectだけを読む。version/boot/operationは各1個、型・値・範囲を検証し、重複や不正、同名値が別のdataや子objectにある場合はcorrelation unknown。RustはValue経由で重複を消してから検証せず、PicoもJSON全体のstrstrで値を拾わない。metadata不正で正常domain APIを拒否しない。escaped keyの重複も検証する。Picoの補助scannerは深さに有限上限を置き、上限外も相関不明として通常処理を変えない。
 
 上記が通るまで因果追跡の受入を保留する。正常crossテストとsource保存の既存成功は保持するが、未実装境界・実機負荷・物理描画は引き続き未確認。
+
+実装・検証：観測cause付き/なしを共通enqueueへ戻し、通常/stream-diagnostics両構成で350ms満杯を同じく待つことを確認した。Rust観測群9件（既存の雨雲loopback含む）、Rust→C LCD/E-ink横断1件、diagnostic構成のqueue否定1件が成功。解析9件には実Cの取消し・metadata不正でもFrameStartを受ける事例、区間前後の入力除外、未解決causeのunknownを含む。collector21件には実際のJournal/summaryを使う結合とsummary欠落/host sequence改変を含み、成功。C契約とASan/UBSan（LeakSanitizerを使えないsandboxではdetect_leaks=0）も成功。ARM pico_w/sample-a EV1-only build成功、text398156/BSS228672。実機へ反映していない。
+
+metadata v1のobjectは3個の既知fieldだけとし、未知fieldも相関不明にする。source decodedイベントのJSONLは固定field/type/range、durable prefix、queue loss、link epoch、ON/OFFのqueued→written→CID付きreceiptとsummaryの一致を検証する。複数segmentの採取はこの解析入口では曖昧として不完全にし、任意segmentを黙って選ばない。raw EV1はfixture互換である。全機能回帰と実機負荷を一括受入したという意味ではない。
