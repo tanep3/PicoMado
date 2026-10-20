@@ -1,5 +1,7 @@
 # LCD ACK非依存動画 — 2026-10-15
 
+後続の採用済み期限・設定は [2026-10-20の通信と設定](adopted-protocol-and-configuration.md) を参照する。以下の断片2秒/画像5秒や未転送表記は当時の記録として保持する。
+
 基準commitは `5224c30b8769fc4bd4489dd7751425ff66b73de1`。この追加変更は2026-10-15の統合コミット対象。LCD動画だけに `lcd-push-v1` を追加し、`lcd` と `frame-bytes-v1` も申告する端末に限定する。静止画、旧LCD、E-inkは従来のフレームとACK契約を維持する。
 
 サーバーは既存の共有monotonic再生位置から過ぎた位置を飛ばし、各端末に最新画像1枚をwatchで保持する。writerが取り出した画像はimmutableなまま全断片を送り切り、送信途中を置き換えない。未送信画像は次の最新版で置き換える。writer/readerは端末ごとに独立し、制御応答は完全なWS/applicationメッセージの境界で送る。ネット待機中はApp mutexを保持しない。動画画像と1秒ごとのStreamStatusはSQLite/outboxに追加せず、描画ACKを送信creditに使わない。静止画のACK監視は維持する。
