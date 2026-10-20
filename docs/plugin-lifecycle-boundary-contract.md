@@ -1,0 +1,21 @@
+# D-03 plugin所有の復旧・保護参照
+
+正本は設計第2・3節、共通カーネルのplugin責務、風刺画要件と`caricature-storage-retention.md`。既存の純粋なWorldQuery/Rule/TransitionへIOを入れず、外部復旧・保存・削除を区別する。自動削除はfeatureと環境変数の両方が必要な既定OFFを維持し、端末選択・設定・共通順序・保存schemaを変えない。
+
+## 現状の乖離
+
+App constructorが風刺画の保存先とpending-delete復旧を知る。Appは未完了jobの`payload.artwork_id`を解釈する。Appとworkerには風刺画専用の期限選定・日次実行・ファイル整理が残る。最初の単位は前二者だけを修正し、後二者を完了したと扱わない。
+
+## 単位A：起動と参照
+
+登録に任意のstartup recovery executorを追加する。共通bootstrapは登録順で、登録IDから導くPluginPathsとSQLite接続を渡す。executorはサービス公開・保存状態の読込み前に動く外部作用であり、純粋Ruleや通常Queryから呼ばない。具体IDを扱うのはcompositionの登録だけとする。風刺画側のexecutorが削除gate、artwork/cacheパス、既存復旧処理を所有する。失敗した起動を成功として公開せず、既存のpending markerとDB参照照合による復旧順序を維持する。
+
+保護参照のQueryでは、共通層は対象pluginに属する未完了Jobだけを供給する。payloadの意味を読まず、pluginが自分の表示/browse参照とjob内参照を集約する。風刺画の`artwork_id`は風刺画側だけが解釈する。拡張pluginの既存実装はdefaultで現在の表示参照を返し、変更を強制しない。
+
+受入：未知IDへのhook登録拒否、任意の拡張pluginの復旧とPluginPaths配送、復旧後のplugin状態読込み、復旧失敗時の未公開を確認する。独自payloadキーの拡張pluginでも共通層を変えずに参照を列挙し、別plugin/完了jobを混ぜずCancellingを未完了として扱う。風刺画の現行参照・pending-delete復旧・削除gateの回帰を保つ。
+
+## 単位B：期限整理と外部作用（後続）
+
+期限日・保護ledger・候補・日次JST時刻はpluginが所有し、共通層はopaqueな変更計画の現在改訂と参照を検証して保存・公開する。実ファイル削除は確定状態の公開後に外部実行し、途中失敗はmarkerで再開できるようにする。表示/browse中・未完了jobの参照、ledgerの排他、pending marker→snapshot commit→削除完了の順序を失わない。単純なファイル移動や、pluginへ可変App全体を渡す形を責務分離済みとしない。
+
+単位Aの成功だけでBの設計・受入を済ませたことにしない。D-02の保存保証と一時view合流を維持し、共通workerから具体plugin名による処理が消えるまでD-03は追跡する。
