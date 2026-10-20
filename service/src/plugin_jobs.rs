@@ -165,6 +165,16 @@ pub struct PluginPaths {
     pub cache: PathBuf,
 }
 
+/// External bootstrap IO, before persisted content is loaded or published.
+/// This is separate from pure plugin Rules and ordinary content queries.
+pub trait PluginStartupExecutor: Send + Sync {
+    fn recover(
+        &self,
+        paths: &PluginPaths,
+        database: &rusqlite::Connection,
+    ) -> Result<(), std::io::Error>;
+}
+
 pub struct JobExecutionContext {
     pub token: JobToken,
     pub paths: PluginPaths,

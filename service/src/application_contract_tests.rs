@@ -776,3 +776,5 @@ fn multiple_commits_keep_successful_prefix_and_notification_after_later_panic() 
 }
 
 include!("application_shared_contract_tests.rs");
+
+include!("application_lifecycle_contract_tests.rs");

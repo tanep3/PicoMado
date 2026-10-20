@@ -115,6 +115,28 @@ pub(crate) fn begin_pending_delete(root: &Path, id: &str) -> Result<(), Caricatu
     atomic_write(&pending_path(root, id), b"{}")
 }
 
+/// The plugin owns its bootstrap policy, gate, paths and recovery IO.
+pub(crate) struct RetentionRecovery;
+impl crate::plugin_jobs::PluginStartupExecutor for RetentionRecovery {
+    fn recover(
+        &self,
+        paths: &crate::plugin_jobs::PluginPaths,
+        database: &rusqlite::Connection,
+    ) -> Result<(), std::io::Error> {
+        if !deletion_enabled() {
+            return Ok(());
+        }
+        recover_pending_deletes(
+            &ProtectionLedger::new(paths.data.join("artwork")),
+            &paths.cache.join("artwork_variants"),
+            database,
+        )
+        .map_err(|error| {
+            std::io::Error::other(format!("caricature retention recovery failed: {error:?}"))
+        })
+    }
+}
+
 /// Finish a database-first deletion after a crash. Caller holds the ledger lock.
 pub(crate) fn recover_pending_deletes(
     ledger: &ProtectionLedger,

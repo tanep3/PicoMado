@@ -454,15 +454,15 @@ impl App {
                body TEXT NOT NULL
              );",
         )?;
-        if crate::caricature::retention::deletion_enabled() {
-            let artwork_root = root.join("caricature/data/artwork");
-            let cache_root = root.join("caricature/cache/artwork_variants");
-            crate::caricature::retention::recover_pending_deletes(
-                &crate::caricature::retention::ProtectionLedger::new(artwork_root),
-                &cache_root,
-                &connection,
-            )
-            .map_err(|_| AppError::Conflict("caricature retention recovery failed"))?;
+        for id in &plugins.order {
+            if let Some(recovery) = plugins.startup.get(id) {
+                let paths = crate::plugin_jobs::PluginPaths {
+                    data: root.join(id).join("data"),
+                    cache: root.join(id).join("cache"),
+                };
+                recovery.recover(&paths, &connection)
+                    .map_err(|error| AppError::Internal(Box::new(error)))?;
+            }
         }
         let existing: Option<(i64, String)> = connection
             .query_row(
@@ -705,25 +705,14 @@ impl App {
     }
 
     #[cfg(any(test, feature = "caricature-retention-delete"))]
-    fn caricature_retention_pins(&self) -> BTreeSet<String> {
-        let mut ids = self
-            .contents
-            .get("caricature")
-            .map(|content| content.retention_references())
-            .unwrap_or_default();
-        for record in self.runtime.jobs.jobs.values() {
-            if record.job.token.plugin == "caricature" && !record.status.finished() {
-                if let Some(id) = record
-                    .job
-                    .payload
-                    .get("artwork_id")
-                    .and_then(|x| x.as_str())
-                {
-                    ids.insert(id.to_owned());
-                }
-            }
-        }
-        ids
+    fn plugin_retention_references(&self, plugin: &str) -> BTreeSet<String> {
+        let jobs: Vec<_> = self.runtime.jobs.jobs.values()
+            .filter(|record| record.job.token.plugin == plugin && !record.status.finished())
+            .map(|record| &record.job)
+            .collect();
+        self.contents.get(plugin)
+            .map(|content| content.retention_references_for_jobs(&jobs))
+            .unwrap_or_default()
     }
 
     #[cfg(any(test, feature = "caricature-retention-delete"))]
@@ -740,7 +729,7 @@ impl App {
         let cache = paths.cache.join("artwork_variants");
         let ledger = ProtectionLedger::new(root.clone());
         let store = ArtworkStore::new(root.clone());
-        let pins = self.caricature_retention_pins();
+        let pins = self.plugin_retention_references("caricature");
         let candidates = expired_candidates(
             &store
                 .history()
@@ -756,7 +745,7 @@ impl App {
         for id in candidates {
             ledger
                 .locked(|| {
-                    let pins = self.caricature_retention_pins();
+                    let pins = self.plugin_retention_references("caricature");
                     let current =
                         expired_candidates(&store.history()?, today, &ledger.read()?, &pins)?;
                     if !current.contains(&id) {

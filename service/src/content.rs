@@ -76,6 +76,11 @@ pub trait ContentPlugin: Send + Sync {
     fn retention_references(&self) -> BTreeSet<String> {
         BTreeSet::new()
     }
+    /// The host supplies only this plugin's unfinished jobs. Payload meaning
+    /// belongs to the plugin; extensions may retain the existing display refs.
+    fn retention_references_for_jobs(&self, _jobs: &[&PluginJob]) -> BTreeSet<String> {
+        self.retention_references()
+    }
     /// Remove a non-displayed archive entry from persisted plugin state.
     fn retire_artwork(&mut self, _id: &str) -> Result<(), ContentError> {
         Err(ContentError::Unsupported)

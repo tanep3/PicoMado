@@ -14,9 +14,10 @@ pub struct PluginSet {
     pub(crate) engine: Engine,
     pub(crate) contents: BTreeMap<String, Box<dyn ContentPlugin>>,
     pub(crate) order: Vec<String>,
+    pub(crate) startup: BTreeMap<String, std::sync::Arc<dyn crate::plugin_jobs::PluginStartupExecutor>>,
 }
 impl Default for PluginSet {
-    fn default() -> Self { Self { engine: Engine::new(Registry::default()), contents: BTreeMap::new(), order: Vec::new() } }
+    fn default() -> Self { Self { engine: Engine::new(Registry::default()), contents: BTreeMap::new(), order: Vec::new(), startup: BTreeMap::new() } }
 }
 impl PluginSet {
     pub fn register(&mut self, rules: Box<dyn crate::Plugin>, content: Box<dyn ContentPlugin>) -> Result<(), crate::Error> {
@@ -27,11 +28,22 @@ impl PluginSet {
         self.order.push(id);
         Ok(())
     }
+    pub fn register_startup(
+        &mut self,
+        id: &str,
+        executor: std::sync::Arc<dyn crate::plugin_jobs::PluginStartupExecutor>,
+    ) -> Result<(), crate::Error> {
+        if !self.contents.contains_key(id) { return Err(crate::Error::UnknownPlugin(id.into())); }
+        if self.startup.contains_key(id) { return Err(crate::Error::DuplicatePlugin(id.into())); }
+        self.startup.insert(id.into(), executor);
+        Ok(())
+    }
 }
 pub fn builtins() -> PluginSet {
     let mut set=PluginSet::default();
     set.register(Box::new(crate::youtube::YoutubePlugin), Box::new(crate::plugin_adapters::YoutubeManaged::default())).expect("unique plugin");
     set.register(Box::new(crate::caricature::CaricaturePlugin), Box::new(caricature_content())).expect("unique plugin");
+    set.register_startup("caricature", std::sync::Arc::new(crate::caricature::retention::RetentionRecovery)).expect("registered plugin");
     set.register(Box::new(crate::weather::WeatherPlugin), Box::new(crate::weather::WeatherContent::default())).expect("unique plugin");
     set.register(Box::new(crate::radar::RadarPlugin), Box::new(crate::radar::RadarContent::default())).expect("unique plugin");
     set.register(Box::new(crate::clock::ClockPlugin), Box::new(crate::clock::ClockContent::default())).expect("unique plugin");

@@ -1141,6 +1141,22 @@ impl ContentPlugin for CaricatureContent {
         }
         ids
     }
+    fn retention_references_for_jobs(
+        &self,
+        jobs: &[&crate::plugin_jobs::PluginJob],
+    ) -> BTreeSet<String> {
+        let mut ids = self.retention_references();
+        for job in jobs {
+            if let Some(id) = job
+                .payload
+                .get("artwork_id")
+                .and_then(|value| value.as_str())
+            {
+                ids.insert(id.to_owned());
+            }
+        }
+        ids
+    }
     fn retire_artwork(&mut self, id: &str) -> Result<(), ContentError> {
         if self.retention_references().contains(id) {
             return Err(ContentError::Unavailable);
