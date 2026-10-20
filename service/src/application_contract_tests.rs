@@ -642,3 +642,135 @@ fn native_weather_completion_selects_prepared_pixels_without_full_render_under_a
         }
     }
 }
+
+fn commit_prefix_composition() -> crate::plugins::PluginSet {
+    let mut plugins = crate::plugins::PluginSet::default();
+    for id in ["commit-a", "commit-b"] {
+        plugins
+            .register(
+                Box::new(Rules(id)),
+                Box::new(Content { id, video: false }),
+            )
+            .unwrap();
+    }
+    plugins
+}
+
+fn commit_prefix_fixture(path: &Path, root: &Path) -> (App, SessionToken) {
+    let mut app = App::open_with_plugin_set(
+        path,
+        root,
+        Arc::new(crate::fetch::SystemClock),
+        commit_prefix_composition(),
+    )
+    .unwrap();
+    let token = app.hello("prefix", ["lcd".into()].into(), 1).unwrap();
+    acknowledge_review_frames(&mut app, "prefix");
+    for (id, _) in app.pending_effects() {
+        app.complete_effect(id).unwrap();
+    }
+    (app, token)
+}
+
+fn assert_commit_prefix(app: &App, path: &Path, root: &Path, revision: u64) {
+    let body: String = app
+        .connection
+        .query_row("SELECT body FROM app_state WHERE id=1", [], |r| r.get(0))
+        .unwrap();
+    let durable: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        durable,
+        serde_json::to_value(StoredState::from(&app.runtime)).unwrap(),
+        "live state must match the last successful commit, including outbox"
+    );
+    assert_eq!(app.runtime.world.revision, revision);
+    assert_eq!(app.view().devices[0].selected.as_deref(), Some("commit-b"));
+    assert_eq!(app.runtime.world.devices["prefix"].pending_frame_id, None);
+    assert!(!app
+        .pending_effects()
+        .iter()
+        .any(|(_, effect)| matches!(effect, Effect::SendFrame { .. })));
+    assert!(app.frame_assets.is_empty());
+    let restored = App::open_with_plugin_set(
+        path,
+        root,
+        Arc::new(crate::fetch::SystemClock),
+        commit_prefix_composition(),
+    )
+    .unwrap();
+    assert_eq!(
+        restored.view().devices[0].selected.as_deref(),
+        Some("commit-b")
+    );
+    assert!(!restored
+        .pending_effects()
+        .iter()
+        .any(|(_, effect)| matches!(effect, Effect::SendFrame { .. })));
+}
+
+#[test]
+fn multiple_commits_keep_successful_prefix_when_later_sqlite_save_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("state.db");
+    let (mut app, token) = commit_prefix_fixture(&path, temp.path());
+    let mut notifications = app.dispatch_notifications();
+    let before = app.runtime.world.revision;
+    app.connection
+        .execute_batch(
+            "CREATE TEMP TABLE persist_count(n INTEGER NOT NULL);
+             INSERT INTO persist_count VALUES(0);
+             CREATE TEMP TRIGGER fail_second_persist BEFORE UPDATE ON app_state
+             BEGIN
+               UPDATE persist_count SET n=n+1;
+               SELECT CASE WHEN (SELECT n FROM persist_count)=2
+                 THEN RAISE(ABORT, 'injected second persist failure') END;
+             END;",
+        )
+        .unwrap();
+    // Actual button has two saves: select commit-b, then request its frame.
+    let error = app.button(&token, ButtonAction::Down).unwrap_err();
+    assert!(matches!(error, AppError::Internal(_)));
+    let writes: i64 = app
+        .connection
+        .query_row("SELECT n FROM persist_count", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(writes, 1, "the second transaction must roll back");
+    assert_commit_prefix(&app, &path, temp.path(), before + 1);
+    assert!(notifications.has_changed().unwrap());
+    notifications.borrow_and_update();
+    assert!(!notifications.has_changed().unwrap());
+}
+
+#[test]
+fn multiple_commits_keep_successful_prefix_and_notification_after_later_panic() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("state.db");
+    let (state, token) = commit_prefix_fixture(&path, temp.path());
+    let before = state.runtime.world.revision;
+    let mut notifications = state.dispatch_notifications();
+    let app = Arc::new(std::sync::Mutex::new(state));
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut owner = app.lock().unwrap();
+        owner.terminal_event(Event::Next { token }).unwrap();
+        owner
+            .change::<()>(|_, candidate| {
+                // This second candidate must never leak into current or DB state.
+                candidate.world.devices.get_mut("prefix").unwrap().selected =
+                    Some("uncommitted".into());
+                panic!("injected panic after first durable commit");
+            })
+            .unwrap();
+    }));
+    assert!(outcome.is_err());
+    assert!(app.is_poisoned(), "do not silently reuse the failed owner");
+    // Inspect the poisoned baseline explicitly. This is not a claim that its
+    // ordinary shared query API remains available after an owner panic.
+    let owner = match app.lock() {
+        Err(error) => error.into_inner(),
+        Ok(_) => panic!("expected poisoned application owner"),
+    };
+    assert_commit_prefix(&owner, &path, temp.path(), before + 1);
+    assert!(notifications.has_changed().unwrap());
+    notifications.borrow_and_update();
+    assert!(!notifications.has_changed().unwrap());
+}

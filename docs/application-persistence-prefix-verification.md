@@ -1,0 +1,10 @@
+# D-02 保存成功prefixの基準試験
+
+追加契約 `5b5ad49` の後に、既存の保存実装へ2件の試験を追加した。これはD-02の所有・公開方式を置き換える実装ではなく、今後の変更で保つべき基準である。
+
+- `multiple_commits_keep_successful_prefix_when_later_sqlite_save_fails`：実Appのbutton入力で、選択を保存する1回目は成功し、次のframe要求の保存だけを実SQLite TEMP triggerで失敗させる。呼出しはerrorになるが、選択とoutboxは成功したprefixへ一致し、失敗したframe要求・画像は見えない。DB本文とメモリの保存投影を比較し、通知と再起動後の選択も確認する。
+- `multiple_commits_keep_successful_prefix_and_notification_after_later_panic`：同じmutable所有区間の1回目の遷移を保存し、2回目の候補を変更してからpanicさせる。候補変更はDB/現在状態へ漏れず、成功prefixの通知と再起動後の選択を維持する。既存Mutexはpoisonされることを確認し、試験での明示的な内部検査を通常queryの可用性と混同しない。
+
+`d02-commit-prefix-baseline-fixed.log`：観測feature付きの対象2件が成功、0.79秒。実SQLiteと一時ファイルだけを使い、外部通信・実機を使用しない。
+
+新方式では、通常の独立query APIでも成功prefixを返すか明示的にunavailableを返すこと、commit単位のsnapshot/通知の公開を検証する必要がある。guard解放時に一括して通知を戻すだけの方式へ、この2件の成功を転用しない。一時入力の非阻害、保存workerへのdelta渡し、複数端末・接続開始順、退避試作の3件の失敗は未解決で、D-02は引き続き未完了である。
