@@ -111,9 +111,15 @@ pm_net_stage pm_net_checkpoint(void){return network_stage;}
 #if !PM_AWAY_EEX1
 pm_net_failure pm_net_last_failure(void){return PM_NET_FAIL_PROTOCOL;}
 #endif
+#ifdef PM_CAUSAL_FIXTURE
+static void (*wire_observer)(uint8_t,const char *);
+#endif
 bool pm_net_send(uint8_t kind,const char *j){
     assert(j && network_stage==PM_NET_READY);
     if(net_send_rejected)return false;
+#ifdef PM_CAUSAL_FIXTURE
+    if(wire_observer)wire_observer(kind,j);
+#endif
     if(kind==1){hello_count++;welcome_available=true;}
     if(kind==5)heartbeat_count++;
     if(kind==8){frame_receipts++;clock_ms++;}

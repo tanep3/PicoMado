@@ -50,3 +50,5 @@ EV1の固定bodyは維持し、component8をObservation、event1をcapture境界
 - T-05：server保存はApp lockと独立、有界・一consumer・排他的file・正常終了/故障を試験する。既存232件、Pico全体、AP2/SIM/TX、NODELAY/SDK出自、実ARMの回帰を確認する。
 
 実USB/IRQ負荷、RF送信、物理画素、E-ink波形・残像、未登録の将来境界は引き続き別受入。ソフトウェアの因果追跡成立を、間欠遅延の原因特定や実機解消と報告しない。
+
+実装上のsource coverageはPico `0x9f`、server `0xeb`。serverのNetwork境界はまだ採取しないため、そのbitを立てない。ホスト解析は入力通知のPico側結果、server受理・commit・frame割当、Picoのframe/CRC/drawを必須とし、server socket送出内の未実装境界を推測しない。server JSONLには正常fsync後にSHA-256付き `.summary.json` を排他的保存し、解析時に対応を確認する。通常のSQLiteアプリ状態保存は本契約の観測ログ保存とは別で、D-02に残る。

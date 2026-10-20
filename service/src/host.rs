@@ -30,6 +30,14 @@ where
     R: FnOnce(SharedApp, watch::Receiver<bool>) -> Fut,
     Fut: Future<Output = Result<(), AppError>>,
 {
+    #[cfg(feature="boundary-observation")]
+    let _observation_capture=std::env::var_os("PICOMADO_OBSERVATION_PATH").and_then(|path|{
+        let source=app.lock().ok()?.observation_source();
+        match crate::observation::Capture::start(source,std::path::Path::new(&path)) {
+            Ok(capture)=>Some(capture),
+            Err(error)=>{eprintln!("picomado observation_start_failed {error}");None}
+        }
+    });
     let (stop_tx, stop_rx) = watch::channel(false);
     let web_app = app.clone();
     let server = async move {

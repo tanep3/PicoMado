@@ -61,13 +61,15 @@ impl VideoSlot {
 
 /// One immutable current frame. Pending replacements live only in VideoSlot.
 pub struct VideoTransfer {
+    cause:Option<crate::observation::Cause>,
     pub frame: Arc<VideoFrame>,
     part: usize,
     pub started: std::time::Instant,
 }
 impl VideoTransfer {
-    pub fn new(frame: Arc<VideoFrame>) -> Self {
-        Self {
+    pub fn new(frame: Arc<VideoFrame>) -> Self {Self::new_observed(frame,None)}
+    pub fn new_observed(frame: Arc<VideoFrame>,cause:Option<crate::observation::Cause>) -> Self {
+        Self {cause,
             frame,
             part: 0,
             started: std::time::Instant::now(),
@@ -76,7 +78,7 @@ impl VideoTransfer {
     pub fn next_packet(&mut self) -> Result<Option<Vec<u8>>, crate::protocol::ProtocolError> {
         use crate::protocol::{StreamFrame, WireMessage, IMAGE_FRAGMENT_BYTES};
         let result = if self.part == 0 {
-            crate::protocol::encode(&WireMessage::FrameStart {
+            crate::protocol::encode_observed(&WireMessage::FrameStart {
                 token: self.frame.token.clone(),
                 mode: Some(self.frame.mode.into()),
                 eink_refresh: None,
@@ -90,7 +92,7 @@ impl VideoTransfer {
                 format: "rgb565be".into(),
                 byte_len: self.frame.pixels.len() as u32,
                 crc32: crc32fast::hash(&self.frame.pixels),
-            })?
+            },self.cause)?
         } else {
             let offset = (self.part - 1) * IMAGE_FRAGMENT_BYTES;
             if offset >= self.frame.pixels.len() {

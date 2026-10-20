@@ -93,12 +93,18 @@ fn process(
     process_on_connection(app, current, message, diagnostics, None)
 }
 
-fn process_on_connection(
+#[cfg(test)]
+fn process_on_connection(app:&SharedApp,current:&mut Option<SessionToken>,message:WireMessage,diagnostics:&mut AckDiagnostics,accept_order:Option<std::num::NonZeroU64>)->Result<Option<WireMessage>,&'static str>{
+    process_with_observation(app,current,message,diagnostics,accept_order,None)
+}
+
+fn process_with_observation(
     app: &SharedApp,
     current: &mut Option<SessionToken>,
     message: WireMessage,
     diagnostics: &mut AckDiagnostics,
     accept_order: Option<std::num::NonZeroU64>,
+    cause: Option<crate::observation::Cause>,
 ) -> Result<Option<WireMessage>, &'static str> {
     let received = std::time::Instant::now();
     let received_unix_ms = std::time::SystemTime::now()
@@ -123,6 +129,7 @@ fn process_on_connection(
         &mut lock_wait,
         &mut persistence_us,
         &mut image_preparation_us,
+        cause,
     );
     let elapsed = received.elapsed();
     let sampled = diagnostics.ignored == ignored_before
@@ -153,6 +160,7 @@ fn process_inner(
     lock_wait: &mut Duration,
     persistence_us: &mut u128,
     image_preparation_us: &mut u128,
+    cause: Option<crate::observation::Cause>,
 ) -> Result<Option<WireMessage>, &'static str> {
     if let WireMessage::Hello {
         device_id,
@@ -193,7 +201,8 @@ fn process_inner(
         return Err("stale_session");
     }
     let totals = guard.operation_totals();
-    let result = match message {
+    guard.observation_source().record_context(crate::observation::Component::Api,crate::observation::Phase::Dispatched,0,0,0,message.kind() as u64,0,cause);
+    let result = guard.with_observation_cause(&token.device_id,cause,|guard| match message {
         WireMessage::SettingsStored {
             incarnation,
             revision,
@@ -369,7 +378,7 @@ fn process_inner(
             Ok(None)
         }
         _ => Err("unexpected_message"),
-    };
+    });
     let after = guard.operation_totals();
     *persistence_us = after.0.saturating_sub(totals.0);
     *image_preparation_us = after.1.saturating_sub(totals.1);
@@ -378,6 +387,7 @@ fn process_inner(
 
 struct QueuedReply {
     message: WireMessage,
+    cause: Option<crate::observation::Cause>,
     #[cfg(feature="stream-diagnostics")]
     enqueued_at: u64,
 }
@@ -385,8 +395,14 @@ enum WriterCommand {Bind(SessionToken),Reply(QueuedReply),Stop}
 impl WriterCommand {
     #[inline(always)]
     fn reply(message:WireMessage)->Self {
-        Self::Reply(QueuedReply{message,#[cfg(feature="stream-diagnostics")] enqueued_at:crate::diagnostics::mark()})
+        Self::Reply(QueuedReply{message,cause:None,#[cfg(feature="stream-diagnostics")] enqueued_at:crate::diagnostics::mark()})
     }
+}
+async fn enqueue_observed_reply(tx:&tokio::sync::mpsc::Sender<WriterCommand>,message:WireMessage,session:u64,cause:Option<crate::observation::Cause>)->Result<(),()> {
+    if cause.is_none(){return enqueue_reply(tx,message,session).await;}
+    let mut reply=match WriterCommand::reply(message){WriterCommand::Reply(reply)=>reply,_=>unreachable!()};
+    reply.cause=cause;
+    tokio::time::timeout(SEND_TIMEOUT,tx.send(WriterCommand::Reply(reply))).await.map_err(|_|())?.map_err(|_|())
 }
 async fn enqueue_reply(tx:&tokio::sync::mpsc::Sender<WriterCommand>,message:WireMessage,_session:u64)->Result<(),()> {
     #[cfg(not(feature="stream-diagnostics"))]
@@ -467,6 +483,12 @@ impl FrameWriteFailure {
         }
     }
 }
+async fn write_observed_wire<S>(sink:&mut S,message:WireMessage,cause:Option<crate::observation::Cause>)->Result<(),WriteFailure> where S:Sink<Message>+Unpin {
+    if cause.is_none(){return write_wire(sink,message).await;}
+    let bytes=crate::protocol::encode_observed(&message,cause).map_err(|_|WriteFailure::Encode)?;
+    tokio::time::timeout(SEND_TIMEOUT,sink.send(Message::Binary(bytes.into()))).await.map_err(|_|WriteFailure::Deadline)?.map_err(|_|WriteFailure::Sink)
+}
+
 fn log_write_failure(failure:FrameWriteFailure,session:u64,frame:u64,sequence:u64,started:u64){
     let kind=match failure {FrameWriteFailure::Idle(_)=>Some(crate::diagnostics::Kind::FragmentDeadline),FrameWriteFailure::Total(_)=>Some(crate::diagnostics::Kind::FrameDeadline),FrameWriteFailure::Sink=>Some(crate::diagnostics::Kind::SendError),_=>None};
     let _late=match failure {FrameWriteFailure::Idle(at)|FrameWriteFailure::Total(at)=>tokio::time::Instant::now().saturating_duration_since(at).as_micros() as u64,_=>0};
@@ -595,13 +617,14 @@ fn enqueue_outbox(
                                     mode,
                                     guard.binary_frames(token),
                                     guard.frame_eink_refresh(&frame),
+                                    guard.frame_observation_cause(&frame),
                                 )
                             })
                     } else {
                         None
                     }
                 };
-                let Some((asset, mode, binary, eink_refresh)) = asset else {
+                let Some((asset, mode, binary, eink_refresh, cause)) = asset else {
                     continue;
                 };
                 let (width, height, format) = if asset.len() == crate::eink::FRAME_BYTES {
@@ -622,7 +645,7 @@ fn enqueue_outbox(
                     byte_len: asset.len() as u32,
                     crc32: crc32fast::hash(&asset),
                 };
-                let encoded_start = encode(&start).map_err(|_| ())?;
+                let encoded_start = crate::protocol::encode_observed(&start,cause).map_err(|_| ())?;
                 let mut wire_bytes = encoded_start.len();
                 queue
                     .push(Packet {
@@ -747,7 +770,7 @@ async fn writer_loop_with_progress<S>(
                     let diagnostic_started=crate::diagnostics::mark();
                     let (_,_,session)=session_identity(&current);
                     crate::diagnostics::event(crate::diagnostics::Kind::ReplyStart,session,0,0,0,0);
-                    if let Err(failure)=write_wire(&mut sink,message).await {
+                    if let Err(failure)=write_observed_wire(&mut sink,message,reply.cause).await {
                         crate::diagnostics::event(crate::diagnostics::Kind::ReplyError,session,0,failure as u64,0,0);
                         let (id,incarnation,session_epoch)=session_identity(&current);
                         eprintln!("picomado control_write_failed id={} incarnation={} session_epoch={} kind={}",id,incarnation,session_epoch,kind);
@@ -808,7 +831,15 @@ async fn writer_loop_with_progress<S>(
                         eprintln!("picomado stream_frame_start id={} frame_id={} sequence={} fps={}",frame.token.device_id,frame.token.frame_id,frame.sequence,frame.fps);
                         crate::diagnostics::duration(crate::diagnostics::Kind::LogIo,diagnostic_log,0,0,0);
                         crate::diagnostics::event(crate::diagnostics::Kind::FrameStart,frame.token.session_epoch,frame.token.frame_id,frame.sequence,frame.generation,0);
-                        video_active=Some(crate::lcd_stream::VideoTransfer::new(frame));
+                        #[cfg(feature="boundary-observation")]
+                        let cause=crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).ok().and_then(|a|{
+                            let cause=a.frame_observation_cause(&frame.token);
+                            a.observation_source().record_context(crate::observation::Component::Frame,crate::observation::Phase::Pending,0,0,0,0,frame.token.frame_id,cause);
+                            cause
+                        });
+                        #[cfg(not(feature="boundary-observation"))]
+                        let cause=None;
+                        video_active=Some(crate::lcd_stream::VideoTransfer::new_observed(frame,cause));
                     }
                 }
             },
@@ -971,6 +1002,10 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
     let mut end_reason = "read_eof";
     let mut end_detail = "none";
     let mut diagnostics = AckDiagnostics::default();
+    #[cfg(feature="boundary-observation")]
+    let observations=app.lock().ok().map(|app|app.observation_source());
+    #[cfg(not(feature="boundary-observation"))]
+    let observations:Option<crate::observation::Source>=None;
     eprintln!("picomado websocket_open connection_id={} accept_order={} order_source={}", connection_id, accept_order, order_source);
     loop {
         let incoming = tokio::select! {
@@ -1026,7 +1061,11 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
         crate::ack_probe::record(crate::ack_probe::Event::DecodeBegin,accept_order.get(),rx_messages+1,0,0,0,bytes.len()as u64,0);
         #[cfg(feature="ack-path-probe")]
         if crate::ack_probe::active(accept_order.get()){decoder.probe_bind(accept_order.get(),rx_messages);}
-        let messages = match decoder.push(&bytes) {
+        #[cfg(feature="boundary-observation")]
+        let decoded=decoder.push_observed(&bytes);
+        #[cfg(not(feature="boundary-observation"))]
+        let decoded=decoder.push(&bytes);
+        let messages = match decoded {
             Ok(messages) => messages,
             Err(_) => {
                 end_reason = "decode_invalid_frame";
@@ -1037,7 +1076,16 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
             }
         };
         let mut failed = false;
-        for message in messages {
+        for received in messages {
+            #[cfg(feature="boundary-observation")]
+            let (message,cause,invalid_cause)=(received.message,received.cause,received.invalid_cause);
+            #[cfg(not(feature="boundary-observation"))]
+            let (message,cause,invalid_cause)=(received,None,false);
+            let cause=if matches!(message,WireMessage::Next{..}|WireMessage::Up{..}|WireMessage::Down{..}|WireMessage::Power{..}|WireMessage::EnterSub{..}){cause}else{None};
+            if let Some(source)=&observations {
+                source.record_context(crate::observation::Component::Api,crate::observation::Phase::Received,0,0,0,message.kind() as u64,0,cause);
+                if invalid_cause{source.record(crate::observation::Component::Observation,crate::observation::Phase::Rejected,0,0,0,1);}
+            }
             rx_messages += 1;
             let kind = wire_label(&message);
             let was_unbound = current.is_none();
@@ -1047,7 +1095,7 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
             crate::ack_probe::record(crate::ack_probe::Event::ProcessBegin,accept_order.get(),rx_messages,probe_identity.0,probe_identity.1,probe_identity.2,0,0);
             #[cfg(feature="ack-path-probe")]
             let probe_process_started=crate::ack_probe::active(accept_order.get()).then(std::time::Instant::now);
-            match process_on_connection(&app, &mut current, message, &mut diagnostics, Some(accept_order)) {
+            match process_with_observation(&app, &mut current, message, &mut diagnostics, Some(accept_order),cause) {
                 Ok(reply) => {
                     #[cfg(feature="ack-path-probe")]
                     {if was_unbound {probe_bind_pending=true;}if probe_bind_pending {if let Some(token)=&current {probe_bind_pending=!crate::ack_probe::bind_accepted(&app,token,accept_order.get());}}}
@@ -1067,7 +1115,7 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
                         let queued = std::time::Instant::now();
                         #[cfg(feature="ack-path-probe")]
                         crate::ack_probe::record(crate::ack_probe::Event::ReplyQueueBegin,accept_order.get(),rx_messages,probe_identity.0,probe_identity.1,probe_identity.2,tx.capacity()as u64,0);
-                        if enqueue_reply(&tx,reply,current.as_ref().map_or(0,|s|s.session_epoch)).await.is_err() {
+                        if enqueue_observed_reply(&tx,reply,current.as_ref().map_or(0,|s|s.session_epoch),cause).await.is_err() {
                             end_reason = "writer_command_closed";
                             failed = true;
                             break;
@@ -4208,8 +4256,11 @@ mod tests {
         println!("R3 layout command_bytes={} message_bytes={} timestamp_field={}",std::mem::size_of::<WriterCommand>(),std::mem::size_of::<WireMessage>(),cfg!(feature="stream-diagnostics"));
     }
 
-    include!("../tests/transport_recovery.rs");
+    include!("../tests/support/transport_recovery.rs");
     mod hello_order { use super::*; include!("../tests/support/hello_order.rs"); }
     include!("../tests/support/ack_probe_reader.rs");
+
+    #[cfg(feature="boundary-observation")]
+    include!("causal_contract_tests.rs");
 
 }

@@ -20,7 +20,7 @@ class Tests(unittest.TestCase):
                 value = ev.decode(line)
                 if value:
                     rows.append(value)
-        self.assertEqual([r['sequence'] for r in rows], list(range(1, 17))+[1001, 1002])
+        self.assertEqual([r['sequence'] for r in rows], list(range(2, 18))+[1002, 1003, 1004, 1005])
         self.assertEqual(rows[-1]['dropped'], 984)
         self.assertEqual(rows[0]['us'], 1<<40)
         self.assertEqual(rows[-1]['operation'], 1)
@@ -29,7 +29,7 @@ class Tests(unittest.TestCase):
         line = next(x+b'\n' for x in fixture.splitlines() if x.startswith(b'ev1 s '))
         status = ev.parse_status(line)
         self.assertEqual(status['cid'], (1<<64)-1)
-        self.assertEqual(status['sequence'], 1002)
+        self.assertEqual(status['sequence'], 1005)
         maximum = ('ev1 s '+' '.join(['ffffffffffffffff']*6)+' 1 1\n').encode()
         self.assertLess(len(maximum), 144)
         self.assertEqual(ev.parse_status(maximum)['dropped'], (1<<64)-1)

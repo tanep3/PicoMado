@@ -124,8 +124,13 @@ static void command(const char *line){
     if(n>=2 && !strcmp(w[0],"EV1")){
         uint64_t cid=0;bool tagged=n==3 && hex(w[2],&cid) && cid;
         if(n!=2 && !tagged){response("ev1 error=syntax\n");return;}
-        if(!strcmp(w[1],"ON"))pm_observation_enable(true);
-        else if(!strcmp(w[1],"OFF"))pm_observation_enable(false);
+        if(!strcmp(w[1],"ON")){
+            pm_observation_enable(true);
+            pm_observe(PM_OB_OBSERVATION,1,PM_OB_RECEIVED,0,0,0,0,PM_OB_CATALOG,PM_OB_COVERAGE);
+        }else if(!strcmp(w[1],"OFF")){
+            pm_observe(PM_OB_OBSERVATION,1,PM_OB_COMPLETED,0,0,0,0,PM_OB_CATALOG,PM_OB_COVERAGE);
+            pm_observation_enable(false);
+        }
         else if(strcmp(w[1],"STATUS")){response("ev1 error=syntax\n");return;}
         pm_observation_status s=pm_observation_read();
         if(tagged)response("ev1 s %llx %llx %llx %llx %llx %llx %u %u\n",

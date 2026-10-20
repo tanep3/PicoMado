@@ -65,3 +65,25 @@ fn full_observer_preserves_selection_and_persistence(){
     let restored=App::open(&temp.path().join("state.db")).unwrap();
     assert_eq!(restored.view().devices[0].selected,expected);
 }
+
+#[cfg(feature="boundary-observation")]
+#[test]
+fn causes_stay_with_exact_frame_and_view_across_overlapping_inputs(){
+    use crate::observation::Cause;
+    let temp=tempfile::tempdir().unwrap();let mut app=App::open_with_plugin_set(&temp.path().join("db"),temp.path(),Arc::new(crate::fetch::SystemClock),composition()).unwrap();
+    let token=app.hello("fixture",["lcd".into()].into(),42).unwrap();
+    let initial=app.pending_effects().into_iter().find_map(|(_,e)|if let Effect::SendFrame{token,..}=e{Some(token)}else{None}).unwrap();
+    let a=Cause{version:1,boot:101,operation:201};let b=Cause{version:1,boot:101,operation:202};
+    app.with_observation_cause("fixture",Some(a),|app|app.button(&token,ButtonAction::Down)).unwrap();
+    // Video starts asynchronously after the accepted view change.
+    app.queue_lcd_frame(&token,"fixture-video",vec![3;25600]).unwrap();
+    let frame_a=app.pending_effects().into_iter().find_map(|(_,e)|if let Effect::SendFrame{token,..}=e{Some(token)}else{None}).unwrap();
+    assert_eq!(app.frame_observation_cause(&frame_a),Some(a));
+    let mut transfer=crate::lcd_stream::VideoTransfer::new_observed(Arc::new(crate::lcd_stream::VideoFrame{token:frame_a.clone(),fps:6,sequence:1,generation:1,mode:"normal",pixels:Arc::new(vec![3;25600])}),Some(a));
+    app.with_observation_cause("fixture",Some(b),|app|app.button(&token,ButtonAction::Down)).unwrap();
+    let metadata=crate::protocol::Decoder::default().push_observed(&transfer.next_packet().unwrap().unwrap()).unwrap();
+    assert_eq!(metadata[0].cause,Some(a),"in-flight video retains its immutable cause");
+    let frame_b=app.pending_effects().into_iter().find_map(|(_,e)|if let Effect::SendFrame{token,..}=e{Some(token)}else{None}).unwrap();
+    assert_eq!(app.frame_observation_cause(&frame_b),Some(b));assert_eq!(app.frame_observation_cause(&frame_a),Some(a));assert_eq!(app.frame_observation_cause(&initial),None);
+    let unknown=FrameToken{frame_id:u64::MAX,display_epoch:u64::MAX,..frame_b.clone()};assert_eq!(app.frame_observation_cause(&unknown),None);
+}

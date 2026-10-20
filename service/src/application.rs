@@ -347,6 +347,11 @@ pub struct App {
     plugin_catalog: Vec<String>,
     observations: crate::observation::Source,
     observation_parent: u64,
+    observation_cause: Option<crate::observation::Cause>,
+    #[cfg(feature="boundary-observation")]
+    frame_causes: std::collections::VecDeque<(u64,crate::observation::Cause)>,
+    #[cfg(feature="boundary-observation")]
+    view_causes: std::collections::VecDeque<((u64,u64,u64,u64),crate::observation::Cause)>,
     runtime: Runtime,
     clock: Arc<dyn crate::fetch::Clock + Send + Sync>,
     /// Completed LCD pixels are transient; only validated handles enter the sender.
@@ -476,6 +481,11 @@ impl App {
             plugin_catalog: plugins.order,
             observations: crate::observation::Source::default(),
             observation_parent: 0,
+            observation_cause: None,
+            #[cfg(feature="boundary-observation")]
+            frame_causes: std::collections::VecDeque::with_capacity(256),
+            #[cfg(feature="boundary-observation")]
+            view_causes: std::collections::VecDeque::with_capacity(256),
             runtime,
             clock,
             frame_assets: BTreeMap::new(),
@@ -522,30 +532,42 @@ impl App {
     ) -> Result<T, AppError> {
         use crate::observation::{Component, Phase};
         let before = self.runtime.world.revision;
-        let operation = self.observations.record(Component::State, Phase::Received, 0, self.observation_parent, before, 0);
+        let operation = self.record_observation(Component::State, Phase::Received, 0, self.observation_parent, before, 0);
         let first_effect = self.runtime.next_effect_id;
         let mut next = self.runtime.clone();
         let result = match action(&self.engine, &mut next) {
             Ok(value) => value,
             Err(error) => {
-                self.observations.record(Component::State, Phase::Rejected, operation, 0, before, 0);
+                self.record_observation(Component::State, Phase::Rejected, operation, 0, before, 0);
                 return Err(error);
             }
         };
         next.prune_stale_effects();
-        self.observations.record(Component::State, Phase::Dispatched, operation, 0, next.world.revision, next.outbox.len() as u64);
+        self.record_observation(Component::State, Phase::Dispatched, operation, 0, next.world.revision, next.outbox.len() as u64);
         let saving = std::time::Instant::now();
         if let Err(error) = Self::persist(&mut self.connection, &next) {
-            self.observations.record(Component::State, Phase::Error, operation, 0, before, 0);
+            self.record_observation(Component::State, Phase::Error, operation, 0, before, 0);
             return Err(error);
         }
         self.persistence_us = self.persistence_us.saturating_add(saving.elapsed().as_micros());
         let revision = next.world.revision;
         self.runtime = next;
-        self.observations.record(Component::State, Phase::Committed, operation, 0, revision, 0);
+        self.record_observation(Component::State, Phase::Committed, operation, 0, revision, 0);
+        #[cfg(feature="boundary-observation")]
+        for (_, effect) in self.runtime.outbox.range(first_effect..) {
+            if let Effect::SendFrame{token,..}=effect {
+                let key=(token.incarnation,token.session_epoch,token.display_epoch,token.screen_owner_epoch);
+                let cause=self.observation_cause.or_else(||self.view_causes.iter().rev().find(|(view,_)|*view==key).map(|(_,cause)|*cause));
+                if let Some(cause)=cause {
+                    if self.frame_causes.len()==256 {self.frame_causes.pop_front();}
+                    self.frame_causes.push_back((token.frame_id,cause));
+                }
+                self.observations.record_context(Component::Frame,Phase::Pending,0,operation,revision,0,token.frame_id,cause);
+            }
+        }
         if self.observations.enabled() {
             for (id, _) in self.runtime.outbox.range(first_effect..) {
-                self.observations.record(Component::Effect, Phase::Pending, 0, operation, revision, *id);
+                self.record_observation(Component::Effect, Phase::Pending, 0, operation, revision, *id);
             }
         }
         self.timed_frames
@@ -695,10 +717,42 @@ impl App {
     }
 
     /// Subscribe before inspecting the outbox so changes cannot be missed.
+    fn record_observation(&self,component:crate::observation::Component,phase:crate::observation::Phase,operation:u64,parent:u64,revision:u64,argument:u64)->u64 {
+        self.observations.record_context(component,phase,operation,parent,revision,argument,0,self.observation_cause)
+    }
+    pub fn with_observation_cause<T>(&mut self,device_id:&str,cause:Option<crate::observation::Cause>,action:impl FnOnce(&mut Self)->T)->T {
+        #[cfg(feature="boundary-observation")]
+        let before=self.runtime.world.devices.get(device_id).map(|d|(d.incarnation,d.session_epoch,d.display_epoch,d.screen_owner_epoch));
+        let previous=self.observation_cause;self.observation_cause=cause.filter(|c|c.valid());
+        let result=action(self);
+        #[cfg(feature="boundary-observation")]
+        if let Some(cause)=self.observation_cause {
+            let after=self.runtime.world.devices.get(device_id).map(|d|(d.incarnation,d.session_epoch,d.display_epoch,d.screen_owner_epoch));
+            if after!=before {
+                if let Some(key)=after {
+                    if self.view_causes.len()==256{self.view_causes.pop_front();}
+                    self.view_causes.push_back((key,cause));
+                }
+            }
+        }
+        #[cfg(not(feature="boundary-observation"))]
+        let _=device_id;
+        self.observation_cause=previous;result
+    }
+    pub fn frame_observation_cause(&self,frame:&FrameToken)->Option<crate::observation::Cause>{
+        #[cfg(feature="boundary-observation")]
+        {
+            if let Some((_,cause))=self.frame_causes.iter().rev().find(|(id,_)|*id==frame.frame_id){return Some(*cause);}
+            let key=(frame.incarnation,frame.session_epoch,frame.display_epoch,frame.screen_owner_epoch);
+            self.view_causes.iter().rev().find(|(view,_)|*view==key).map(|(_,cause)|*cause)
+        }
+        #[cfg(not(feature="boundary-observation"))]
+        {let _=frame;None}
+    }
     pub fn observation_source(&self) -> crate::observation::Source { self.observations.clone() }
 
     pub(crate) fn observe_effect(&self, phase: crate::observation::Phase, id: u64) {
-        self.observations.record(crate::observation::Component::Effect, phase, 0, 0, self.runtime.world.revision, id);
+        self.record_observation(crate::observation::Component::Effect, phase, 0, 0, self.runtime.world.revision, id);
     }
 
     pub fn has_plugin(&self, id: &str) -> bool { self.contents.contains_key(id) }
@@ -1898,25 +1952,25 @@ impl App {
             return Err(AppError::Invalid("unsupported terminal event"));
         }
         use crate::observation::{Component, Phase};
-        let operation = self.observations.record(Component::Input, Phase::Received, 0, 0, self.runtime.world.revision, 0);
+        let operation = self.record_observation(Component::Input, Phase::Received, 0, 0, self.runtime.world.revision, 0);
         let decision = match self.engine.handle(&self.runtime.world, &event) {
             Ok(decision) => decision,
             Err(_) => {
-                self.observations.record(Component::Input, Phase::Rejected, operation, 0, self.runtime.world.revision, 0);
+                self.record_observation(Component::Input, Phase::Rejected, operation, 0, self.runtime.world.revision, 0);
                 return Err(AppError::Conflict("terminal event rejected"));
             }
         };
-        self.observations.record(Component::Input, Phase::Dispatched, operation, 0, decision.state.revision, decision.effects.len() as u64);
+        self.record_observation(Component::Input, Phase::Dispatched, operation, 0, decision.state.revision, decision.effects.len() as u64);
         // A delayed/duplicate ACK is a Rule no-op, so it must not create a
         // SQLite write on every retry. State-changing events still commit.
         if decision.applied.is_none() {
-            self.observations.record(Component::Input, Phase::Completed, operation, 0, self.runtime.world.revision, 0);
+            self.record_observation(Component::Input, Phase::Completed, operation, 0, self.runtime.world.revision, 0);
             return Ok(false);
         }
         self.observation_parent = operation;
         let result = self.change(|_, state| state.accept(decision));
         self.observation_parent = 0;
-        self.observations.record(Component::Input, if result.is_ok() { Phase::Completed } else { Phase::Error }, operation, 0, self.runtime.world.revision, 1);
+        self.record_observation(Component::Input, if result.is_ok() { Phase::Completed } else { Phase::Error }, operation, 0, self.runtime.world.revision, 1);
         let changed = result?;
         if changed {
             match &event {
@@ -1981,7 +2035,7 @@ impl App {
         if asset_handle.is_empty() || asset_handle.len() > 256 || asset_handle.contains('\0') {
             return Err(AppError::Invalid("invalid asset handle"));
         }
-        self.change(|engine, state| {
+        let frame=self.change(|engine, state| {
             let device = state
                 .world
                 .devices
@@ -2013,7 +2067,8 @@ impl App {
                 .ok_or(AppError::Conflict("frame not applicable"))?;
             state.accept(decision)?;
             Ok(frame)
-        })
+        })?;
+        Ok(frame)
     }
 
     /// A future plugin executor reports fetch completion by outbox ID. The

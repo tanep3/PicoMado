@@ -21,25 +21,25 @@ int main(int argc,char **argv){
     command("EV1 ON");drain();used=0;output[0]=0;
     for(unsigned i=0;i<1000;i++)pm_observe(PM_OB_API,12,PM_OB_RECEIVED,0,0,1,2,3,i);
     pm_observation_status s=pm_observation_read();
-    assert(s.sequence==1000 && s.dropped==984 && s.first_lost==17 && s.last_lost==1000 && s.queued==16);
+    assert(s.sequence==1001 && s.dropped==984 && s.first_lost==18 && s.last_lost==1001 && s.queued==16);
     command("EV1 STATUS");room=0;
     for(unsigned i=0;i<10000;i++)pm_trace_flush();
     assert(!used && !masked);drain();
-    assert(strstr(output,"ev1 status b=1234 seq=3e8 drop=3d8 first=11 last=3e8 on=1 sat=0\n"));
-    assert(pm_observe(PM_OB_DISPLAY,1,PM_OB_COMPLETED,1,0,1,2,1,0)==1001);drain();
+    assert(strstr(output,"ev1 status b=1234 seq=3e9 drop=3d8 first=12 last=3e9 on=1 sat=0\n"));
+    assert(pm_observe(PM_OB_DISPLAY,1,PM_OB_COMPLETED,1,0,1,2,1,0)==1002);drain();
     command("EV1 OFF");drain();
     assert(!pm_observe(PM_OB_API,12,PM_OB_RECEIVED,0,0,1,2,3,4));
     command("EV1 ON");drain();
-    assert(pm_observe(PM_OB_API,12,PM_OB_COMPLETED,1,0,1,2,0,0)==1002);drain();
+    assert(pm_observe(PM_OB_API,12,PM_OB_COMPLETED,1,0,1,2,0,0)==1005);drain();
     command("EV1 STATUS ffffffffffffffff");drain();
-    assert(strstr(output,"ev1 s ffffffffffffffff 1234 3ea 3d8 11 3e8 1 0\n"));
+    assert(strstr(output,"ev1 s ffffffffffffffff 1234 3ed 3d8 12 3e9 1 0\n"));
     unsigned events=0;
     for(char *p=output;*p;){char *end=strchr(p,'\n');assert(end);
         if(!strncmp(p,"ev1 ",4) && p[4]!='s'){assert(end-p==165);events++;}
         else {assert(!strncmp(p,"ev1 status ",11) || !strncmp(p,"ev1 s ",6));assert(end-p<144);}
         p=end+1;
     }
-    assert(events==18 && !masked && writes>10000);
+    assert(events==20 && !masked && writes>10000);
     FILE *f=fopen(argv[1],"wb");assert(f);assert(fwrite(output,1,used,f)==used);assert(!fclose(f));
     puts("PASS bounded shared event/control queue, 984 explicit drops, 64-bit time, 7-byte writes, stop/resume watermark");
 }

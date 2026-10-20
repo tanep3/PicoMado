@@ -5,8 +5,10 @@
 #define PM_EVENT_STREAM 0
 #endif
 /* Stable boundary vocabulary, shared with the host. No application decisions. */
-enum { PM_OB_INPUT=1,PM_OB_API,PM_OB_NETWORK,PM_OB_FRAME,PM_OB_DISPLAY,PM_OB_STATE,PM_OB_EFFECT };
+enum { PM_OB_INPUT=1,PM_OB_API,PM_OB_NETWORK,PM_OB_FRAME,PM_OB_DISPLAY,PM_OB_STATE,PM_OB_EFFECT,PM_OB_OBSERVATION };
 enum { PM_OB_RECEIVED=1,PM_OB_DISPATCHED,PM_OB_PENDING,PM_OB_COMPLETED,PM_OB_REJECTED,PM_OB_ERROR,PM_OB_CANCELLED,PM_OB_COMMITTED };
+#define PM_OB_CATALOG 2u
+#define PM_OB_COVERAGE 0x9fu
 typedef struct {
     uint64_t boot,sequence,dropped,first_lost,last_lost;
     unsigned queued;

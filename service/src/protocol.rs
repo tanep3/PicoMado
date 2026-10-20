@@ -303,8 +303,15 @@ impl GatedFrameReceiver {
 }
 
 pub fn encode(message: &WireMessage) -> Result<Vec<u8>, ProtocolError> {
+    encode_observed(message,None)
+}
+pub fn encode_observed(message: &WireMessage,cause:Option<crate::observation::Cause>) -> Result<Vec<u8>, ProtocolError> {
     validate_image_message(message)?;
-    let payload = serde_json::to_vec(message).map_err(|_| ProtocolError::InvalidJson)?;
+    let payload = if let Some(cause)=cause.filter(|c|c.valid()) {
+        #[derive(Serialize)]
+        struct Envelope<'a>{#[serde(flatten)] message:&'a WireMessage,observation:crate::observation::Cause}
+        serde_json::to_vec(&Envelope{message,observation:cause})
+    }else{serde_json::to_vec(message)}.map_err(|_| ProtocolError::InvalidJson)?;
     let len = payload.len() + 2;
     let limit = if matches!(message, WireMessage::FrameChunk { .. }) {
         MAX_CHUNK_BYTES
@@ -391,6 +398,8 @@ fn decode_frame_bytes(body: &[u8]) -> Result<WireMessage, ProtocolError> {
     })
 }
 
+pub struct ObservedMessage {pub message:WireMessage,pub cause:Option<crate::observation::Cause>,pub invalid_cause:bool}
+
 #[derive(Default)]
 pub struct Decoder {
     buffer: Vec<u8>,
@@ -404,7 +413,20 @@ impl Decoder {
     #[cfg(feature="ack-path-probe")]
     pub(crate) fn probe_bind(&mut self,connection:u64,message:u64){self.probe_connection=connection;self.probe_message=message;}
 
-    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<WireMessage>, ProtocolError> {
+    pub fn push(&mut self,bytes:&[u8])->Result<Vec<WireMessage>,ProtocolError>{self.push_parsed(bytes,|message,_|message)}
+    pub fn push_observed(&mut self,bytes:&[u8])->Result<Vec<ObservedMessage>,ProtocolError>{
+        self.push_parsed(bytes,|message,payload|{
+            #[derive(Deserialize)]struct Metadata{#[serde(default)]observation:Option<serde_json::Value>}
+            let metadata=serde_json::from_slice::<Metadata>(payload);
+            let (cause,invalid)=match metadata {
+                Ok(Metadata{observation:Some(value)})=>match serde_json::from_value::<crate::observation::Cause>(value){
+                    Ok(cause) if cause.valid()=>(Some(cause),false),_ =>(None,true)},
+                Ok(_) =>(None,false),Err(_) =>(None,payload.iter().copied().find(|b|!b.is_ascii_whitespace())==Some(b'{')),
+            };
+            ObservedMessage{message,cause,invalid_cause:invalid}
+        })
+    }
+    fn push_parsed<T>(&mut self, bytes: &[u8], parse:impl Fn(WireMessage,&[u8])->T) -> Result<Vec<T>, ProtocolError> {
         if bytes.len() > MAX_CHUNK_BYTES
             || self.buffer.len().saturating_add(bytes.len()) > MAX_CHUNK_BYTES
         {
@@ -472,7 +494,7 @@ impl Decoder {
             }
             #[cfg(feature="ack-path-probe")]
             if self.probe_connection!=0 {self.probe_message+=1;crate::ack_probe::decoded(self.probe_connection,self.probe_message,kind,&frame[2..],&message);}
-            messages.push(message);
+            messages.push(parse(message,&frame[2..]));
             self.buffer.drain(..length + 4);
         }
         Ok(messages)
@@ -914,5 +936,32 @@ mod tests {
             fresh_receiver.complete_draw(fresh.clone()),
             Some(WireMessage::RenderedAck { token: fresh })
         );
+    }
+}
+
+#[cfg(test)]
+mod observation_contract_tests {
+    use super::*;
+    use crate::observation::Cause;
+    #[test]
+    fn optional_cause_keeps_legacy_message_and_no_metadata_bytes_identical(){
+        let message=WireMessage::Up{incarnation:1,session_epoch:2};
+        assert_eq!(encode(&message).unwrap(),encode_observed(&message,None).unwrap());
+        let cause=Cause{version:1,boot:9,operation:3};
+        let bytes=encode_observed(&message,Some(cause)).unwrap();
+        assert_eq!(Decoder::default().push(&bytes).unwrap(),vec![message.clone()]);
+        assert_eq!(serde_json::from_slice::<WireMessage>(&bytes[6..]).unwrap(),message);
+        let mut decoder=Decoder::default();let mut result=vec![];
+        for part in bytes.chunks(3){result.extend(decoder.push_observed(part).unwrap());}
+        assert_eq!(result.len(),1);assert_eq!(result[0].cause,Some(cause));assert_eq!(result[0].message,message);
+    }
+    #[test]
+    fn invalid_observation_never_rejects_valid_domain_message(){
+        for metadata in ["null","{}","{\"version\":99,\"boot\":1,\"operation\":1}","{\"version\":1,\"boot\":0,\"operation\":1}","[]"] {
+            let json=format!("{{\"type\":\"up\",\"data\":{{\"incarnation\":1,\"session_epoch\":2}},\"observation\":{metadata}}}");
+            let mut bytes=((json.len()+2) as u32).to_be_bytes().to_vec();bytes.extend([VERSION,15]);bytes.extend(json.as_bytes());
+            let result=Decoder::default().push_observed(&bytes).unwrap();assert_eq!(result.len(),1);assert!(result[0].cause.is_none());
+            assert!(matches!(result[0].message,WireMessage::Up{incarnation:1,session_epoch:2}));
+        }
     }
 }
