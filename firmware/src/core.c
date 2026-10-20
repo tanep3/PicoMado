@@ -24,11 +24,15 @@ bool pm_token_current(pm_token t, uint64_t i, uint64_t s, uint64_t d, uint64_t o
            t.display_epoch == d && t.screen_owner_epoch == o;
 }
 
+bool pm_frame_header_valid(uint64_t width,uint64_t height,const char *format,
+                           uint64_t length,uint64_t crc){
+    return width==PM_W && height==PM_H && format && !strcmp(format,PM_PIXEL_FORMAT_NAME) &&
+        length==PM_IMAGE_BYTES && crc<=UINT32_MAX;
+}
 bool pm_start(pm_assembly *a, pm_token token, unsigned width, unsigned height,
               const char *format, uint32_t length, uint32_t crc) {
     pm_reset(a);
-    if (width != PM_W || height != PM_H || strcmp(format, PM_PIXEL_FORMAT_NAME) ||
-        length != PM_IMAGE_BYTES) return false;
+    if (!pm_frame_header_valid(width,height,format,length,crc)) return false;
     a->token = token; a->expected = length; a->crc = crc; a->active = true;
     return true;
 }

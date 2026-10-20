@@ -31,6 +31,8 @@ typedef struct {
 
 uint32_t pm_crc32(const uint8_t *bytes, size_t len);
 void pm_reset(pm_assembly *a);
+bool pm_frame_header_valid(uint64_t width,uint64_t height,const char *format,
+                           uint64_t length,uint64_t crc);
 bool pm_start(pm_assembly *a, pm_token token, unsigned width, unsigned height,
               const char *format, uint32_t length, uint32_t crc);
 bool pm_chunk(pm_assembly *a, pm_token token, uint32_t offset,

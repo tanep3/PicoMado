@@ -26,7 +26,7 @@ static unsigned ram_offset;
 static uint32_t until_ms,deadline_ms;
 static bool stopped,result_ready,result_ok,status_valid;
 static char status_one[32],status_two[32];
-static uint64_t frame_context;
+static uint64_t queued_frame_context,active_frame_context;
 static bool queued_clock,active_clock,clock_base_valid,partial_update,awake;
 static unsigned queued_minutes;
 static uint64_t queued_minute,active_minute,last_full_minute;
@@ -63,7 +63,7 @@ void pm_display_init(void){
 bool pm_display_frame(uint8_t *pixels,size_t length){
     if(stopped || !pixels || length!=PM_IMAGE_BYTES || active_job==REMOTE || queued_job==REMOTE || result_ready)return false;
     memcpy(queued,pixels,length);queued_job=REMOTE;status_valid=false;queued_clock=false;
-    frame_context=pm_trace_current_frame();return true;
+    queued_frame_context=pm_trace_current_frame();return true;
 }
 bool pm_display_clock_frame(uint8_t *pixels,size_t length,unsigned minutes,uint64_t minute,bool reset_base){
     if(minutes<1 || minutes>60 || !pm_display_frame(pixels,length))return false;
@@ -81,6 +81,7 @@ void pm_display_poll(void){
     if(stage==IDLE){
         if(queued_job==NONE || stopped)return;
         active_job=queued_job;queued_job=NONE;active_clock=queued_clock;queued_clock=false;
+        active_frame_context=queued_frame_context;queued_frame_context=0;
         active_minute=queued_minute;
         partial_update=active_clock && clock_base_valid && awake &&
             active_minute>=last_full_minute && active_minute-last_full_minute<queued_minutes;
@@ -112,7 +113,7 @@ void pm_display_poll(void){
             cmd(0x45);data(0);data(0);data(249);data(0);
             cmd(0x4e);data(0);cmd(0x4f);data(0);data(0);
             cmd(0x24);ram_offset=0;stage=WRITE_RAM;
-            pm_trace_event(PM_TRACE_SPI_BEGIN,frame_context,0,0);
+            pm_trace_event(PM_TRACE_SPI_BEGIN,active_frame_context,0,0);
         }break;
     case WAIT_SOFT_RESET:
         if(reached(now,until_ms) && !gpio_get(PM_EINK_PIN_BUSY)){
@@ -122,7 +123,7 @@ void pm_display_poll(void){
             cmd(0x4e);data(0);cmd(0x4f);data(0);data(0);
             cmd(0x3c);data(0x05);cmd(0x21);data(0);data(0x80);
             cmd(0x18);data(0x80);cmd(0x24);ram_offset=0;stage=WRITE_RAM;
-            pm_trace_event(PM_TRACE_SPI_BEGIN,frame_context,0,0);
+            pm_trace_event(PM_TRACE_SPI_BEGIN,active_frame_context,0,0);
         }break;
     case WRITE_RAM:case WRITE_BASE:
         for(unsigned n=0;n<128 && ram_offset<sizeof ram;n++)data(ram[ram_offset++]);
@@ -131,7 +132,7 @@ void pm_display_poll(void){
                 // Display_Base writes the same image to old/new RAM before f7.
                 cmd(0x26);ram_offset=0;stage=WRITE_BASE;break;
             }
-            pm_trace_event(PM_TRACE_SPI_END,frame_context,active_clock&&!partial_update?2*sizeof ram:sizeof ram,PM_EINK_SPI_BAUD);
+            pm_trace_event(PM_TRACE_SPI_END,active_frame_context,active_clock&&!partial_update?2*sizeof ram:sizeof ram,PM_EINK_SPI_BAUD);
             cmd(0x22);data(partial_update?0xff:0xf7);cmd(0x20);until_ms=now+10;stage=WAIT_REFRESH;
         }break;
     case WAIT_REFRESH:
@@ -178,11 +179,13 @@ void pm_display_status(const char *one,const char *two){
             if(bitmap[y*(PM_STATUS_W/8)+x/8]&(0x80u>>(x&7)))dot(x+(PM_W-PM_STATUS_W)/2,y+48);
     }else {label(one,35);label(two,73);}
     queued_job=LOCAL;queued_clock=false;clock_base_valid=false;
+    queued_frame_context=0;
 }
 void pm_display_standby(void){
     // App defers this until physical refresh finishes. Never clear retained pixels.
     if(queued_job==REMOTE){result_ready=true;result_ok=false;}
     queued_job=NONE;stopped=true;status_valid=false;queued_clock=false;clock_base_valid=false;
+    queued_frame_context=0;
     if(awake && stage==IDLE){cmd(0x10);data(0x01);until_ms=clock_ms()+100;stage=WAIT_SLEEP;}
     awake=false;
 }
@@ -193,4 +196,5 @@ void pm_display_reference_pattern(void){
     for(unsigned y=0;y<PM_H;y++)for(unsigned x=0;x<PM_W;x++)
         if(x==0 || y==0 || x==PM_W-1 || y==PM_H-1 || (x<18 && y<10))dot(x,y);
     label("PICO MADO",35);queued_job=LOCAL;status_valid=false;queued_clock=false;clock_base_valid=false;
+    queued_frame_context=0;
 }

@@ -5,6 +5,7 @@
 #include "eink_transform.h"
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
+#include "trace.h"
 static spi_inst_t instance;
 spi_inst_t *spi1=&instance;
 static uint32_t clock_ms;
@@ -14,6 +15,19 @@ static size_t old_written;
 static unsigned full_refreshes,partial_refreshes,soft_resets;
 static size_t written,writes;
 static unsigned sleeping,refreshes,gpio_inits[30];
+#if PM_TRACE_ENABLE
+static uint64_t test_frame_context,spi_frames[8];
+static unsigned spi_frame_count;
+static bool capture_spi;
+uint64_t pm_trace_current_frame(void){return test_frame_context;}
+void pm_trace_event(pm_trace_kind kind,uint64_t frame,int32_t a,uint32_t b){
+    (void)a;(void)b;
+    if(capture_spi&&(kind==PM_TRACE_SPI_BEGIN||kind==PM_TRACE_SPI_END)){
+        assert(spi_frame_count<8);spi_frames[spi_frame_count++]=frame;
+    }
+}
+int pm_logf(const char *format,...){(void)format;return 0;}
+#endif
 absolute_time_t get_absolute_time(void){return clock_ms;}
 uint32_t to_ms_since_boot(absolute_time_t t){return (uint32_t)t;}
 void gpio_init(uint p){assert(p<30);gpio_inits[p]++;}
@@ -118,6 +132,20 @@ int main(void){
         poll_for(PM_EINK_BUSY_TIMEOUT_MS+100);assert(pm_display_take_result(&ok)&&!ok);busy=false;
         assert(pm_display_clock_frame(pixels,sizeof pixels,15,104,false));poll_for(1000);
         assert(pm_display_take_result(&ok)&&ok&&full_refreshes==full_before+9);
+#if PM_TRACE_ENABLE
+        // A queued remote image cannot relabel the active local SPI transfer.
+        capture_spi=true;spi_frame_count=0;test_frame_context=0;
+        pm_display_status("LOCAL","FIRST");poll_for(5);
+        test_frame_context=9901;pm_eink_pack_landscape(pixels,expected);
+        assert(pm_display_frame(pixels,sizeof pixels));
+        // The driver owns its copy while main reuses its assembly for reception.
+        memset(pixels,0,sizeof pixels);poll_for(2000);
+        assert(pm_display_take_result(&ok)&&ok&&!pm_display_busy());
+        assert(!memcmp(output,expected,sizeof output));
+        assert(spi_frame_count==4&&spi_frames[0]==0&&spi_frames[1]==0&&spi_frames[2]==9901&&spi_frames[3]==9901);
+        capture_spi=false;
+        puts("eink driver trace: active local/queued remote identity and copied pixels remain separate PASS");
+#endif
         puts("clock: V4 base/partial/full interval, old/new RAM, no SWRESET/deep sleep during partial, other-plugin isolation, reset/wake/timeout recovery PASS");
     }else assert(!ok&&writes==0);
     puts("eink: mono mapping/padding, byte-CS full refresh, bounded poll/BUSY timeout, retained standby, absent-panel PASS");

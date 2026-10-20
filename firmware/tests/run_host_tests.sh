@@ -80,11 +80,17 @@ done
 
 build input tests/input_test.c src/core.c
 run input
+build eink-pending tests/eink_pending_test.c src/core.c
+run eink-pending
 for device in E-ink_0 E-ink_1; do
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
         -I"devices/$device" -Isrc -Itests/stubs tests/eink_test.c src/display_eink.c \
         -o "$work/eink-$device"
     run "eink-$device"
+    cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_TRACE_ENABLE=1 \
+        -I"devices/$device" -Isrc -Itests/stubs tests/eink_test.c src/display_eink.c \
+        -o "$work/eink-trace-$device"
+    run "eink-trace-$device"
 done
 mkdir -p "$work/absent-panel"
 sed 's/^#define PM_EINK_PANEL_CONNECTED 1/#define PM_EINK_PANEL_CONNECTED 0/' \
