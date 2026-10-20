@@ -44,3 +44,19 @@ static inline void pm_net_rx_snapshot(void){}
 typedef enum { PM_NET_FAIL_NONE, PM_NET_FAIL_TCP, PM_NET_FAIL_PROTOCOL, PM_NET_FAIL_TARGET, PM_NET_FAIL_EOF_TIMEOUT } pm_net_failure;
 bool pm_net_proxy_target_connected(void);
 pm_net_failure pm_net_last_failure(void);
+
+#include "tx_link_probe.h"
+typedef struct {uint64_t boot,run;uint32_t generation,count,dropped,malformed,digest;bool active,attached,generation_changed;} pm_tx_status;
+#if PM_TX_LINK_PROBE
+void pm_net_tx_status(pm_tx_status *status);
+bool pm_net_tx_read(uint64_t boot,uint64_t run,unsigned index,pm_tx_row *row);
+#else
+static inline void pm_net_tx_status(pm_tx_status *s){*s=(pm_tx_status){0};}
+static inline bool pm_net_tx_read(uint64_t b,uint64_t r,unsigned i,pm_tx_row *o){(void)b;(void)r;(void)i;(void)o;return false;}
+#endif
+
+#include "cyw43_inner_probe.h"
+#if PM_CYW43_INNER_PROBE
+void pm_net_cyw_status(pm_cyw_status *out);
+bool pm_net_cyw_read(uint64_t boot,uint64_t run,unsigned index,pm_cyw_row *out);
+#endif

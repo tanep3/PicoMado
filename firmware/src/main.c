@@ -1,10 +1,11 @@
 #include "trace.h"
 #include "ack_probe.h"
+#include "usb_control.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "pico/stdlib.h"
-#if PM_ACK_PATH_PROBE
+#if PM_ACK_PATH_PROBE || PM_USB_BUTTON_SIM
 #include "pico/rand.h"
 #endif
 #include "pico/cyw43_arch.h"
@@ -173,11 +174,11 @@ static void log_usb_snapshot(void){
     static bool was_connected;
     static uint32_t last_ms;
     bool connected=stdio_usb_connected();
-#if PM_ACK_PATH_PROBE
+#if PM_ACK_PATH_PROBE || PM_USB_BUTTON_SIM
     pm_ack_probe_live(session_epoch,state==ACTIVE);
-    if(connected)for(unsigned n=0;n<16;n++){int ch=getchar_timeout_us(0);if(ch<0)break;pm_ack_probe_input(ch);}
+    if(connected)for(unsigned n=0;n<16;n++){int ch=getchar_timeout_us(0);if(ch<0)break;pm_usb_control_input(ch);}
 #endif
-    pm_ack_probe_poll(connected);
+    pm_usb_control_poll(connected);
     if(connected && !was_connected)pm_net_rx_snapshot();
     pm_stats_usb_poll(connected);
     if(!connected){was_connected=false;return;}
@@ -798,7 +799,6 @@ static void poll_display(void){
 }
 #endif
 static void button(unsigned i,bool long_press){
-    if(state==ACTIVE)pm_ack_probe_button(session_epoch,display_epoch,owner_epoch,i,long_press);
 #if PM_DIAGNOSTIC_STAGE
     pm_logf("diag button=%u state=%u\n",i,(unsigned)state);
 #endif
@@ -845,6 +845,33 @@ static void diagnostic_hold(uint32_t duration_ms,bool watch_buttons){
     }
 }
 #endif
+static void poll_local_inputs(uint32_t now,bool allowed){
+    bool connected=stdio_usb_connected();
+    /* Gate must open before a committed detached simulator can run. */
+    pm_ack_probe_usb_state(connected);
+    bool raw[4]={false};unsigned physical=0;
+    for(unsigned i=0;i<input_count();i++){
+        raw[i]=!gpio_get(button_pins[i]);
+        if(raw[i] || buttons[i].stable)physical|=1u<<i;
+    }
+    pm_sim_dispatch synthetic=pm_usb_control_tick(connected,physical,allowed,session_epoch,state,state==STANDBY,settings.long_ms,now);
+    if(!allowed)return;
+    for(unsigned i=0;i<input_count();i++){
+        bool was_pressed=buttons[i].stable;
+        int event=pm_button_input_step(&buttons[i],PM_BUTTON_COUNT,i,raw[i],now,settings.long_ms,state==STANDBY);
+        if(!was_pressed && buttons[i].stable)pm_trace_event(PM_TRACE_BUTTON,0,(int32_t)i,(uint32_t)state);
+        if(event>=0){
+            bool long_press=PM_BUTTON_COUNT==2 && (event==0 || event==2);
+            if(state==ACTIVE)pm_ack_probe_button(session_epoch,display_epoch,owner_epoch,(unsigned)event,long_press);
+            button((unsigned)event,long_press);
+        }
+    }
+    if(synthetic.valid){
+        if(state==ACTIVE)pm_ack_probe_sim_button(session_epoch,display_epoch,owner_epoch,synthetic.logical,synthetic.long_press,synthetic.job,synthetic.step);
+        button(synthetic.logical,synthetic.long_press);
+        pm_usb_control_dispatched(synthetic,session_epoch,state,now_ms());
+    }
+}
 static void finish_loop(uint64_t started){
     pm_trace_flush();
     pm_trace_slow(PM_TRACE_SLOW_LOOP,started,(uint32_t)state);
@@ -852,8 +879,10 @@ static void finish_loop(uint64_t started){
 }
 int main(void){
     stdio_init_all();
-#if PM_ACK_PATH_PROBE
-    pm_ack_probe_init_boot(((uint64_t)get_rand_32()<<32)|get_rand_32());
+#if PM_ACK_PATH_PROBE || PM_USB_BUTTON_SIM
+    uint64_t control_boot=((uint64_t)get_rand_32()<<32)|get_rand_32();
+    pm_ack_probe_init_boot(control_boot);
+    pm_usb_control_init(control_boot,input_count());
 #else
     pm_ack_probe_init();
 #endif
@@ -912,18 +941,14 @@ int main(void){
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
         bool draining=panel_standby;
         poll_display();
-        if(draining){finish_loop(loop_started);sleep_ms(5);continue;}
+        if(draining){
+#if PM_USB_BUTTON_SIM || PM_ACK_PATH_PROBE
+            poll_local_inputs(now,false);log_usb_snapshot();
 #endif
-#if PM_ACK_PATH_PROBE
-        pm_ack_probe_usb_state(stdio_usb_connected());
-#endif
-        for(unsigned i=0;i<input_count();i++){
-            bool pressed=!gpio_get(button_pins[i]);
-            bool was_pressed=buttons[i].stable;
-            int event=pm_button_input_step(&buttons[i],PM_BUTTON_COUNT,i,pressed,now,settings.long_ms,state==STANDBY);
-            if(!was_pressed && buttons[i].stable)pm_trace_event(PM_TRACE_BUTTON,0,(int32_t)i,(uint32_t)state);
-            if(event>=0)button((unsigned)event,PM_BUTTON_COUNT==2 && (event==0 || event==2));
+            finish_loop(loop_started);sleep_ms(5);continue;
         }
+#endif
+        poll_local_inputs(now,true);
         log_usb_snapshot();
 #if PM_AWAY_EEX1
         poll_endpoint();

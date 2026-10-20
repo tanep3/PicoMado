@@ -57,7 +57,7 @@ int pm_logf(const char *format,...){
     }
     restore_interrupts(irq);return n;
 }
-#if PM_ACK_PATH_PROBE
+#if PM_ACK_PATH_PROBE || PM_USB_BUTTON_SIM
 // Frozen probe export shares the ordinary line queue: partial USB writes from
 // different producers must never interleave within a line. Never evict here.
 bool pm_trace_try_line(const char *line,size_t length){

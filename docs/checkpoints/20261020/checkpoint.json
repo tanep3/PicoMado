@@ -1,0 +1,34 @@
+{
+  "production_commit": "ffb62d6dcfe35b85191672d686fcc65c6acb8b50",
+  "tested_source_root": "/home/tane/Documents/Codex/2026-10-18/task/cyw43-inner-candidate-20261020/src",
+  "review_evidence_root": "/home/tane/Documents/Codex/2026-10-18/task/cyw43-inner-candidate-20261020/review-frozen",
+  "private_configuration_backup": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/private-checkpoint",
+  "private_configuration": [
+    {
+      "path": "firmware/devices/E-ink_1/board-id.txt",
+      "sha256": "4adc92c56605166ad1c3cf8c653c081e1e8dd2e9e747b0d67047a418c1c709d2"
+    },
+    {
+      "path": "firmware/devices/E-ink_1/config.h",
+      "sha256": "fa967354ee3653e795ba7b4cc15f8de6fa79c6e20e1fd1eece89222a98bdcde3"
+    },
+    {
+      "path": "firmware/devices/PicoMado-lcd1/board-id.txt",
+      "sha256": "9ad7dace15c469d67fc1ffdc3a7190dd6270060dd682ab1ee8adc513cb3bbea5"
+    },
+    {
+      "path": "firmware/devices/PicoMado-lcd1/config.h",
+      "sha256": "8efebce22a7a54bae523e7141a6150bfa07261370fd3cb757c19bd43e490c729"
+    },
+    {
+      "path": "firmware/devices/E-ink_0/board-id.txt",
+      "sha256": "7db92b45f44b721cbac88f3417876ab95f3175a09374ff1702c1d273ff4d8a55"
+    },
+    {
+      "path": "firmware/devices/E-ink_0/config.h",
+      "sha256": "9346b484df43d1408186d4e69b25aa9187d386dc87d17c305777126c13ebb55b"
+    }
+  ],
+  "excluded_from_git": "device config.h and board-id.txt, captures and build outputs; secret contents remain in private backup only",
+  "restore": "Checkout this commit for reviewed candidate sources; use private-checkpoint device configuration and reviewed CMake settings; regenerate private SDK LL using prepare_cyw43_inner.py. No shared SDK edits."
+}

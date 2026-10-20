@@ -52,6 +52,76 @@ static uint8_t tx_packet[1040];
 static char upgrade_request[320];
 static uint8_t socks_auth_request[513];
 static ip_addr_t server_addr, proxy_addr;
+#if PM_TX_LINK_PROBE
+#include "lwip/netif.h"
+static pm_tx_probe tx_probe;
+static struct netif *tx_netif;
+static netif_linkoutput_fn tx_original;
+static bool tx_read(const void *packet,unsigned offset,void *out,unsigned n){
+    const struct pbuf *p=packet;
+    return offset<=p->tot_len && n<=p->tot_len-offset && (!n || pbuf_copy_partial(p,out,(u16_t)n,(u16_t)offset)==n);
+}
+static int tx_forward(void *context,const void *packet){
+    return tx_original((struct netif *)context,(struct pbuf *)packet);
+}
+static err_t tx_wrapper(struct netif *n,struct pbuf *p){
+    /* SDK lock serializes callback writes with main snapshots/reset; no AP2 writer here. */
+    unsigned refs=p->ref;
+    return (err_t)pm_tx_observe(&tx_probe,tx_read,p,tx_forward,n,time_us_64,
+        pcb?pcb->nrtx:0,refs>255?255:(uint8_t)refs);
+}
+static void tx_detach(void){
+    if(tx_netif && tx_netif->linkoutput==tx_wrapper)tx_netif->linkoutput=tx_original;
+    tx_netif=NULL;tx_original=NULL;tx_probe.attached=false;
+    if(tx_probe.active)tx_probe.generation_changed=true;
+    tx_probe.active=false;
+#if PM_CYW43_INNER_PROBE
+    pm_cyw_probe_sync(tx_probe.boot,tx_probe.run,tx_probe.generation,false,tx_probe.generation_changed,tx_probe.deadline_us,0,&tx_probe.tuple);
+#endif
+}
+static void tx_attach(void){
+    struct netif *n=netif_default;
+    if(n==tx_netif && n && n->linkoutput==tx_wrapper)return;
+    tx_detach();
+    if(n && n->linkoutput && n->linkoutput!=tx_wrapper){tx_netif=n;tx_original=n->linkoutput;n->linkoutput=tx_wrapper;tx_probe.attached=true;}
+}
+static void tx_sync(void){
+    uint64_t boot,run,deadline,frozen;unsigned state;uint32_t generation;
+    bool recording=pm_ack_probe_capture(&boot,&run,&deadline,&state,&frozen,&generation);
+    if(run && run!=tx_probe.run && state!=PM_AP_IDLE && state!=PM_AP_FROZEN){
+        bool attached=tx_probe.attached;memset(&tx_probe,0,sizeof tx_probe);tx_probe.attached=attached;
+        tx_probe.boot=boot;tx_probe.run=run;tx_probe.generation=generation;
+        if(pcb){memcpy(tx_probe.tuple.local,ip_2_ip4(&pcb->local_ip),4);memcpy(tx_probe.tuple.peer,ip_2_ip4(&pcb->remote_ip),4);tx_probe.tuple.local_port=pcb->local_port;tx_probe.tuple.peer_port=pcb->remote_port;}
+    }
+    if(run && run==tx_probe.run && generation!=tx_probe.generation)tx_probe.generation_changed=true;
+    if(state==PM_AP_FROZEN && frozen)while(tx_probe.count && tx_probe.rows[tx_probe.count-1].time_us>=frozen)tx_probe.count--;
+    tx_probe.deadline_us=deadline;
+    tx_probe.active=recording && run==tx_probe.run && !tx_probe.generation_changed && tx_probe.attached && time_us_64()<deadline;
+#if PM_CYW43_INNER_PROBE
+    pm_cyw_probe_sync(boot,run,generation,tx_probe.active,tx_probe.generation_changed,deadline,state==PM_AP_FROZEN?frozen:0,&tx_probe.tuple);
+#endif
+}
+#if PM_CYW43_INNER_PROBE
+void pm_net_cyw_status(pm_cyw_status *s){cyw43_arch_lwip_begin();tx_sync();pm_cyw_probe_status(s);cyw43_arch_lwip_end();}
+bool pm_net_cyw_read(uint64_t boot,uint64_t run,unsigned index,pm_cyw_row *row){cyw43_arch_lwip_begin();tx_sync();bool ok=pm_cyw_probe_row(boot,run,index,row);cyw43_arch_lwip_end();return ok;}
+#endif
+void pm_net_tx_status(pm_tx_status *s){
+    cyw43_arch_lwip_begin();tx_sync();
+    *s=(pm_tx_status){.boot=tx_probe.boot,.run=tx_probe.run,.generation=tx_probe.generation,.count=tx_probe.count,.dropped=tx_probe.dropped,.malformed=tx_probe.malformed,.digest=pm_tx_digest(&tx_probe),.active=tx_probe.active,.attached=tx_probe.attached,.generation_changed=tx_probe.generation_changed};
+    cyw43_arch_lwip_end();
+}
+bool pm_net_tx_read(uint64_t boot,uint64_t run,unsigned index,pm_tx_row *row){
+    cyw43_arch_lwip_begin();tx_sync();
+    bool ok=boot==tx_probe.boot && run==tx_probe.run && !tx_probe.active && index<tx_probe.count;
+    if(ok)*row=tx_probe.rows[index];
+    cyw43_arch_lwip_end();return ok;
+}
+#else
+#define tx_sync() ((void)0)
+#define tx_attach() ((void)0)
+#define tx_detach() ((void)0)
+#endif
+
 
 #if PM_TRACE_STATS
 // Caller already holds the SDK lock; no IO, allocation, or TCP state changes.
@@ -269,6 +339,7 @@ bool pm_net_init(void) {
     return cyw43_arch_init()==0;
 }
 static void close_unlocked(void) {
+    tx_detach();
     pm_diag_drain_error();
     pm_diag_connection(false);
     pm_diag_event(PM_D_CLOSE,0,0,0,0);
@@ -290,6 +361,7 @@ static void begin_unlocked(const pm_profile *p) {
                     strlen(p->proxy_user)>255 || strlen(p->proxy_password)>255)) {
         stage=PM_NET_FAILED;return;
     }
+    tx_attach();
     pcb=tcp_new_ip_type(IPADDR_TYPE_V4);
     if(!pcb){RX_OBSERVE(pm_rx_fault,PM_RX_ALLOC_ERROR,0,);stage=PM_NET_FAILED;return;}
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
@@ -522,6 +594,7 @@ void pm_net_begin(const pm_profile *p){
 void pm_net_poll(void){
     uint64_t started=pm_trace_clock();cyw43_arch_poll();
     uint64_t waiting=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,waiting);
+    tx_sync();
     poll_unlocked();
 #if PM_TRACE_STATS
     if(pm_rx_sample_due()){pm_rx_state observed=rx_observe();pm_rx_sample(&observed);}
@@ -541,7 +614,7 @@ pm_net_stage pm_net_checkpoint(void){
 bool pm_net_send(uint8_t kind,const char *json){
     pm_ack_probe_before_lock(kind,json);
     uint64_t started=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,started);
-    pm_ack_probe_locked(kind);bool ok=send_unlocked(kind,json);cyw43_arch_lwip_end();pm_ack_probe_send_return(kind,ok);pm_stats_note(PM_STAT_NET_SEND,started);return ok;
+    pm_ack_probe_locked(kind);tx_sync();bool ok=send_unlocked(kind,json);cyw43_arch_lwip_end();pm_ack_probe_send_return(kind,ok);pm_stats_note(PM_STAT_NET_SEND,started);return ok;
 }
 bool pm_net_take(uint8_t *kind,char *json,size_t cap){
     uint64_t started=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,started);
@@ -561,7 +634,7 @@ bool pm_net_send_optional(uint8_t kind,const char *json){
     pm_ack_probe_before_lock(kind,json);
     uint64_t started=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,started);
     bool room=stage==PM_NET_READY && pcb && strlen(json)+14<=tcp_sndbuf(pcb);
-    bool ok=room && send_unlocked(kind,json);cyw43_arch_lwip_end();pm_ack_probe_send_return(kind,ok);pm_stats_note(PM_STAT_NET_SEND,started);return ok;
+    tx_sync();bool ok=room && send_unlocked(kind,json);cyw43_arch_lwip_end();pm_ack_probe_send_return(kind,ok);pm_stats_note(PM_STAT_NET_SEND,started);return ok;
 }
 
 #if PM_TRACE_STATS

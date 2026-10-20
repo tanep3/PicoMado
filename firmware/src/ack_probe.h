@@ -12,7 +12,7 @@ typedef enum {
  PM_AP_PENDING_SET,PM_AP_PENDING_REPLACED,PM_AP_PENDING_TAKE,PM_AP_PENDING_SKIP,
  PM_AP_ACK_BUILD,PM_AP_BEFORE_LOCK,PM_AP_LOCKED,PM_AP_ENCODED,
  PM_AP_WRITE_BEGIN,PM_AP_WRITE_END,PM_AP_OUTPUT_END,PM_AP_SEND_RETURN,
- PM_AP_CONNECTION,PM_AP_TCP_SAMPLE,PM_AP_PENDING_CLEAR,PM_AP_WRITE_REJECT,PM_AP_TX_POSITION
+ PM_AP_CONNECTION,PM_AP_TCP_SAMPLE,PM_AP_PENDING_CLEAR,PM_AP_WRITE_REJECT,PM_AP_TX_POSITION,PM_AP_SIM_BUTTON
 } pm_ack_probe_event;
 typedef struct {
  uint64_t us,session,frame;
@@ -37,6 +37,9 @@ void pm_ack_probe_context(uint64_t session,uint64_t frame);
 void pm_ack_probe_live(uint64_t session,bool active);
 void pm_ack_probe_note(pm_ack_probe_event event,uint8_t kind,uint64_t session,uint64_t frame,uint32_t a,uint32_t b,uint32_t c,uint32_t d);
 void pm_ack_probe_button(uint64_t session,uint64_t display,uint64_t owner,unsigned button,bool long_press);
+void pm_ack_probe_sim_button(uint64_t session,uint64_t display,uint64_t owner,unsigned button,bool long_press,uint64_t job,unsigned step);
+bool pm_ack_probe_capture(uint64_t *boot,uint64_t *run,uint64_t *deadline,unsigned *state,uint64_t *freeze,uint32_t *generation);
+bool pm_ack_probe_usb_busy(void);
 void pm_ack_probe_before_lock(uint8_t kind,const char *json);
 void pm_ack_probe_locked(uint8_t kind);
 void pm_ack_probe_encoded(uint8_t kind,const char *json);
@@ -53,9 +56,13 @@ static inline void pm_ack_probe_init(void){}
 static inline void pm_ack_probe_init_boot(uint64_t b){(void)b;}
 static inline void pm_ack_probe_command(const char *c){(void)c;}
 static inline void pm_ack_probe_poll(bool v){(void)v;}
+static inline void pm_ack_probe_usb_state(bool v){(void)v;}
 static inline void pm_ack_probe_context(uint64_t s,uint64_t f){(void)s;(void)f;}
 static inline void pm_ack_probe_note(pm_ack_probe_event e,uint8_t k,uint64_t s,uint64_t f,uint32_t a,uint32_t b,uint32_t c,uint32_t d){(void)e;(void)k;(void)s;(void)f;(void)a;(void)b;(void)c;(void)d;}
 static inline void pm_ack_probe_button(uint64_t s,uint64_t d,uint64_t o,unsigned b,bool l){(void)s;(void)d;(void)o;(void)b;(void)l;}
+static inline void pm_ack_probe_sim_button(uint64_t s,uint64_t d,uint64_t o,unsigned b,bool l,uint64_t j,unsigned n){(void)s;(void)d;(void)o;(void)b;(void)l;(void)j;(void)n;}
+static inline bool pm_ack_probe_capture(uint64_t*b,uint64_t*r,uint64_t*d,unsigned*s,uint64_t*f,uint32_t*g){(void)b;(void)r;(void)d;(void)s;(void)f;(void)g;return false;}
+static inline bool pm_ack_probe_usb_busy(void){return false;}
 static inline void pm_ack_probe_before_lock(uint8_t k,const char *j){(void)k;(void)j;}
 static inline void pm_ack_probe_locked(uint8_t k){(void)k;}
 static inline void pm_ack_probe_encoded(uint8_t k,const char *j){(void)k;(void)j;}

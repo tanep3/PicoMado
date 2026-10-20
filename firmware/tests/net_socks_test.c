@@ -31,9 +31,23 @@ static unsigned send_room=sizeof sent;
 static const pm_profile test_profile={"dummy-ssid","dummy-password","198.51.100.1",true,
     "192.0.2.1","dummy-user","dummy-proxy-password",1080};
 int cyw43_arch_init(void){return 0;}
+#if PM_NET_TX_THREADS
+#include <pthread.h>
+static pthread_mutex_t sdk_mutex=PTHREAD_MUTEX_INITIALIZER;
+static _Thread_local unsigned lwip_depth;
+#else
 static unsigned lwip_depth;
-void cyw43_arch_lwip_begin(void){assert(lwip_depth==0);lwip_depth=1;}
-void cyw43_arch_lwip_end(void){assert(lwip_depth==1);lwip_depth=0;}
+#endif
+void cyw43_arch_lwip_begin(void){assert(lwip_depth==0);
+#if PM_NET_TX_THREADS
+    assert(!pthread_mutex_lock(&sdk_mutex));
+#endif
+    lwip_depth=1;}
+void cyw43_arch_lwip_end(void){assert(lwip_depth==1);lwip_depth=0;
+#if PM_NET_TX_THREADS
+    assert(!pthread_mutex_unlock(&sdk_mutex));
+#endif
+}
 void cyw43_arch_poll(void){}
 uint32_t save_and_disable_interrupts(void){return 0;}
 void restore_interrupts(uint32_t state){(void)state;}
@@ -62,7 +76,16 @@ err_t tcp_close(struct tcp_pcb *p){assert(lwip_depth==1);assert(p==&socket_insta
 void tcp_abort(struct tcp_pcb *p){assert(lwip_depth==1);assert(p==&socket_instance);}
 void tcp_recved(struct tcp_pcb *p,u16_t n){assert(lwip_depth==1);assert(p==&socket_instance);credits_returned+=n;}
 unsigned pbuf_copy_partial(const struct pbuf *p,void *out,unsigned n,unsigned offset){
-    assert(offset+n<=p->tot_len);memcpy(out,p->payload+offset,n);return n;
+    assert(offset+n<=p->tot_len);
+#if PM_TX_LINK_PROBE
+    unsigned copied=0;
+    while(p && copied<n){if(offset>=p->len){offset-=p->len;p=p->next;continue;}
+        unsigned take=p->len-offset;if(take>n-copied)take=n-copied;
+        memcpy((uint8_t *)out+copied,p->payload+offset,take);copied+=take;offset=0;p=p->next;}
+    return copied;
+#else
+    memcpy(out,p->payload+offset,n);return n;
+#endif
 }
 unsigned char pbuf_free(struct pbuf *p){assert(p);return 1;}
 static void feed(const uint8_t *data,size_t n){

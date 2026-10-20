@@ -54,3 +54,6 @@ serverは受理済み現行sessionだけをaccept順で認定し、IDLE中も対
 低メモリ検証は固定容量の満杯・置換・有界readと、SDKのERR_MEM/queued bytes保持を対象にする。実機の動的heap/stack高水位やMCU CPU負荷はホスト試験から保証しない。`tcp_write(COPY)`成功後のoutput errorを単純なアプリ再送へ変更すると重複し得るため、送信方針の修正は含めない。上書き/争合/不完全読出しや凍結後入力がある場合、欠測を「ACK未生成」の証拠にしない。
 
 保存は同じdirectory内の専用一時ファイルへ全量write→file fsync→hard linkで最終名へatomic no-overwrite publish→directory fsyncする。途中のstagingだけが残っても再実行できる。既存の異なる最終ファイルは上書きせず拒否する。旧方式や外部操作で最終名自体が破損していた場合も勝手に置換しない。
+
+
+USB合成入力と専用linkoutput境界の診断は初期値OFFで追加可能。物理counterは変更せず、合成イベント24と `AP2 SYNTH` で由来を分ける。有限実行・共有CDC parser・TX1の仕様と試行手順は [USB入力／TX診断](usb-button-tx-diagnostics.md) を参照。
