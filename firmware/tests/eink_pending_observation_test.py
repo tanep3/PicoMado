@@ -28,3 +28,17 @@ assert latest_complete[0]['a']==1
 assert all(r['stage']=='old_done' for r in matches(5,1,4,101))
 assert [r['sequence'] for r in rows]==sorted(r['sequence'] for r in rows)
 print('PASS decoded real EV1: pending/rejected result and old/new frame identities stay separate')
+
+# A repeated in-flight token has separate API operations, one physical update.
+for event in (12,13):
+    received=matches(2,event,1,900);pending=matches(2,event,3,900)
+    assert len(received)==len(pending)==2,(event,received,pending)
+    assert len({r['operation'] for r in received})==2
+    assert sorted(r['operation'] for r in pending)==sorted(r['operation'] for r in received)
+    assert all(r['b']==2 for r in pending)
+begin=matches(5,1,2,900);done=matches(5,1,4,900)
+assert len(begin)==len(done)==1,(begin,done)
+assert begin[0]['stage']=='replay_original_ready'
+assert done[0]['stage']=='replay_original_done' and done[0]['a']==1
+assert not matches(4,1,7,900)
+print('PASS decoded EV1: two replay API operations coalesce into one physical frame900 completion')

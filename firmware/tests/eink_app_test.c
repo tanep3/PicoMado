@@ -161,6 +161,33 @@ static void pending_scenarios(void){
         if(invalidation==3)assert(state==STANDBY&&!panel_standby);
         state=ACTIVE;await_selection=false;wifi_enabled=true;have_display=false;
     }
+    // Same token received before physical completion must coalesce at dispatch.
+    a=next_frame(900);assert(start_pending(a,0x81,10,800,250,false)==PM_API_PENDING);native_pending(a,0x81);
+    calls=draw_calls;before=render_count;
+    assert(start_pending(a,0x81,10,800,250,false)==PM_API_PENDING);
+    assert(legacy_pending(a,0x81,0,3813)==PM_API_PENDING&&pending_frame.phase==PM_EINK_READY);
+    finish(true);assert(!drawing&&draw_calls==calls&&pending_frame.phase==PM_EINK_EMPTY);
+    assert(pending_render_ack&&pm_token_equal(pending_render_token,a)&&render_count==before);
+    assert(send_pending_render_ack()&&render_count==before+1);poll_display();assert(draw_calls==calls);
+    // A failed first draw may retry the fully CRC-validated replay once.
+    a=next_frame(901);assert(start_pending(a,0x82,0,0,250,false)==PM_API_PENDING);native_pending(a,0x82);
+    assert(start_pending(a,0x82,0,0,250,false)==PM_API_PENDING);native_pending(a,0x82);
+    calls=draw_calls;finish(false);assert(drawing&&draw_calls==calls+1&&!pending_render_ack);finish_current(a);
+    // A replay of the active token cannot erase newer partial or Ready pixels.
+    for(unsigned ready=0;ready<2;ready++){
+        a=next_frame(910+ready*2);assert(start_pending(a,0x83,0,0,250,false)==PM_API_PENDING);native_pending(a,0x83);
+        b=a;b.frame_id++;
+        assert(start_pending(b,0x84,20,810+ready,250,false)==PM_API_PENDING);
+        assert(legacy_pending(b,0x84,0,ready?3813:100)==PM_API_PENDING);
+        size_t used=assembly.used;unsigned phase=pending_frame.phase;
+        assert(start_pending(a,0x83,0,0,250,false)==PM_API_REJECTED);
+        assert(legacy_pending(a,0x83,0,3813)==PM_API_REJECTED);
+        assert(pending_frame.phase==phase&&pm_token_equal(pending_frame.frame.token,b)&&assembly.used==used);
+        if(!ready)assert(legacy_pending(b,0x84,100,3713)==PM_API_PENDING);
+        calls=draw_calls;finish(true);assert(drawing&&pm_token_equal(drawing_token,b)&&draw_calls==calls+1);
+        expect_pixels(0x84);assert(clock_interval==20&&clock_minute==810+ready);finish_current(b);
+    }
+    puts("eink pending actual main: in-flight duplicate coalesces/success ACK/failed retry/newer partial+Ready preserved PASS");
     puts("eink pending actual main: busy latest/native+legacy/partial/CRC/invalid header/metadata/old failure/once/local/retry/reconnect/standby PASS");
 }
 int main(void){

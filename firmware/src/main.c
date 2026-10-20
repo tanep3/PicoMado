@@ -644,6 +644,13 @@ static pm_api_result dispatch_pending_eink(void){
     if(!pm_eink_pending_take(&pending_frame,!drawing && !pm_display_busy(),allowed,
         incarnation,session_epoch,display_epoch,owner_epoch,&next))return PM_API_PENDING;
     pm_token t=next.token;
+    // A replay may become Ready while its original physical draw is in flight.
+    // Completion changes last_rendered after receive_chunk's earlier check.
+    if(have_display && pm_token_equal(last_rendered,t)){
+        pending_render_token=t;pending_render_ack=true;
+        pm_ack_probe_note(PM_AP_PENDING_SET,9,t.session_epoch,t.frame_id,0,0,0,0);
+        return PM_API_COMPLETED;
+    }
     bool same_display=have_display && last_rendered.incarnation==t.incarnation &&
         last_rendered.session_epoch==t.session_epoch && last_rendered.display_epoch==t.display_epoch &&
         last_rendered.screen_owner_epoch==t.screen_owner_epoch;
@@ -836,6 +843,12 @@ static pm_api_result api_frame(uint8_t kind,const char *j){
             number(j,"byte_len",&len) && number(j,"crc32",&crc) && string_equals(j,"format",PM_PIXEL_FORMAT_NAME);
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
         if(!header || !pm_frame_header_valid(w,h,PM_PIXEL_FORMAT_NAME,len,crc))return PM_API_REJECTED;
+        // A known replay is not a new image and cannot evict a distinct latest
+        // pending frame, including pixels still being assembled.
+        if(((drawing && pm_token_equal(drawing_token,t)) ||
+            (have_display && pm_token_equal(last_rendered,t))) &&
+           pending_frame.phase!=PM_EINK_EMPTY && !pm_token_equal(pending_frame.frame.token,t))
+            return PM_API_REJECTED;
         reset_assembly();
 #endif
         if(!header || !pm_start(&assembly,t,w,h,PM_PIXEL_FORMAT_NAME,len,crc))reset_assembly();

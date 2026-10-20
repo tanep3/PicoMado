@@ -28,6 +28,16 @@ int main(int argc,char **argv){
     assert(drawing&&drawing_token.frame_id==202&&!pending_render_ack&&!frame_renders);
     panel_result=true;poll_display();assert(pending_render_token.frame_id==202);
     assert(send_pending_render_ack()&&frame_renders==1);drain("new_done");
+    start(900,3,1,"normal");drain("replay_original_header");
+    chunk(900,3,1,0,PM_IMAGE_BYTES);drain("replay_original_ready");
+    assert(drawing&&drawing_token.frame_id==900);
+    start(900,3,1,"normal");drain("replay_header");
+    chunk(900,3,1,0,PM_IMAGE_BYTES);drain("replay_ready");
+    assert(pending_frame.phase==PM_EINK_READY&&drawing);
+    panel_result=true;poll_display();drain("replay_original_done");
+    assert(!drawing&&pending_render_ack&&pending_render_token.frame_id==900&&pending_frame.phase==PM_EINK_EMPTY);
+    assert(send_pending_render_ack()&&frame_renders==2);drain("replay_ack");
+    poll_display();drain("replay_idle");assert(!drawing&&!pending_render_ack);
     assert(!pm_observation_read().dropped);assert(fclose(events)==0);
     puts("PASS EV1 actual E-ink API_PENDING/rejection and old/new physical frame identity");
 }
