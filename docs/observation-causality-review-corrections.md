@@ -1,0 +1,11 @@
+# 第2-B 独立レビュー後の是正契約
+
+`94df8e7` のソフトウェア検証だけでは受入に足りない。下記5件を別の是正単位で解消する。D-01完了 `6ee47e1` とD-02作業差分は保持する。
+
+1. 観測causeの有無で返信queue待ちの意味を変えない。既存のenqueue経路へ任意causeを引数として渡し、250msの独自queue timeoutを追加しない。wire送出の既存250msは別の契約として維持。満杯queueを350ms以上保ち、両方とも同じ待機・解放後送出になる否定試験を追加する。
+2. 解析対象は確定したbootと開始より後・終了以下のsequenceに限定する。区間前後の元記録は証拠として保存しても、別区間の入力と描画を現在の結果へ混ぜない。旧入力を含むprelude＋空の新captureで結果が空になることを確認する。
+3. 解析の正規入力はaccepted collectorが生成したJSONLと `.summary.json`。storage durability、host sequence/prefix、link epoch、CID付き開始/終了応答とsummaryの一致を検証し、その区間のeventだけを使う。raw EV1はソフトウェアfixture互換として扱い、collector保存確認を暗黙に付けない。実collectorが実際に保存・確定したartifactを用いる結合試験を追加する。欠落summaryや不正prefixを完全扱いしない。
+4. phase CANCELLEDは失敗ではない。後続入力による失効をcancelledまたはcorrelation unknownとして報告し、明示reject/errorと分ける。実CのFrameStart→次入力によるassembly取消しを通す。
+5. observationはtop-levelの単一objectだけを読む。version/boot/operationは各1個、型・値・範囲を検証し、重複や不正、同名値が別のdataや子objectにある場合はcorrelation unknown。RustはValue経由で重複を消してから検証せず、PicoもJSON全体のstrstrで値を拾わない。metadata不正で正常domain APIを拒否しない。escaped keyの重複も検証する。Picoの補助scannerは深さに有限上限を置き、上限外も相関不明として通常処理を変えない。
+
+上記が通るまで因果追跡の受入を保留する。正常crossテストとsource保存の既存成功は保持するが、未実装境界・実機負荷・物理描画は引き続き未確認。
