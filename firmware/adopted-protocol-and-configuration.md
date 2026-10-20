@@ -43,4 +43,4 @@ LCDは160×80 RGB565BE/25600B、E-inkは250×122 mono1/4000B。SPI転置はド�
 
 `nagle-fix-candidate/latest-live-result.json` の `derived180_windows.regulated_device_180` を再確認した。同一session/generationの端末時計180秒区間では描画数の標本境界から11.861111〜11.994444fpsの上下界、1秒以上の間隔0、最大間隔は既存累積値による上界461.778ms。厳密な180秒枚数や区間内最大値は復元できない。全232.089973秒区間は2447描画・10.543325fpsで、再接続に伴う8.210821秒の間隔1回を含む。定常区間は再接続を除くため元の採取窓と同じ比較ではなく、厳密なA/BでもNODELAY単独の因果証明でもない。動画の改善と、原因未特定の間欠切替遅延を分けて扱う。
 
-現在の期限は `transport.rs` の `FRAGMENT_STALL_TIMEOUT=3s`、`STREAM_FRAME_TIMEOUT=10s`、`SEND_TIMEOUT=250ms` を照合した。10-15記録の2s/5sは当時値として保持する。Wi-Fiのrequest/readbackは `app_timing_test.c`、EEX1の世代内cacheとWi-Fi世代失効は `endpoint_client_test.c` と `app_eex_test.c`、旧frame/旧応答・ACK混在は `control_reply_test.c` が回帰の根拠となる。
+現在の期限は `transport.rs` の `FRAGMENT_STALL_TIMEOUT=3s`、`STREAM_FRAME_TIMEOUT=10s`、`SEND_TIMEOUT=250ms` を照合した。10-15記録の2s/5sは当時値として保持する。Wi-Fiのrequest/readbackは `app_timing_test.c`、EEX1の世代内cacheとWi-Fi世代失効は `endpoint_client_test.c` と `app_endpoint_test.c`、旧frame/旧応答・ACK混在は `control_reply_test.c` が回帰の根拠となる。

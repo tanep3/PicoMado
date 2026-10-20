@@ -75,9 +75,13 @@ Pico は既存 trace の32件キューを共用する。EV1 有効後は通常�
 | 遅れた旧Helloが現動画を置換しない | `service/tests/support/hello_order.rs`、`hello_order_matrix.rs`、transport試験 |
 | FrameStart先着・chunks間の制御応答、旧ACK、動画取消し | `control_reply_test.c`（trace ON/OFF、LCD/E-ink）、protocol/transport/queue試験 |
 | pending ACK取得・取消し・重複と再送方針 | `ack_pending_semantics_test.c`、`ack_net_semantics_test.c`、`run_usb_tx_tests.sh` |
-| 正常EOF、Close、部分画像、既描画の保持 | `net_eof_recovery_test.c`、`run_net_eof_recovery_tests.sh`、実main回帰（`run_host_tests.sh`から実行） |
+| 正常EOF、Close、部分画像、既描画の保持 | `fin_recovery_test.c`（`run_host_tests.sh`の52モード）、実main回帰（`run_host_tests.sh`から実行） |
 | 旧run COMMIT再発火禁止、DTR取消し、実入力優先 | `usb_run_binding_test.c`、`button_sim_batch_test.c`、`usb_main_input_test.c`。EV1有効の組合せも追加実行する。 |
 | 混在・部分write・返信枠・digest | `usb_multiplex_test.c`、`ack_probe_v2_test.py`、`usb_button_trial_test.py`、追加EV1試験。controllerは16件。 |
 | 私有SDK出自と送信・エラーの保持 | `run_cyw43_inner_tests.py`、`run_inner_tests.sh`、source/SDK/UF2 manifest。共有SDK不変、ON/OFFのbus trace比較。 |
 
 用途別の回帰であり、実機の絶対的な無回帰保証ではない。重い処理と保存、実USBの時間・高水位、物理パネル、C-08は結果を別記する。
+
+### 既存試験fixtureの接続補正
+
+標準cargo testで既存の `transport_recovery.rs` が旧negative比較用cfgを選び、実write進行probeをwriterへ渡していない。これにより「進行あり3.2秒」「進行継続10秒」の2試験が、実際は進行なし3秒で落ちることを確認した。productionのtimeoutを緩めず、採用済みWriteProgressと同じprobeをfixtureへ明示的に接続する。無進行3秒・連続進行10秒・制御250ms・置換session取消しの既存assertは維持する。ローカルTCPを使う試験はsandboxのEPERMで別に失敗するため、既存許可範囲のローカルloopbackだけを使う実行で区別して確認する。
