@@ -91,3 +91,9 @@ Pico は既存 trace の32件キューを共用する。EV1 有効後は通常�
 ### 既存試験fixtureの接続補正
 
 標準cargo testで既存の `transport_recovery.rs` が旧negative比較用cfgを選び、実write進行probeをwriterへ渡していない。これにより「進行あり3.2秒」「進行継続10秒」の2試験が、実際は進行なし3秒で落ちることを確認した。productionのtimeoutを緩めず、採用済みWriteProgressと同じprobeをfixtureへ明示的に接続する。無進行3秒・連続進行10秒・制御250ms・置換session取消しの既存assertは維持する。ローカルTCPを使う試験はsandboxのEPERMで別に失敗するため、既存許可範囲のローカルloopbackだけを使う実行で区別して確認する。
+
+### 実機からの観測契約へのフィードバック
+
+[2026-10-20の手押し結果](manual-switch-analysis-20261020.md)では、4操作の正の入力→描画事実を得た一方、動画中のsource queue欠測885件により採取全体はincompleteだった。C-03の有界・非待機・通常機能独立と、C-08の欠測を成功にしない方針を維持し、source境界・排出・cold startの不足を[修正前契約](observation-runtime-gap-contract.md)と[検証条件](observation-runtime-gap-verification.md)で具体化した。
+
+入力受付・TCP COPY受理・output呼出し・実linkoutput・kernel受理・対向API受付・物理描画を区別する。今回測れていないserver Network／Pico RX・TCP境界をcoverage済みとせず、根因の仮説を実装へ先取りしない。runtimeコードはこのフィードバックでは変更していない。

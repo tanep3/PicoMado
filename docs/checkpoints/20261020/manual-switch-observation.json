@@ -1,0 +1,328 @@
+{
+  "capture_date_UTC": "2026-10-20",
+  "source_commit": "8ef09191e101cd833e6e97264cee89353fad861d",
+  "runtime_unchanged_from": "52d8fddfd301f7f79c092c1ceca10d3c9fbb30f6",
+  "device": "PicoMado-lcd1",
+  "session": 2282,
+  "user_report": "時計からYoutubeで気持ち遅延",
+  "transitions": [
+    {
+      "from": "caricature",
+      "to": "rain-radar",
+      "operation": 1906,
+      "first_frame": 914701,
+      "device_us": {
+        "input_to_notify_begin": 284,
+        "notification_call": 1028,
+        "input_to_notify_accepted": 1312,
+        "notify_accepted_to_inputaccepted_received": 97862,
+        "input_to_inputaccepted_received": 99174,
+        "reply_received_to_frame_start": 4442,
+        "input_to_frame_start": 103616,
+        "frame_start_to_crc_complete": 39321,
+        "crc_complete_to_draw_begin": 1213,
+        "physical_draw_call": 19270,
+        "input_to_first_draw_complete": 163420,
+        "frame_start_to_draw_complete": 59804
+      },
+      "server_us": {
+        "api_received_to_dispatch": 3756,
+        "api_received_to_selection_commit": 36232,
+        "api_received_to_first_frame_pending": 64976,
+        "journal_message_elapsed": 67606,
+        "journal_input_lock_wait": 3743,
+        "journal_persistence": 59536,
+        "journal_image_preparation": 86,
+        "input_reply_sink_call": 99,
+        "frame_kernel_write_acceptance": 407
+      }
+    },
+    {
+      "from": "rain-radar",
+      "to": "weather",
+      "operation": 1921,
+      "first_frame": 914702,
+      "device_us": {
+        "input_to_notify_begin": 266,
+        "notification_call": 1053,
+        "input_to_notify_accepted": 1319,
+        "notify_accepted_to_inputaccepted_received": 405373,
+        "input_to_inputaccepted_received": 406692,
+        "reply_received_to_frame_start": 4465,
+        "input_to_frame_start": 411157,
+        "frame_start_to_crc_complete": 39404,
+        "crc_complete_to_draw_begin": 1238,
+        "physical_draw_call": 19186,
+        "input_to_first_draw_complete": 470985,
+        "frame_start_to_draw_complete": 59828
+      },
+      "server_us": {
+        "api_received_to_dispatch": 1499,
+        "api_received_to_selection_commit": 20449,
+        "api_received_to_first_frame_pending": 45004,
+        "journal_message_elapsed": 47196,
+        "journal_input_lock_wait": 1496,
+        "journal_persistence": 42495,
+        "journal_image_preparation": 11,
+        "input_reply_sink_call": 97,
+        "frame_kernel_write_acceptance": 596
+      }
+    },
+    {
+      "from": "weather",
+      "to": "clock",
+      "operation": 1936,
+      "first_frame": 914703,
+      "device_us": {
+        "input_to_notify_begin": 270,
+        "notification_call": 1020,
+        "input_to_notify_accepted": 1290,
+        "notify_accepted_to_inputaccepted_received": 573016,
+        "input_to_inputaccepted_received": 574306,
+        "reply_received_to_frame_start": 4458,
+        "input_to_frame_start": 578764,
+        "frame_start_to_crc_complete": 40192,
+        "crc_complete_to_draw_begin": 1198,
+        "physical_draw_call": 20105,
+        "input_to_first_draw_complete": 640259,
+        "frame_start_to_draw_complete": 61495
+      },
+      "server_us": {
+        "api_received_to_dispatch": 1241,
+        "api_received_to_selection_commit": 21455,
+        "api_received_to_first_frame_pending": 60110,
+        "journal_message_elapsed": 62485,
+        "journal_input_lock_wait": 1238,
+        "journal_persistence": 57899,
+        "journal_image_preparation": 52,
+        "input_reply_sink_call": 158,
+        "frame_kernel_write_acceptance": 749
+      }
+    },
+    {
+      "from": "clock",
+      "to": "youtube",
+      "operation": 1951,
+      "first_frame": 914704,
+      "device_us": {
+        "input_to_notify_begin": 275,
+        "notification_call": 1035,
+        "input_to_notify_accepted": 1310,
+        "notify_accepted_to_inputaccepted_received": 1478404,
+        "input_to_inputaccepted_received": 1479714,
+        "reply_received_to_frame_start": 34865,
+        "input_to_frame_start": 1514579,
+        "frame_start_to_crc_complete": 37551,
+        "crc_complete_to_draw_begin": 7384,
+        "physical_draw_call": 19313,
+        "input_to_first_draw_complete": 1578827,
+        "frame_start_to_draw_complete": 64248
+      },
+      "server_us": {
+        "api_received_to_dispatch": 1507,
+        "api_received_to_selection_commit": 20592,
+        "api_received_to_first_frame_pending": 39925,
+        "journal_message_elapsed": 22226,
+        "journal_input_lock_wait": 1501,
+        "journal_persistence": 18411,
+        "journal_image_preparation": 3,
+        "input_reply_sink_call": 86,
+        "frame_kernel_write_acceptance": 289
+      }
+    }
+  ],
+  "server_source_bounds_us": {
+    "api_receive_to_reply_sink_complete_lower_us": 22226,
+    "api_receive_to_reply_sink_complete_upper_us": 39925,
+    "api_receive_to_first_frame_sink_complete_lower_us": 39925,
+    "api_receive_to_first_frame_sink_complete_upper_us": 66022,
+    "basis": "ReplyDone log precedes stream_frame_start, which precedes same-source FramePending. First frame sent log precedes the next FramePending in one serial writer. Bounds use server Source timestamps only; exact queue/write completion facts were not captured.",
+    "coverage_limit": "API Received is after WS/app decoding; kernel/socket/read/decode waiting before it is not included."
+  },
+  "conditional_same_Pi_bounds": [
+    {
+      "operation": 1906,
+      "transition": "caricature -> rain-radar",
+      "frame_id": 914701,
+      "journal_same_stream_order_1based": {
+        "reply_done": 88,
+        "frame_begin": 89,
+        "frame_done": 90
+      },
+      "Pico_reply_before_frame_source_order": true,
+      "host_process_entry_to_reply_journal_receipt_upper_us": 69610,
+      "host_process_entry_to_frame_done_journal_receipt_upper_us": 72788,
+      "journal_upper_bound_conditions": [
+        "same-host CLOCK_REALTIME has no unrecorded step",
+        "process-entry timestamp is floored to ms; journal receipt is after send completion",
+        "journal lag makes this an upper bound, not an exact completion time"
+      ],
+      "USB_send_return_fact_receive_host_mono_ns": 566854567115514,
+      "server_process_entry_converted_host_mono_ns_range": [
+        566854507444000,
+        566854508454000
+      ],
+      "conditional_server_entry_after_USB_send_fact_ns_range": [
+        -59671514,
+        -58661514
+      ],
+      "conditional_bound_meaning": "USB receive follows Pico send-call return; positive lower bound is time still remaining before server process entry. Does not measure wire one-way delay.",
+      "USB_reply_fact_receive_host_mono_ns": 566854628130911
+    },
+    {
+      "operation": 1921,
+      "transition": "rain-radar -> weather",
+      "frame_id": 914702,
+      "journal_same_stream_order_1based": {
+        "reply_done": 98,
+        "frame_begin": 99,
+        "frame_done": 100
+      },
+      "Pico_reply_before_frame_source_order": true,
+      "host_process_entry_to_reply_journal_receipt_upper_us": 48934,
+      "host_process_entry_to_frame_done_journal_receipt_upper_us": 52944,
+      "journal_upper_bound_conditions": [
+        "same-host CLOCK_REALTIME has no unrecorded step",
+        "process-entry timestamp is floored to ms; journal receipt is after send completion",
+        "journal lag makes this an upper bound, not an exact completion time"
+      ],
+      "USB_send_return_fact_receive_host_mono_ns": 566855691147579,
+      "server_process_entry_converted_host_mono_ns_range": [
+        566855960444000,
+        566855961454000
+      ],
+      "conditional_server_entry_after_USB_send_fact_ns_range": [
+        269296421,
+        270306421
+      ],
+      "conditional_bound_meaning": "USB receive follows Pico send-call return; positive lower bound is time still remaining before server process entry. Does not measure wire one-way delay.",
+      "USB_reply_fact_receive_host_mono_ns": 566856053192541
+    },
+    {
+      "operation": 1936,
+      "transition": "weather -> clock",
+      "frame_id": 914703,
+      "journal_same_stream_order_1based": {
+        "reply_done": 108,
+        "frame_begin": 109,
+        "frame_done": 110
+      },
+      "Pico_reply_before_frame_source_order": true,
+      "host_process_entry_to_reply_journal_receipt_upper_us": 65179,
+      "host_process_entry_to_frame_done_journal_receipt_upper_us": 68275,
+      "journal_upper_bound_conditions": [
+        "same-host CLOCK_REALTIME has no unrecorded step",
+        "process-entry timestamp is floored to ms; journal receipt is after send completion",
+        "journal lag makes this an upper bound, not an exact completion time"
+      ],
+      "USB_send_return_fact_receive_host_mono_ns": 566857028394285,
+      "server_process_entry_converted_host_mono_ns_range": [
+        566857451444000,
+        566857452454000
+      ],
+      "conditional_server_entry_after_USB_send_fact_ns_range": [
+        423049715,
+        424059715
+      ],
+      "conditional_bound_meaning": "USB receive follows Pico send-call return; positive lower bound is time still remaining before server process entry. Does not measure wire one-way delay.",
+      "USB_reply_fact_receive_host_mono_ns": 566857559521916
+    },
+    {
+      "operation": 1951,
+      "transition": "clock -> youtube",
+      "frame_id": 914704,
+      "journal_same_stream_order_1based": {
+        "reply_done": 118,
+        "frame_begin": 119,
+        "frame_done": 120
+      },
+      "Pico_reply_before_frame_source_order": true,
+      "host_process_entry_to_reply_journal_receipt_upper_us": 24160,
+      "host_process_entry_to_frame_done_journal_receipt_upper_us": 41199,
+      "journal_upper_bound_conditions": [
+        "same-host CLOCK_REALTIME has no unrecorded step",
+        "process-entry timestamp is floored to ms; journal receipt is after send completion",
+        "journal lag makes this an upper bound, not an exact completion time"
+      ],
+      "USB_send_return_fact_receive_host_mono_ns": 566858565407904,
+      "server_process_entry_converted_host_mono_ns_range": [
+        566859949444000,
+        566859950454000
+      ],
+      "conditional_server_entry_after_USB_send_fact_ns_range": [
+        1384036096,
+        1385046096
+      ],
+      "conditional_bound_meaning": "USB receive follows Pico send-call return; positive lower bound is time still remaining before server process entry. Does not measure wire one-way delay.",
+      "USB_reply_fact_receive_host_mono_ns": 566859991753513
+    }
+  ],
+  "clock_policy": {
+    "journal_anchor_count": 1921,
+    "realtime_minus_monotonic_us_range": [
+      1791970815701546,
+      1791970815701556
+    ],
+    "sampled_offset_span_us": 10,
+    "policy": "No Pico timestamps are aligned. Python Journal host_mono_ns is Pi time.monotonic_ns. Server received_unix_ms is mapped to the same Pi monotonic clock using journal same-host realtime/monotonic pairs. Bounds are conditional on no unrecorded realtime step outside the sampled offset envelope.",
+    "source_hashes": {
+      "device": "d822097740c208fd5fa937972a5dc9a1cc50d1be6fe67fb612de7eca0a377a3f",
+      "journal": "7fac68dc7944eb9d24baace1d6bf7296cf39aef634df6ede1d103dd731f7d41e"
+    }
+  },
+  "quality": {
+    "device_canonical_complete": false,
+    "server_canonical_complete": true,
+    "device_storage_durable": true,
+    "host_journal_write_or_queue_loss": 0,
+    "source_drop_before_interval": 1866,
+    "source_drop_at_end": 2751,
+    "source_drop_delta": 885,
+    "gap_count": 474,
+    "sum_missing_sequences": 885,
+    "first_gap": {
+      "before_sequence": 1983,
+      "after_sequence": 1985,
+      "missing_count": 1,
+      "before_us": 663911623,
+      "after_us": 663966532,
+      "before_dropped": 1866,
+      "after_dropped": 1867
+    },
+    "all4_positive_input_to_first_draw_ranges_before_first_gap": true,
+    "cross_source_timestamp_subtractions_performed": false,
+    "clock_policy": "Every duration subtracts timestamps from the same boot/source, or uses directly instrumented same-clock duration in journal. Source clocks are not aligned."
+  },
+  "source_hashes": {
+    "device.jsonl": {
+      "sha256": "d822097740c208fd5fa937972a5dc9a1cc50d1be6fe67fb612de7eca0a377a3f",
+      "bytes": 1465803
+    },
+    "device.jsonl.summary.json": {
+      "sha256": "d16890339bc5a04b76e359a72465f54d09c121438dc940fb799b59930c39a46e",
+      "bytes": 1159
+    },
+    "server.jsonl": {
+      "sha256": "75f90dd64bab35f5659f05e2c388ced4b5ae8d7d3049559e706aebe3bc0045e2",
+      "bytes": 351131
+    },
+    "server.jsonl.summary.json": {
+      "sha256": "0fdb5e3a9fe44c1467ec6a35a1fffa2c0ab89d5c8d9a48de835a1ce25508cf3e",
+      "bytes": 137
+    },
+    "journal-capture-complete.private.jsonl": {
+      "sha256": "7fac68dc7944eb9d24baace1d6bf7296cf39aef634df6ede1d103dd731f7d41e",
+      "bytes": 2635523
+    },
+    "causal-analysis.json": {
+      "sha256": "668a91a51213da25a59e56ca57d4f34646e603178d63486bb2766016f13aa216",
+      "bytes": 1288
+    },
+    "post-normal-verification.json": {
+      "sha256": "0a27c80d4ad568306becfc93b5a602f333de0b0d120112a820f11063c67cdd99",
+      "bytes": 593
+    }
+  },
+  "evidence_directory_name": "observation-live-20261020T230517Z",
+  "new_runtime_code_or_live_operations_in_followup": false
+}

@@ -37,3 +37,11 @@ transport_completeは「この採取sourceの開始/終了境界とsequence、�
 これにより第2-Aの追加ブロッカー3件はソフトウェア試験上解消した。64-bit CIDは認証ではなく偶発衝突の可能性が残る。因果追跡D-05や実機間欠遅延の解消を意味しない。
 
 再レビューP3：RNG取得をJournal worker/FDとselectorの取得より先へ移した。RNG例外注入時にJournal/selectorが一度も呼ばれず、出力ファイルが作られないことを追加検証した。`collector-rng-failure-regression.log`：新規PTY/Unix IPCを含む20件成功（2.614秒）。既存のK-06の「乱数失敗時は開始失敗」に従う初期化順序の是正である。実機操作なし。
+
+## 後続の実USBで判明した開始条件
+
+2026-10-20の承認済み採取準備では、DTR統計snapshotとONが重なって実begin factが欠け、ON応答とtransport completeだけでは因果開始を保証しないことを確認した。次の運用wrapperで起動待ちをport_factory内へ置くと、reactorが待機前に得たnowから返信期限を計算して期限切れとなった。この2回は利用者の手押し開始前に証拠を保存し、変更要求の結果不明を成功扱いしていない。
+
+同じexclusive portを保ったまま、collector生成前にsnapshotを読み終え、STATUS／必要なOFFで前区間を確認してから新しいONを行う運用wrapperで回避した。長いport準備・前STATUS/OFF・新ON/OFF・単一owner・durable終了を新規PTYで確認してから実採取した。accepted collector本体やfirmwareをその場で改変したものではない。
+
+開始の合図に実catalog2 begin／CRC／source boot・seq／保存prefixを要求すること、globalと局所の品質を分けることを[修正前契約 R-04](observation-runtime-gap-contract.md)へ整理した。実採取では後の動画中に端末source欠測885件があり、開始成功と全区間の完全性は別である。[実測照合](manual-switch-analysis-20261020.md)を参照する。

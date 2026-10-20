@@ -39,3 +39,9 @@ fixture配置の是正：既存のinclude用 `tests/transport_recovery.rs` がCa
 ## 是正後の現在の範囲
 
 `1cbb992`の5是正は親の独立確認で解消済み。最新server回帰294/273件に関連Rust試験を含み、最終照合ではcollector21件と解析9件も再確認した。D01/D02/D03/D04の後続状態は[最終照合](refactor-final-acceptance-20261020.md)を参照する。D05のソフトウェア範囲の成功と、実USB/SDK stdout全経路/実機負荷・物理表示の未受入は別のままである。
+
+## 後続の実機採取と境界不足
+
+2026-10-20に承認されたLCD手押し採取を行い、正規停止・通常server復帰後、保存証拠だけで[4切替を相関](manual-switch-analysis-20261020.md)した。時計→YouTubeは入力受付→初回描画1,578.827ms。serverのAPI受付後→返信完了は39.925ms以内と絞れるが、API前のTCP／driver／kernel／read/decode待ちは未分離。
+
+端末sourceのqueue予約拒否による欠測885件で、採取全体と正規解析4件はincomplete。4操作の初回描画までの連続した正の事実に基づく測定値を、global completeへ読み替えない。新しいruntime修正は行わず、[修正前契約](observation-runtime-gap-contract.md)と[検証条件](observation-runtime-gap-verification.md)へ不足をフィードバックした。上の実機未受入のうち、今回得た証拠と依然残るUSB負荷／高水位／RF／物理画素の範囲を分けて扱う。
