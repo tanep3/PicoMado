@@ -6,6 +6,8 @@
 
 永続変更は一つのmutable App所有者へ直列化する。所有権の受け渡しlockはIOの前に解放し、SQLite/serialize中は公開snapshotのlockを保持しない。読取りは最後の公開済み不変Appを参照する。既存の素材・画素はArcで共有し、接続/フレームの世代を各送信境界でも照合する。
 
+保存形式に画像文字列を含む既存plugin snapshotも、runtime上では不変Arcで共有する。公開・一時Appのcloneでその文字列群を複製せず、既存の保存schemaへの展開は保存workerで行う。旧形式とE-inkの動画frame生成も一時配信経路を使い、mutable所有者がbusyという理由だけで処理を止めない。端末ごとのpending/ACKによる既存の間引きは保つ。
+
 保存を必要としない入力・配信完了は、公開snapshotから作る一時App上で処理し、短い公開lockの中で新しい一時snapshotへ置き換える。この経路ではDBに接続しない。ACK、準備済みweather/radarのSUB/browse、既存画像の配信進行を対象にする。未知pluginの入力、設定変更、通常モードの選択、新しい永続jobの発行はこの経路へ暗黙に入れない。pluginは一時入力の可否と不変なview状態の受け渡しを共通traitで宣言する。共通層はplugin IDで内容を判断しない。
 
 一時Appの遷移には永続投影の不変条件を置く。登録/incarnation、選択、利用設定・順序、plugin設定/保存snapshot、durable jobを変更する試みは保存せず拒否する。frame IDとeffect IDは共通の短い採番区間で予約し、二つの経路の衝突・失敗時の再使用を防ぐ。ACK進行などの純粋な一時更新はSQLiteの書込みを発生させない。
@@ -23,6 +25,8 @@ mutable所有権を取得した時点の基準snapshotと、完了時の最新�
 pluginは自分の一時viewだけを合流する。weather/radarの最新取得セット・鮮度・configを古いcloneへ戻さない。SUB開始時にpinした不変セットとcursorを保ち、normalへcancelした後は新しいlatestへ戻る。weatherのnative画素cacheは現在latestとpinの最大2セットを保つ。radarの取得セットも不変Arcで共有し、snapshot作成で画像集合を複製しない。
 
 配信effectはIDを照合し、公開側で完了した既存effectを復活させない。一時側で追加したframe/effectと画素handleを合流し、現在世代に合わないものを除く。保存側が作った別deviceの新effectは消さない。frame/effectの共通採番はIOを待たない。
+
+旧viewを拒否したdeviceのcause関連付けも合流しない。表示世代の数値が偶然同じでも、破棄したSUB入力のcauseを設定変更後の新frameへ継承しない。設定・削除・再接続の3種類を保存待ち中の一時入力と競合させて検証する。
 
 ## 公開・失敗・panic
 
