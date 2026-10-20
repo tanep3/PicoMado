@@ -4320,6 +4320,7 @@ mod tests {
     include!("../tests/support/ack_probe_reader.rs");
     include!("persistence_contract_tests.rs");
     include!("d02_review_contract_tests.rs");
+    include!("d02_display_revision_contract_tests.rs");
 
     #[cfg(feature="boundary-observation")]
     include!("causal_contract_tests.rs");

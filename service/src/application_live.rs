@@ -140,7 +140,9 @@ impl App {
                 && ours.selected == before.selected
                 && self.input_fences.get(id) == base.input_fences.get(id)
                 && ours.enabled == before.enabled;
-            if !unchanged {
+            // An unrelated enable/config revision can preserve the actual
+            // display. Its completed ACKs and refresh obligation still apply.
+            if !unchanged && !same_display_identity(before, ours) {
                 continue;
             }
             accepted.insert(id.clone());
@@ -167,6 +169,13 @@ impl App {
             ours.last_sent_frame = now.last_sent_frame;
             ours.last_received_frame = now.last_received_frame;
             ours.last_rendered_frame = now.last_rendered_frame;
+            if let Some(debt) = self.content_refresh_debt.get_mut(id) {
+                let mut display = crate::display_token(id, ours);
+                display.settings_revision = debt.settings_revision;
+                if *debt == display {
+                    debt.settings_revision = ours.settings_revision;
+                }
+            }
             if content_refresh && ours.mode == Mode::Normal && ours.owner == Owner::Remote {
                 self.content_refresh_debt
                     .insert(id.clone(), crate::display_token(id, ours));
@@ -335,6 +344,17 @@ impl App {
         .map_err(settings_error)?;
         Ok((next != *before).then_some(next))
     }
+}
+fn same_display_identity(before: &Device, after: &Device) -> bool {
+    before.incarnation == after.incarnation
+        && before.session_epoch == after.session_epoch
+        && before.display_epoch == after.display_epoch
+        && before.screen_owner_epoch == after.screen_owner_epoch
+        && before.selected == after.selected
+        && before.mode == after.mode
+        && before.owner == after.owner
+        && before.online == after.online
+        && before.capabilities == after.capabilities
 }
 fn effect_device(effect: &Effect) -> &str {
     match effect {

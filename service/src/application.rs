@@ -668,6 +668,15 @@ impl App {
         if !self.transient_only {self.persistence_us = self.persistence_us.saturating_add(saving.elapsed().as_micros());}
         let revision = next.world.revision;
         if let Some(fences)=next_fences{self.input_fences=fences;}
+        self.content_refresh_debt.retain(|id, token| {
+            let Some(before) = self.runtime.world.devices.get(id) else { return false; };
+            let Some(after) = next.world.devices.get(id) else { return false; };
+            if !crate::display_current(before, token) || !same_display_identity(before, after) {
+                return false;
+            }
+            token.settings_revision = after.settings_revision;
+            true
+        });
         self.runtime = next;
         if self.transient_only{self.transient_changed=true;}
         self.record_observation(Component::State, Phase::Committed, operation, 0, revision, if self.transient_only {2}else{1});

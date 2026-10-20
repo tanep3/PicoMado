@@ -59,3 +59,21 @@
 初期の全体試行2回は各277成功/1失敗だった。失敗は新しいguard試験のfixtureで、無関係な設定変更での有効な描画ACKを拒否すると期待した点と、送信完了前のeffectを残していた点に限られた。既存挙動に合わせてfixtureを修正し、上記の最終結果を得た。4件の修正実装を変更して通したものではない。
 
 追加修正もサーバRustのみでファーム更新は不要。実機、サービス、本番DB・設定、SSH、共有SDKへの書込みは行っていない。本番ソースは`ffb62d6`のまま差分なし。SDKの既存submodule差分を保持し、cyw43_ll.cのSHA-256は基準の`a4e6baa503b9332a0a445c8b22deb4bee62793c441dc74a200b0fe8065c397c7`と一致した。実機の間欠遅延解消は引き続き未検証であり、独立再レビューと本番反映は別途行う。D-03/D-04の未完了範囲も維持する。
+
+
+## 表示を保つ改訂の追加P2
+
+551445aの前4件は独立再レビューで解消確認された。追加で、未選択pluginの無効化がsettings revisionを進めるだけで、表示中のlatest配信義務も消していた。上記の「有効化設定変更で義務を消す」試験基準はこの点を捉えていなかった。[追加契約](application-live-state-review-corrections.md)を2c8eaf7で先に記録し、表示の同一性で引継ぎと失効を区別する修正を行う。D03Aの保存点53cb612は保持し、D04の進行中差分は0dbcd816へ安全に退避した。
+
+表示同一性の修正では、取得更新後に未選択pluginを無効化してから旧RenderedAckを送る場合と、その設定の実SQLite保存を停止した間にACK・実writer配信を進める場合を、LCD/E-inkの4条件で確認した。後者も新しい画像のpending/effect完了を古い保存snapshotへ戻さず、後着重複ACKで二度発行しない。選択・再接続・待機・削除の旧義務失効と、表示を保つ改訂の義務引継ぎを区別した。共通実装に具体plugin名の分岐は追加していない。
+
+| 追加P2修正後 | 結果 | 証拠 |
+| --- | --- | --- |
+| 再現・境界 | 7成功、0失敗、1.03秒 | `d02-display-revision-targeted.log` |
+| 全feature unit（D03Aも含む） | 284成功、0失敗、81.24秒 | `d02-display-revision-all-features.log` |
+| 通常unit | 263成功、0失敗、87.65秒 | `d02-display-revision-default.log` |
+| bin / 保存済みJMA integration | 1成功 / 4成功、0失敗（JMA 2.38秒） | `d02-display-revision-offline.log` |
+
+通常unitの最初の実行はセッションが失効し、ログにコンパイル開始しか残らなかった。cargo/rustc/test/linkerが残っていないことを確認し、部分ログを`d02-display-revision-default-interrupted.log`へ保持して再実行した。上表はその完了結果であり、中断した試行を成功に数えていない。
+
+`d02-display-revision-check.log`の通常lib/bins型チェックも成功（5.55秒）。この追加修正もサーバ側だけで、ファーム更新や本番操作は行っていない。独立再レビュー用の固定点として保存し、退避済みD04の作業はその後に再開する。

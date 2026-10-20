@@ -556,7 +556,7 @@ fn d02_review_confirmation_fast_path_keeps_session_revision_and_noop_guards() {
 }
 
 #[test]
-fn d02_review_refresh_obligation_is_cancelled_by_display_invalidation() {
+fn d02_review_refresh_obligation_follows_display_identity() {
     for invalidation in ["selection", "settings", "reconnect", "standby", "delete"] {
         let temp = tempfile::tempdir().unwrap();
         let (mut state, token) = commit_prefix_fixture(&temp.path().join("db"), temp.path());
@@ -606,17 +606,37 @@ fn d02_review_refresh_obligation_is_cancelled_by_display_invalidation() {
             }
             _ => unreachable!(),
         }
-        assert!(state.content_refresh_debt.is_empty(), "{invalidation}");
-        let effects = state.pending_effects();
-        // An unrelated enable-setting revision may leave the current draw
-        // valid. Its completion may be accepted, but must not revive the debt.
-        state
-            .terminal_event(Event::RenderedAck { token: old })
-            .unwrap();
-        assert_eq!(
-            state.pending_effects(),
-            effects,
-            "old completion cannot create a refresh in a new scope"
-        );
+        if invalidation == "settings" {
+            let current = &state.runtime.world.devices[&token.device_id];
+            assert_eq!(
+                state.content_refresh_debt[&token.device_id].settings_revision,
+                current.settings_revision
+            );
+            assert!(state
+                .terminal_event(Event::RenderedAck { token: old.clone() })
+                .unwrap());
+            assert!(state.content_refresh_debt.is_empty());
+            let frames: Vec<_> = state
+                .pending_effects()
+                .into_iter()
+                .filter_map(|(_, e)| match e {
+                    Effect::SendFrame { token, .. } => Some(token),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(frames.len(), 1);
+            assert!(frames[0].frame_id > old.frame_id);
+        } else {
+            assert!(state.content_refresh_debt.is_empty(), "{invalidation}");
+            let effects = state.pending_effects();
+            assert!(!state
+                .terminal_event(Event::RenderedAck { token: old })
+                .unwrap());
+            assert_eq!(
+                state.pending_effects(),
+                effects,
+                "a replaced display cannot revive its old obligation"
+            );
+        }
     }
 }
