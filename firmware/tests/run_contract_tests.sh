@@ -18,3 +18,12 @@ cc "${base[@]}" -DPM_EVENT_STREAM=1 -DPM_TRACE_ENABLE=1 -DPM_USE_SAMPLE_CONFIG=1
 
 cc "${base[@]}" tests/observation_json_test.c -o "$work/metadata"
 "$work/metadata"
+
+for device in E-ink_0 E-ink_1; do
+ cc "${base[@]}" -DPM_EVENT_STREAM=1 -DPM_TRACE_ENABLE=1 -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 \
+  '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
+  -I"devices/$device" -Itests/app_stubs tests/eink_pending_observation_test.c \
+  src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c -o "$work/pending-$device"
+ "$work/pending-$device" "$work/pending-$device.events"
+ python3 tests/eink_pending_observation_test.py "$work/pending-$device.events"
+done

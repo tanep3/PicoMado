@@ -40,3 +40,9 @@ driverのqueued/active trace contextも分けた。局所描画中にremoteをqu
 D04はE-ink firmwareの変更なので、採用時には対象端末用firmwareの更新が必要。wire/APIとLCDの有効な受信規則は保つ。今回のUF2はdummy sampleであり実機へ書き込まない。実機反映は独立レビュー後、既存の端末設定・board IDでbuildして識別を確認し、別途承認された書込みと物理受入を行う。
 
 本番source/DB/設定、実USB、SSH、service再起動、install、push、共有SDKへの書込みは行っていない。SDK既存差分を保持し、cyw43_ll.cの基準SHA-256 `a4e6baa503b9332a0a445c8b22deb4bee62793c441dc74a200b0fe8065c397c7`と一致した。D03Bの期限整理・公開後ファイル作用は別の未完了項目として残る。
+
+## 観測ONの実E-ink経路の追加確認
+
+`eink_pending_observation_test.c`で実main/APIと実EV1 encoderを同時に動かし、decoderでframe/operation/resultを照合した。0/2ボタンの双方で、frame101の物理描画中に受信したframe202はAPI_PENDINGのままで、旧101の完了時に202を完了扱いにしない。無効header303はREJECTEDで202を破壊せず、202のdispatchは旧完了後、実完了とRendered ACKは次の完了後にだけ発生する。APIのReceived/Pending operation IDも同じで、観測dropは0。
+
+`d04-observed-pending-contracts.log`の通常実行と`d04-observed-pending-sanitized.log`のAddress/Undefined実行が成功した。既存の`run_contract_tests.sh`へ追加しており、既存観測契約も同時に回帰している。この追加確認でfirmware本体は変更していない。
