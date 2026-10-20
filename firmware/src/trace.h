@@ -5,6 +5,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include "stream_diag.h"
+#include "observation.h"
 #ifndef PM_TRACE_ENABLE
 #define PM_TRACE_ENABLE 0
 #endif
@@ -26,7 +27,7 @@ typedef enum {
     PM_TRACE_TCP_WRITE, PM_TRACE_TCP_OUTPUT, PM_TRACE_SLOW_POLL,
     PM_TRACE_SLOW_LOOP
 } pm_trace_kind;
-#if PM_ACK_PATH_PROBE || PM_USB_BUTTON_SIM
+#if PM_ACK_PATH_PROBE || PM_USB_BUTTON_SIM || PM_EVENT_STREAM
 bool pm_trace_try_line(const char *line,size_t length);
 #endif
 #if PM_TRACE_ENABLE

@@ -1,13 +1,6 @@
 // Included in transport::tests for the same production writer/fixtures.
-#[cfg(recovery_candidate)]
 type RecoveryProbe=crate::socket_progress::WriteProgress;
-#[cfg(not(recovery_candidate))]
-#[derive(Clone,Default)]
-struct RecoveryProbe(Arc<std::sync::atomic::AtomicU64>);
-fn recovery_accept(p:&RecoveryProbe,n:usize){
-    #[cfg(recovery_candidate)] p.test_accept(n);
-    #[cfg(not(recovery_candidate))] {p.0.fetch_add(n as u64,Ordering::Relaxed);}
-}
+fn recovery_accept(p:&RecoveryProbe,n:usize){p.test_accept(n);}
 struct RecoverySink {
     recorded:Arc<std::sync::Mutex<Vec<Message>>>, count:Arc<AtomicUsize>,
     probe:RecoveryProbe, hold:Duration, progress:bool,
@@ -44,10 +37,7 @@ async fn recovery_fixture(hold:Duration,progress:bool,control:bool,replace_sessi
     let probe=RecoveryProbe::default();
     let sink=RecoverySink{recorded:recorded.clone(),count:count.clone(),probe:probe.clone(),hold,progress,began:None,wait:None};
     let (tx,rx)=tokio::sync::mpsc::channel(32);
-    #[cfg(recovery_candidate)]
     let task=tokio::spawn(writer_loop_with_progress(sink,rx,app.clone(),None,Some(probe)));
-    #[cfg(not(recovery_candidate))]
-    let task=tokio::spawn(writer_loop(sink,rx,app.clone()));
     tx.send(WriterCommand::Bind(token.clone())).await.unwrap();
     while count.load(Ordering::SeqCst)<1{tokio::time::sleep(Duration::from_millis(1)).await;}
     let began=std::time::Instant::now();

@@ -1,12 +1,13 @@
 #pragma once
 #include "button_sim.h"
+#include "observation.h"
 #ifndef PM_USB_BUTTON_SIM
 #define PM_USB_BUTTON_SIM 0
 #endif
 #ifndef PM_ACK_PATH_PROBE
 #define PM_ACK_PATH_PROBE 0
 #endif
-#if PM_USB_BUTTON_SIM || PM_ACK_PATH_PROBE
+#if PM_USB_BUTTON_SIM || PM_ACK_PATH_PROBE || PM_EVENT_STREAM
 void pm_usb_control_init(uint64_t boot,unsigned buttons);
 void pm_usb_control_input(int ch);
 void pm_usb_control_poll(bool connected);

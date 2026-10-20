@@ -1,5 +1,9 @@
 #include "trace.h"
 #include "rx_stats.h"
+#include "observation.h"
+#if PM_EVENT_STREAM && !PM_TRACE_ENABLE
+#error "Event stream requires the bounded trace backend"
+#endif
 #if PM_TRACE_ENABLE
 #include <stdbool.h>
 #include <string.h>
@@ -13,12 +17,72 @@
 typedef struct {
     uint64_t us;
     unsigned kind;
-    union {struct {uint64_t frame;int32_t a;uint32_t b;} event;char text[TEXT_CAP];} data;
+    union {struct {uint64_t frame;int32_t a;uint32_t b;} event;char text[TEXT_CAP];
+#if PM_EVENT_STREAM
+        struct {uint64_t sequence,operation,parent,session,frame,dropped;uint32_t a,b;uint16_t event;uint8_t component,phase;} observation;
+#endif
+    } data;
 } record;
 static record queue[RECORDS];
 static unsigned head,tail,count;
 static uint32_t dropped;
 static uint64_t frame_context;
+#if PM_EVENT_STREAM
+#define OBSERVATION_KIND (UINT32_MAX-1u)
+static pm_observation_status observation;
+static bool observation_negotiated;
+static void observation_lost(uint64_t seq){
+    if(!observation.first_lost)observation.first_lost=seq;
+    observation.last_lost=seq;
+    if(observation.dropped<UINT64_MAX)observation.dropped++;else observation.saturated=true;
+}
+void pm_observation_init(uint64_t boot){observation.boot=boot?boot:1;}
+void pm_observation_enable(bool enabled){
+    uint32_t irq=save_and_disable_interrupts();observation.enabled=enabled;
+    if(enabled)observation_negotiated=true;
+    restore_interrupts(irq);
+}
+pm_observation_status pm_observation_read(void){
+    uint32_t irq=save_and_disable_interrupts();pm_observation_status s=observation;s.queued=count;
+    restore_interrupts(irq);return s;
+}
+uint64_t pm_observe(uint8_t component,uint16_t event,uint8_t phase,
+    uint64_t operation,uint64_t parent,uint64_t session,uint64_t frame,uint32_t a,uint32_t b){
+    uint32_t irq=save_and_disable_interrupts();
+    if(!observation.enabled){restore_interrupts(irq);return 0;}
+    if(observation.sequence==UINT64_MAX){observation.saturated=true;observation.enabled=false;restore_interrupts(irq);return 0;}
+    uint64_t seq=++observation.sequence;
+    /* Half the shared queue remains available to command replies. Drop newest;
+     * never wait, overwrite a control reply, format or enter the SDK here. */
+    if(count>=RECORDS/2){observation_lost(seq);restore_interrupts(irq);return seq;}
+    record *r=&queue[tail];tail=(tail+1)%RECORDS;count++;
+    r->kind=OBSERVATION_KIND;r->us=time_us_64();
+    r->data.observation.sequence=seq;r->data.observation.operation=operation?operation:seq;
+    r->data.observation.parent=parent;r->data.observation.session=session;r->data.observation.frame=frame;
+    r->data.observation.a=a;r->data.observation.b=b;r->data.observation.component=component;
+    r->data.observation.event=event;r->data.observation.phase=phase;r->data.observation.dropped=observation.dropped;
+    restore_interrupts(irq);return seq;
+}
+static void put_be(uint8_t **p,uint64_t value,unsigned bytes){
+    for(unsigned i=bytes;i;i--)*(*p)++=(uint8_t)(value>>(8*(i-1)));
+}
+static int observation_line(const record *r,char *out){
+    uint8_t body[76],*p=body;const char *hex="0123456789abcdef";
+    put_be(&p,r->data.observation.component,1);put_be(&p,r->data.observation.event,2);put_be(&p,r->data.observation.phase,1);
+    put_be(&p,observation.boot,8);put_be(&p,r->data.observation.sequence,8);put_be(&p,r->us,8);
+    put_be(&p,r->data.observation.operation,8);put_be(&p,r->data.observation.parent,8);
+    put_be(&p,r->data.observation.session,8);put_be(&p,r->data.observation.frame,8);
+    put_be(&p,r->data.observation.dropped,8);put_be(&p,r->data.observation.a,4);put_be(&p,r->data.observation.b,4);
+    uint32_t crc=UINT32_MAX;memcpy(out,"ev1 ",4);unsigned n=4;
+    for(unsigned i=0;i<sizeof body;i++){
+        crc^=body[i];for(unsigned j=0;j<8;j++)crc=(crc>>1)^((crc&1)?UINT32_C(0xedb88320):0);
+        out[n++]=hex[body[i]>>4];out[n++]=hex[body[i]&15];
+    }
+    crc=~crc;out[n++]=' ';
+    for(unsigned i=8;i;i--)out[n++]=hex[(crc>>(4*(i-1)))&15];
+    out[n++]='\n';out[n]=0;return (int)n;
+}
+#endif
 static char pending[LINE_CAP];
 static size_t pending_length,pending_offset;
 static const char *const names[]={"button","frame_start","crc_ok","receipt_begin","receipt_end",
@@ -28,6 +92,9 @@ uint32_t pm_trace_dropped(void){return dropped;}
 void pm_trace_frame_context(uint64_t frame){uint32_t irq=save_and_disable_interrupts();frame_context=frame;restore_interrupts(irq);}
 uint64_t pm_trace_current_frame(void){uint32_t irq=save_and_disable_interrupts();uint64_t value=frame_context;restore_interrupts(irq);return value;}
 static record *reserve(void){
+    #if PM_EVENT_STREAM
+    if(observation_negotiated && count>=RECORDS/2){if(dropped<UINT32_MAX)dropped++;return NULL;}
+#endif
     if(count==RECORDS){head=(head+1)%RECORDS;count--;dropped++;}
     record *r=&queue[tail];tail=(tail+1)%RECORDS;count++;
     r->us=pm_trace_clock();return r;
@@ -38,6 +105,7 @@ void pm_trace_event(pm_trace_kind kind,uint64_t frame,int32_t a,uint32_t b){
     if(kind!=PM_TRACE_BUTTON)return;
 #endif
     uint32_t irq=save_and_disable_interrupts();record *r=reserve();
+    if(!r){restore_interrupts(irq);return;}
     r->kind=(unsigned)kind;r->data.event.frame=frame;r->data.event.a=a;r->data.event.b=b;
     restore_interrupts(irq);
 }
@@ -47,24 +115,28 @@ void pm_trace_slow(pm_trace_kind kind,uint64_t started,uint32_t where){
         elapsed>UINT32_MAX?UINT32_MAX:(uint32_t)elapsed);
 }
 int pm_logf(const char *format,...){
+    /* Formatting is outside the IRQ mask; producers only copy a bounded value. */
+    char text[TEXT_CAP];va_list args;va_start(args,format);
+    int n=vsnprintf(text,sizeof text,format,args);va_end(args);
+    if(n<0)return n;
+    if((size_t)n>=sizeof text){text[TEXT_CAP-2]='\n';text[TEXT_CAP-1]=0;}
     uint32_t irq=save_and_disable_interrupts();record *r=reserve();
-    r->kind=UINT32_MAX;
-    va_list args;va_start(args,format);
-    int n=vsnprintf(r->data.text,sizeof r->data.text,format,args);va_end(args);
-    if(n<0){r->data.text[0]=0;restore_interrupts(irq);return n;}
-    if((size_t)n>=sizeof r->data.text){
-        r->data.text[TEXT_CAP-2]='\n';r->data.text[TEXT_CAP-1]=0;dropped++;
-    }
+    if(r){r->kind=UINT32_MAX;memcpy(r->data.text,text,(size_t)n<sizeof text?(size_t)n+1:sizeof text);}
+    if((size_t)n>=sizeof text && dropped<UINT32_MAX)dropped++;
     restore_interrupts(irq);return n;
 }
-#if PM_ACK_PATH_PROBE || PM_USB_BUTTON_SIM
+#if PM_ACK_PATH_PROBE || PM_USB_BUTTON_SIM || PM_EVENT_STREAM
 // Frozen probe export shares the ordinary line queue: partial USB writes from
 // different producers must never interleave within a line. Never evict here.
 bool pm_trace_try_line(const char *line,size_t length){
     if(length>=TEXT_CAP)return false;
     uint32_t irq=save_and_disable_interrupts();
-    if(count>=RECORDS/2){restore_interrupts(irq);return false;}
-    record *r=reserve();r->kind=UINT32_MAX;memcpy(r->data.text,line,length);r->data.text[length]=0;
+    unsigned limit=RECORDS/2;
+#if PM_EVENT_STREAM
+    if(observation_negotiated)limit=RECORDS;
+#endif
+    if(count>=limit){restore_interrupts(irq);return false;}
+    record *r=&queue[tail];tail=(tail+1)%RECORDS;count++;r->us=pm_trace_clock();r->kind=UINT32_MAX;memcpy(r->data.text,line,length);r->data.text[length]=0;
     restore_interrupts(irq);return true;
 }
 #endif
@@ -77,6 +149,10 @@ static void flush_one(void){
         uint32_t lost=dropped;restore_interrupts(irq);
         record *r=&saved;
         int n;
+        #if PM_EVENT_STREAM
+        if(r->kind==OBSERVATION_KIND)n=observation_line(r,pending);
+        else
+#endif
         if(r->kind==UINT32_MAX)n=snprintf(pending,sizeof pending,"%s",r->data.text);
         else n=snprintf(pending,sizeof pending,
             "timing us=%llu event=%s frame=%llu a=%ld b=%lu dropped=%lu\n",

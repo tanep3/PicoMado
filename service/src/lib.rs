@@ -3,6 +3,7 @@
 pub mod ack_probe;
 
 pub mod diagnostics;
+pub mod observation;
 pub mod application;
 pub mod caricature;
 pub mod clock;

@@ -39,17 +39,20 @@ pub fn run_pending(
         if !app.effect_pending(id) {
             continue;
         }
+        app.observe_effect(crate::observation::Phase::Dispatched, id);
         match executor.execute(id, &effect) {
             Ok(Outcome::Completed) if !matches!(effect, Effect::Fetch(_)) => {
                 app.complete_effect(id)?;
+                app.observe_effect(crate::observation::Phase::Completed, id);
                 report.completed += 1;
             }
             Ok(Outcome::FetchResult(result)) if matches!(effect, Effect::Fetch(_)) => {
                 app.resolve_fetch(id, result)?;
+                app.observe_effect(crate::observation::Phase::Completed, id);
                 report.completed += 1;
             }
-            Ok(Outcome::Deferred) => report.deferred += 1,
-            Ok(Outcome::Completed) | Ok(Outcome::FetchResult(_)) | Err(_) => report.failed += 1,
+            Ok(Outcome::Deferred) => { app.observe_effect(crate::observation::Phase::Pending, id); report.deferred += 1; },
+            Ok(Outcome::Completed) | Ok(Outcome::FetchResult(_)) | Err(_) => { app.observe_effect(crate::observation::Phase::Error, id); report.failed += 1; },
         }
     }
     Ok(report)

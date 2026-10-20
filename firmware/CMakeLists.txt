@@ -119,6 +119,7 @@ if(PM_CYW43_INNER_PROBE)
   endif()
   set_property(TARGET cyw43_driver PROPERTY INTERFACE_SOURCES "${PM_NEW_DRIVER_SOURCES}")
 endif()
+option(PM_EVENT_STREAM "Generic bounded boundary events over the existing USB owner" OFF)
 option(PM_STREAM_DIAGNOSTICS "Bounded stream diagnostics; never changes playback policy" OFF)
 add_library(picomado_core STATIC src/core.c src/button_sim.c src/video.c src/endpoint_policy.c src/eex_wire.c src/eex_exchange.c src/endpoint_client.c)
 target_compile_options(picomado_core PRIVATE -fstack-usage)
@@ -168,7 +169,7 @@ endif()
 add_executable(${PM_APP_TARGET} src/cyw43_inner_probe.c src/usb_control.c src/tx_link_probe.c src/ack_probe.c src/stream_diag.c src/endpoint_udp_sdk.c src/main.c ${PM_DISPLAY_SOURCES} src/net.c src/ws_accept.c src/trace.c src/trace_usb.c src/rx_stats.c)
 target_include_directories(${PM_APP_TARGET} PRIVATE ${PM_DEVICE_DIR} ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_options(${PM_APP_TARGET} PRIVATE -fstack-usage)
-target_compile_definitions(${PM_APP_TARGET} PRIVATE PM_CYW43_INNER_PROBE=$<BOOL:${PM_CYW43_INNER_PROBE}> PM_USB_BUTTON_SIM=$<BOOL:${PM_USB_BUTTON_SIM}> PM_TX_LINK_PROBE=$<BOOL:${PM_TX_LINK_PROBE}> PM_ACK_PATH_PROBE=$<BOOL:${PM_ACK_PATH_PROBE}> PM_AWAY_EEX1=$<BOOL:${PM_AWAY_EEX1}> PM_EEX1_PORT=${PM_EEX1_PORT} PM_NETWORK_BUILD=1 PM_NORMAL_BUILD=1 PM_TRACE_ENABLE=1 ${PM_SAMPLE_DEFINE}
+target_compile_definitions(${PM_APP_TARGET} PRIVATE PM_EVENT_STREAM=$<BOOL:${PM_EVENT_STREAM}> PM_CYW43_INNER_PROBE=$<BOOL:${PM_CYW43_INNER_PROBE}> PM_USB_BUTTON_SIM=$<BOOL:${PM_USB_BUTTON_SIM}> PM_TX_LINK_PROBE=$<BOOL:${PM_TX_LINK_PROBE}> PM_ACK_PATH_PROBE=$<BOOL:${PM_ACK_PATH_PROBE}> PM_AWAY_EEX1=$<BOOL:${PM_AWAY_EEX1}> PM_EEX1_PORT=${PM_EEX1_PORT} PM_NETWORK_BUILD=1 PM_NORMAL_BUILD=1 PM_TRACE_ENABLE=1 ${PM_SAMPLE_DEFINE}
   PM_LCD_FRAME_CS_HOLD=1 PM_LCD_CONTROL_SPI_BAUD=PM_LCD_SPI_BAUD
   PM_LCD_CAPTURE_ENABLE=0 PICO_STDIO_USB_STDOUT_TIMEOUT_US=0 PICO_STDIO_DEADLOCK_TIMEOUT_MS=0
   PM_EXPECTED_BOARD_ID="${PM_BOARD_ID}" PM_BUILD_DEVICE="${PM_DEVICE}"

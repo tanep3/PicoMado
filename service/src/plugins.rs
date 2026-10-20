@@ -8,50 +8,38 @@ use crate::{Engine, Registry};
 
 pub const DEFAULT_ORDER: [&str; 5] = ["youtube", "caricature", "weather", "rain-radar", "clock"];
 
-pub fn engine() -> Engine {
-    let mut registry = Registry::default();
-    registry
-        .register(Box::new(crate::youtube::YoutubePlugin))
-        .expect("unique plugin");
-    registry
-        .register(Box::new(crate::caricature::CaricaturePlugin))
-        .expect("unique plugin");
-    registry
-        .register(Box::new(crate::weather::WeatherPlugin))
-        .expect("unique plugin");
-    registry
-        .register(Box::new(crate::radar::RadarPlugin))
-        .expect("unique plugin");
-    registry
-        .register(Box::new(crate::clock::ClockPlugin))
-        .expect("unique plugin");
-    Engine::new(registry)
+/// One registration owns matching rules and content. The application does not
+/// add an ID branch when another plugin is registered.
+pub struct PluginSet {
+    pub(crate) engine: Engine,
+    pub(crate) contents: BTreeMap<String, Box<dyn ContentPlugin>>,
+    pub(crate) order: Vec<String>,
 }
-
-pub fn contents() -> BTreeMap<String, Box<dyn ContentPlugin>> {
-    BTreeMap::from([
-        (
-            "clock".into(),
-            Box::new(crate::clock::ClockContent::default()) as Box<dyn ContentPlugin>,
-        ),
-        (
-            "youtube".into(),
-            Box::new(crate::plugin_adapters::YoutubeManaged::default()) as Box<dyn ContentPlugin>,
-        ),
-        (
-            "caricature".into(),
-            Box::new(caricature_content()) as Box<dyn ContentPlugin>,
-        ),
-        (
-            "weather".into(),
-            Box::new(crate::weather::WeatherContent::default()) as Box<dyn ContentPlugin>,
-        ),
-        (
-            "rain-radar".into(),
-            Box::new(crate::radar::RadarContent::default()) as Box<dyn ContentPlugin>,
-        ),
-    ])
+impl Default for PluginSet {
+    fn default() -> Self { Self { engine: Engine::new(Registry::default()), contents: BTreeMap::new(), order: Vec::new() } }
 }
+impl PluginSet {
+    pub fn register(&mut self, rules: Box<dyn crate::Plugin>, content: Box<dyn ContentPlugin>) -> Result<(), crate::Error> {
+        let id = rules.id().to_owned();
+        if id != content.id() || id.is_empty() { return Err(crate::Error::UnknownPlugin(id)); }
+        self.engine.registry.register(rules)?;
+        self.contents.insert(id.clone(), content);
+        self.order.push(id);
+        Ok(())
+    }
+}
+pub fn builtins() -> PluginSet {
+    let mut set=PluginSet::default();
+    set.register(Box::new(crate::youtube::YoutubePlugin), Box::new(crate::plugin_adapters::YoutubeManaged::default())).expect("unique plugin");
+    set.register(Box::new(crate::caricature::CaricaturePlugin), Box::new(caricature_content())).expect("unique plugin");
+    set.register(Box::new(crate::weather::WeatherPlugin), Box::new(crate::weather::WeatherContent::default())).expect("unique plugin");
+    set.register(Box::new(crate::radar::RadarPlugin), Box::new(crate::radar::RadarContent::default())).expect("unique plugin");
+    set.register(Box::new(crate::clock::ClockPlugin), Box::new(crate::clock::ClockContent::default())).expect("unique plugin");
+    debug_assert_eq!(set.order, DEFAULT_ORDER);
+    set
+}
+pub fn engine() -> Engine { builtins().engine }
+pub fn contents() -> BTreeMap<String, Box<dyn ContentPlugin>> { builtins().contents }
 
 /// Built-in source adapters live beside plugin registration. The generic fetch
 /// runner does not need to know which plugins use HTTP.

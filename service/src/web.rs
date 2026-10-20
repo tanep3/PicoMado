@@ -11,7 +11,9 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::application::{App, AppError, AppView, DEFAULT_ORDER};
+use crate::application::{App, AppError, AppView};
+#[cfg(test)]
+use crate::application::DEFAULT_ORDER;
 use crate::settings::{DeviceSettings, PluginSettings};
 
 pub type SharedApp = Arc<Mutex<App>>;
@@ -88,8 +90,8 @@ async fn home() -> Html<&'static str> {
     Html(include_str!("ui.html"))
 }
 
-async fn plugin_page(Path(plugin): Path<String>) -> Result<Html<&'static str>, StatusCode> {
-    if DEFAULT_ORDER.contains(&plugin.as_str()) {
+async fn plugin_page(State(app): State<SharedApp>, Path(plugin): Path<String>) -> Result<Html<&'static str>, StatusCode> {
+    if app.lock().map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?.has_plugin(&plugin) {
         Ok(Html(include_str!("ui.html")))
     } else {
         Err(StatusCode::NOT_FOUND)

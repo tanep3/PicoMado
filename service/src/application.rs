@@ -148,10 +148,16 @@ impl From<&Runtime> for StoredState {
     }
 }
 
+#[cfg(test)]
 impl TryFrom<StoredState> for Runtime {
-    type Error = AppError;
+    type Error=AppError;
+    fn try_from(stored:StoredState)->Result<Self,Self::Error>{
+        Self::from_stored(stored,&DEFAULT_ORDER.iter().map(|id|(*id).to_owned()).collect::<Vec<_>>())
+    }
+}
 
-    fn try_from(stored: StoredState) -> Result<Self, Self::Error> {
+impl Runtime {
+    fn from_stored(stored: StoredState, catalog: &[String]) -> Result<Self, AppError> {
         let devices = stored
             .world
             .devices
@@ -201,7 +207,8 @@ impl TryFrom<StoredState> for Runtime {
         // four IDs, in any saved order. Append only; preserve all selections,
         // enablement sets and per-device revisions. Reject malformed orders.
         let legacy: BTreeSet<_> = ["youtube", "caricature", "weather", "rain-radar"].into();
-        if state.world.plugin_order.len() == legacy.len()
+        if catalog.iter().any(|id| id == "clock")
+            && state.world.plugin_order.len() == legacy.len()
             && state
                 .world
                 .plugin_order
@@ -239,7 +246,7 @@ impl TryFrom<StoredState> for Runtime {
                         || device.incarnation >= state.world.next_incarnation
                 })
             })
-            || !valid_order(&state.world.plugin_order)
+            || !valid_order(&state.world.plugin_order, catalog)
         {
             return Err(AppError::Conflict("inconsistent stored state"));
         }
@@ -328,15 +335,18 @@ fn valid_name(value: &str, max: usize) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
-fn valid_order(order: &[String]) -> bool {
-    order.len() == DEFAULT_ORDER.len()
-        && order.iter().collect::<BTreeSet<_>>().len() == DEFAULT_ORDER.len()
-        && order.iter().all(|id| DEFAULT_ORDER.contains(&id.as_str()))
+fn valid_order(order: &[String], catalog: &[String]) -> bool {
+    order.len()==catalog.len()
+        && order.iter().collect::<BTreeSet<_>>().len()==catalog.len()
+        && order.iter().all(|id| catalog.contains(id))
 }
 
 pub struct App {
     connection: Connection,
     engine: Engine,
+    plugin_catalog: Vec<String>,
+    observations: crate::observation::Source,
+    observation_parent: u64,
     runtime: Runtime,
     clock: Arc<dyn crate::fetch::Clock + Send + Sync>,
     /// Completed LCD pixels are transient; only validated handles enter the sender.
@@ -392,6 +402,15 @@ impl App {
         root: &Path,
         clock: Arc<dyn crate::fetch::Clock + Send + Sync>,
     ) -> Result<Self, AppError> {
+        Self::open_with_plugin_set(path, root, clock, crate::plugins::builtins())
+    }
+
+    /// Inject a plugin composition without editing application or transport.
+    pub fn open_with_plugin_set(
+        path: &Path, root: &Path,
+        clock: Arc<dyn crate::fetch::Clock + Send + Sync>,
+        plugins: crate::plugins::PluginSet,
+    ) -> Result<Self, AppError> {
         let mut connection = Connection::open(path)?;
         connection.execute_batch(
             "PRAGMA journal_mode=WAL;
@@ -424,14 +443,14 @@ impl App {
             }
             let stored = serde_json::from_str::<StoredState>(&body)?;
             let previous_order_revision = stored.order_revision;
-            let runtime = Runtime::try_from(stored)?;
+            let runtime = Runtime::from_stored(stored, &plugins.order)?;
             if runtime.order_revision != previous_order_revision {
                 Self::persist(&mut connection, &runtime)?;
             }
             runtime
         } else {
             let runtime = Runtime {
-                world: World::new(DEFAULT_ORDER.iter().map(|id| (*id).to_owned()).collect()),
+                world: World::new(plugins.order.clone()),
                 settings: SettingsStore::new(),
                 order_revision: 1,
                 outbox: BTreeMap::new(),
@@ -443,7 +462,7 @@ impl App {
             Self::persist(&mut connection, &runtime)?;
             runtime
         };
-        let mut contents = crate::plugins::contents();
+        let mut contents = plugins.contents;
         for (id, value) in &runtime.plugin_states {
             if let Some(plugin) = contents.get_mut(id) {
                 plugin
@@ -453,7 +472,10 @@ impl App {
         }
         Ok(Self {
             connection,
-            engine: crate::plugins::engine(),
+            engine: plugins.engine,
+            plugin_catalog: plugins.order,
+            observations: crate::observation::Source::default(),
+            observation_parent: 0,
             runtime,
             clock,
             frame_assets: BTreeMap::new(),
@@ -498,15 +520,34 @@ impl App {
         &mut self,
         action: impl FnOnce(&Engine, &mut Runtime) -> Result<T, AppError>,
     ) -> Result<T, AppError> {
+        use crate::observation::{Component, Phase};
+        let before = self.runtime.world.revision;
+        let operation = self.observations.record(Component::State, Phase::Received, 0, self.observation_parent, before, 0);
+        let first_effect = self.runtime.next_effect_id;
         let mut next = self.runtime.clone();
-        let result = action(&self.engine, &mut next)?;
+        let result = match action(&self.engine, &mut next) {
+            Ok(value) => value,
+            Err(error) => {
+                self.observations.record(Component::State, Phase::Rejected, operation, 0, before, 0);
+                return Err(error);
+            }
+        };
         next.prune_stale_effects();
+        self.observations.record(Component::State, Phase::Dispatched, operation, 0, next.world.revision, next.outbox.len() as u64);
         let saving = std::time::Instant::now();
-        Self::persist(&mut self.connection, &next)?;
-        self.persistence_us = self
-            .persistence_us
-            .saturating_add(saving.elapsed().as_micros());
+        if let Err(error) = Self::persist(&mut self.connection, &next) {
+            self.observations.record(Component::State, Phase::Error, operation, 0, before, 0);
+            return Err(error);
+        }
+        self.persistence_us = self.persistence_us.saturating_add(saving.elapsed().as_micros());
+        let revision = next.world.revision;
         self.runtime = next;
+        self.observations.record(Component::State, Phase::Committed, operation, 0, revision, 0);
+        if self.observations.enabled() {
+            for (id, _) in self.runtime.outbox.range(first_effect..) {
+                self.observations.record(Component::Effect, Phase::Pending, 0, operation, revision, *id);
+            }
+        }
         self.timed_frames
             .retain(|id, _| self.runtime.world.devices.contains_key(id));
         for (id, slot) in &mut self.video_slots {
@@ -654,6 +695,14 @@ impl App {
     }
 
     /// Subscribe before inspecting the outbox so changes cannot be missed.
+    pub fn observation_source(&self) -> crate::observation::Source { self.observations.clone() }
+
+    pub(crate) fn observe_effect(&self, phase: crate::observation::Phase, id: u64) {
+        self.observations.record(crate::observation::Component::Effect, phase, 0, 0, self.runtime.world.revision, id);
+    }
+
+    pub fn has_plugin(&self, id: &str) -> bool { self.contents.contains_key(id) }
+
     pub fn dispatch_notifications(&self) -> tokio::sync::watch::Receiver<()> {
         self.dispatch.subscribe()
     }
@@ -1848,16 +1897,27 @@ impl App {
         ) {
             return Err(AppError::Invalid("unsupported terminal event"));
         }
-        let decision = self
-            .engine
-            .handle(&self.runtime.world, &event)
-            .map_err(|_| AppError::Conflict("terminal event rejected"))?;
+        use crate::observation::{Component, Phase};
+        let operation = self.observations.record(Component::Input, Phase::Received, 0, 0, self.runtime.world.revision, 0);
+        let decision = match self.engine.handle(&self.runtime.world, &event) {
+            Ok(decision) => decision,
+            Err(_) => {
+                self.observations.record(Component::Input, Phase::Rejected, operation, 0, self.runtime.world.revision, 0);
+                return Err(AppError::Conflict("terminal event rejected"));
+            }
+        };
+        self.observations.record(Component::Input, Phase::Dispatched, operation, 0, decision.state.revision, decision.effects.len() as u64);
         // A delayed/duplicate ACK is a Rule no-op, so it must not create a
         // SQLite write on every retry. State-changing events still commit.
         if decision.applied.is_none() {
+            self.observations.record(Component::Input, Phase::Completed, operation, 0, self.runtime.world.revision, 0);
             return Ok(false);
         }
-        let changed = self.change(|_, state| state.accept(decision))?;
+        self.observation_parent = operation;
+        let result = self.change(|_, state| state.accept(decision));
+        self.observation_parent = 0;
+        self.observations.record(Component::Input, if result.is_ok() { Phase::Completed } else { Phase::Error }, operation, 0, self.runtime.world.revision, 1);
+        let changed = result?;
         if changed {
             match &event {
                 Event::ReceiptAck { token } => eprintln!(
@@ -2002,7 +2062,7 @@ impl App {
         expected_revision: u64,
         order: Vec<String>,
     ) -> Result<u64, AppError> {
-        if !valid_order(&order) {
+        if !valid_order(&order, &self.plugin_catalog) {
             return Err(AppError::Invalid("invalid plugin order"));
         }
         self.change(|_, state| {
@@ -3175,3 +3235,7 @@ mod clock_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path="application_contract_tests.rs"]
+mod contract_tests;
