@@ -16,6 +16,16 @@
 
 ## 受入と範囲
 
-純粋モデルと実mainのC試験で、描画中の新Start/部分chunk/CRC完了、複数世代の置換、不正header/CRC、旧完了、取消し・切断・再接続・待機、更新metadataの対応とAPI結果を検証する。2/4ボタンE-ink構成、native/旧chunk、既存driverのbase/partial更新試験を維持する。LCD回帰、native sanitizerとARMのRAM/stackを確認する。実パネル・ファーム書込みは行わない。
+純粋モデルと実mainのC試験で、描画中の新Start/部分chunk/CRC完了、複数世代の置換、不正header/CRC、旧完了、取消し・切断・再接続・待機、更新metadataの対応とAPI結果を検証する。既存0/2ボタンE-ink構成と4ボタンLCD構成、native/旧chunk、既存driverのbase/partial更新試験を維持する。LCD回帰、native sanitizerとARMのRAM/stackを確認する。実パネル・ファーム書込みは行わない。
 
 この契約はファーム側の非同期表示処理の修正対象である。D-01/D-02のサーバ変更のために追加ファーム更新が必要になった意味ではない。実機反映と物理的な残像・ちらつき・遅延の受入は別途とする。
+
+## 実装前の追加確認
+
+現行サンプルはE-ink_0が0ボタン、E-ink_1が2ボタン、LCDが4ボタンである。上記の受入を実構成へ合わせた。
+
+既存pm_startは検証前にassemblyをresetする。headerの寸法・長さ・format・CRC幅を副作用なしに検証してから、受信/pendingの置換を適用する。不正headerや64bit値の切詰めで有効なpendingを失わない。CRC不正・部分受信はreadyへ進めない。
+
+pendingモデルはEmpty/Receiving/Readyとtoken/更新metadataだけを持つ。実画素は既存assemblyに保持する。driver側もqueuedとactiveのtrace contextを分け、局所描画中に次のremote画像がqueueされても、現在描画のSPI factを後続frameへ付け替えない。
+
+実mainは描画完了結果を旧tokenとして処理してから、現在scopeに合うready pendingだけを次にdispatchする。旧描画失敗時も、新pendingを旧結果で完了扱いにしない。driver idle待ち中のreadyを含め、reset/selection待ち・切断・新session・待機で失効させる。重複して既に描画済みのtokenは既存ACK再送規則を保つ。
