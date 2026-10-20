@@ -31,6 +31,8 @@ Pi5 では単一 Rust サービスが Web/API と端末通信を同じポート�
 
 ## 2. 遷移を契約で組み立てる
 
+2026-10-20 の実装適合点、Pico の端末 API 境界、共通観測と USB／ホスト保存の分離は [契約と観測の段階的整理](contracts-observation-design.md) に補足する。この節の Query／Rule／Transition／Effect の契約は変更しない。
+
 ユーザー指定の [soukoban の `soukoban.py`](https://github.com/tanep3/soukoban/src/soukoban.py) に示された設計思想を、コードの移植先ではなく契約の参照元とする。提示された契約では `GameState` を `WorldQuery` で観測し、`Rule(WorldQuery, Position, Position)` が `Transition` 候補を遅延生成し、`Engine` が選択した純粋な `Transition(GameState) -> GameState` を適用する。PicoMado では座標の代わりに端末イベント・Web 操作・時刻・外部処理結果を入力とし、同じ分離を保つ。参照先のコード内容はローカルにないため、この契約説明を設計根拠とし、具体的な Rust trait 形状は実装前に検討する。
 
 | 契約 | PicoMado での役割 | 禁止する結合 |
