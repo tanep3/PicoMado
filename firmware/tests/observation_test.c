@@ -31,10 +31,12 @@ int main(int argc,char **argv){
     assert(!pm_observe(PM_OB_API,12,PM_OB_RECEIVED,0,0,1,2,3,4));
     command("EV1 ON");drain();
     assert(pm_observe(PM_OB_API,12,PM_OB_COMPLETED,1,0,1,2,0,0)==1002);drain();
+    command("EV1 STATUS ffffffffffffffff");drain();
+    assert(strstr(output,"ev1 s ffffffffffffffff 1234 3ea 3d8 11 3e8 1 0\n"));
     unsigned events=0;
     for(char *p=output;*p;){char *end=strchr(p,'\n');assert(end);
         if(!strncmp(p,"ev1 ",4) && p[4]!='s'){assert(end-p==165);events++;}
-        else {assert(!strncmp(p,"ev1 status ",11));}
+        else {assert(!strncmp(p,"ev1 status ",11) || !strncmp(p,"ev1 s ",6));assert(end-p<144);}
         p=end+1;
     }
     assert(events==18 && !masked && writes>10000);

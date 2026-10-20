@@ -29,7 +29,7 @@ static void response(const char *format,...){
     char line[REPLY];va_list args;va_start(args,format);int n=vsnprintf(line,sizeof line,format,args);va_end(args);
     if(n<0 || (size_t)n>=sizeof line){enqueue("usb error=response_length\n");return;}enqueue(line);
 }
-#if PM_USB_BUTTON_SIM || PM_TX_LINK_PROBE || PM_CYW43_INNER_PROBE
+#if PM_USB_BUTTON_SIM || PM_TX_LINK_PROBE || PM_CYW43_INNER_PROBE || PM_EVENT_STREAM
 static bool hex(const char *s,uint64_t *v){
     if(!*s || strlen(s)>16)return false;
     *v=0;
@@ -122,12 +122,16 @@ static void command(const char *line){
     canonical[used]=0;
 #if PM_EVENT_STREAM
     if(n>=2 && !strcmp(w[0],"EV1")){
-        /* These commands observe/control the stream only; no DTR or app reset. */
-        if(n==2 && !strcmp(w[1],"ON"))pm_observation_enable(true);
-        else if(n==2 && !strcmp(w[1],"OFF"))pm_observation_enable(false);
-        else if(n!=2 || strcmp(w[1],"STATUS")){response("ev1 error=syntax\n");return;}
+        uint64_t cid=0;bool tagged=n==3 && hex(w[2],&cid) && cid;
+        if(n!=2 && !tagged){response("ev1 error=syntax\n");return;}
+        if(!strcmp(w[1],"ON"))pm_observation_enable(true);
+        else if(!strcmp(w[1],"OFF"))pm_observation_enable(false);
+        else if(strcmp(w[1],"STATUS")){response("ev1 error=syntax\n");return;}
         pm_observation_status s=pm_observation_read();
-        response("ev1 status b=%llx seq=%llx drop=%llx first=%llx last=%llx on=%u sat=%u\n",
+        if(tagged)response("ev1 s %llx %llx %llx %llx %llx %llx %u %u\n",
+            (unsigned long long)cid,(unsigned long long)s.boot,(unsigned long long)s.sequence,
+            (unsigned long long)s.dropped,(unsigned long long)s.first_lost,(unsigned long long)s.last_lost,s.enabled,s.saturated);
+        else response("ev1 status b=%llx seq=%llx drop=%llx first=%llx last=%llx on=%u sat=%u\n",
             (unsigned long long)s.boot,(unsigned long long)s.sequence,(unsigned long long)s.dropped,
             (unsigned long long)s.first_lost,(unsigned long long)s.last_lost,s.enabled,s.saturated);return;
     }

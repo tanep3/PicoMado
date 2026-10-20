@@ -25,6 +25,15 @@ class Tests(unittest.TestCase):
         self.assertEqual(rows[0]['us'], 1<<40)
         self.assertEqual(rows[-1]['operation'], 1)
 
+    def test_c_tagged_status_and_maximum_width(self):
+        line = next(x+b'\n' for x in fixture.splitlines() if x.startswith(b'ev1 s '))
+        status = ev.parse_status(line)
+        self.assertEqual(status['cid'], (1<<64)-1)
+        self.assertEqual(status['sequence'], 1002)
+        maximum = ('ev1 s '+' '.join(['ffffffffffffffff']*6)+' 1 1\n').encode()
+        self.assertLess(len(maximum), 144)
+        self.assertEqual(ev.parse_status(maximum)['dropped'], (1<<64)-1)
+
     def test_corruption_and_line_resync(self):
         good = next(line+b'\n' for line in fixture.splitlines() if len(line)==165)
         bad = bytearray(good)
