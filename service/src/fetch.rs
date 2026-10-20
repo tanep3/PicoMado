@@ -105,10 +105,8 @@ pub async fn run_jma_cycle(app: &crate::web::SharedApp) -> Result<FetchReport, A
     tokio::pin!(fetched);
     while let Some((group, result, attempts)) = fetched.next().await {
         report.attempts += attempts;
-        let mut guard = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Fetch)
-            .map_err(|_| AppError::Conflict("application unavailable"))?;
         for job in group {
-            if guard.complete_plugin_fetch(&job, clock.unix_seconds(), result.clone())? {
+            if complete_fetched_source(app, &job, clock.unix_seconds(), result.clone()).await? {
                 report.applied += 1;
             } else {
                 report.stale += 1;
@@ -116,6 +114,30 @@ pub async fn run_jma_cycle(app: &crate::web::SharedApp) -> Result<FetchReport, A
         }
     }
     Ok(report)
+}
+
+/// Prepare source results without the shared App lock, then revalidate/apply.
+pub async fn complete_fetched_source(
+    app: &crate::web::SharedApp,
+    job: &FetchJob,
+    now: i64,
+    source: Result<Vec<u8>, String>,
+) -> Result<bool, AppError> {
+    let prepare = {
+        let guard = crate::diagnostics::lock(app, crate::diagnostics::Domain::Fetch)
+            .map_err(|_| AppError::Conflict("application unavailable"))?;
+        guard.prepare_plugin_fetch(job)?
+    };
+    let Some(prepare) = prepare else {
+        return Ok(false);
+    };
+    let prepared = tokio::task::spawn_blocking(move || prepare(source))
+        .await
+        .map_err(|_| AppError::Conflict("fetch preparation worker failed"))?
+        .map_err(|_| AppError::Invalid("plugin fetch preparation invalid"))?;
+    let mut guard = crate::diagnostics::lock(app, crate::diagnostics::Domain::Fetch)
+        .map_err(|_| AppError::Conflict("application unavailable"))?;
+    guard.apply_prepared_plugin_fetch(job, now, prepared)
 }
 
 /// Starts only when explicitly called by a host; shutting down the host stops
@@ -127,7 +149,7 @@ pub async fn run_jma_periodic(
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), AppError> {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
-    let mut diagnostic_tick=0;
+    let mut diagnostic_tick = 0;
     loop {
         tokio::select! {
             _ = interval.tick() => {

@@ -106,6 +106,10 @@ impl WeatherContent {
         slot
     }
 }
+struct PreparedWeather {
+    set: Option<ForecastSet>,
+    pixels: Vec<u8>,
+}
 impl ContentPlugin for WeatherContent {
     fn clone_box(&self) -> Box<dyn ContentPlugin> {
         Box::new(self.clone())
@@ -408,12 +412,54 @@ impl ContentPlugin for WeatherContent {
             retries: policy.retries,
         })
     }
+    fn fetch_preparation(
+        &self,
+        job: &FetchJob,
+    ) -> Result<crate::content::FetchPreparation, ContentError> {
+        let slot = self
+            .devices
+            .get(&job.device_id)
+            .ok_or(ContentError::Stale)?;
+        if slot.incarnation != job.incarnation
+            || slot.settings_revision != job.settings_revision
+            || slot.config_revision != job.config_revision
+            || slot.in_flight != Some(job.generation)
+        {
+            return Err(ContentError::Stale);
+        }
+        let choice = location(&slot.location_id).ok_or(ContentError::InvalidSource)?;
+        let job = job.clone();
+        Ok(Box::new(move |result| {
+            let set = result.ok().and_then(|bytes| {
+                ForecastSet::for_location(&bytes, &job.dataset_id, &job.today_jst, choice).ok()
+            });
+            let pixels = match &set {
+                Some(set) => {
+                    render_lcd(set, &set.days[0]).map_err(|_| ContentError::InvalidSource)?
+                }
+                None => render_error_lcd(choice),
+            };
+            Ok(Box::new(PreparedWeather { set, pixels }) as crate::content::PreparedFetch)
+        }))
+    }
     fn complete_fetch(
         &mut self,
         job: &FetchJob,
-        now_unix: i64,
+        now: i64,
         result: Result<Vec<u8>, String>,
     ) -> Result<Option<Vec<u8>>, ContentError> {
+        let prepared = self.fetch_preparation(job)?(result)?;
+        self.apply_prepared_fetch(job, now, prepared)
+    }
+    fn apply_prepared_fetch(
+        &mut self,
+        job: &FetchJob,
+        now: i64,
+        prepared: crate::content::PreparedFetch,
+    ) -> Result<Option<Vec<u8>>, ContentError> {
+        let prepared = *prepared
+            .downcast::<PreparedWeather>()
+            .map_err(|_| ContentError::InvalidSource)?;
         let slot = self
             .devices
             .get_mut(&job.device_id)
@@ -426,12 +472,7 @@ impl ContentPlugin for WeatherContent {
             return Err(ContentError::Stale);
         }
         slot.in_flight = None;
-        let choice = location(&slot.location_id).ok_or(ContentError::InvalidSource)?;
-        let set = result.ok().and_then(|bytes| {
-            ForecastSet::for_location(&bytes, &job.dataset_id, &job.today_jst, choice).ok()
-        });
-        if let Some(set) = set {
-            let pixels = render_lcd(&set, &set.days[0]).map_err(|_| ContentError::InvalidSource)?;
+        if let Some(set) = prepared.set {
             match &mut slot.browse {
                 Some(b) => b.publish(set),
                 None => slot.browse = Some(WeatherBrowse::new(set)),
@@ -440,12 +481,12 @@ impl ContentPlugin for WeatherContent {
             if let Some(b) = &mut slot.browse {
                 b.rebase_normal(&job.today_jst);
             }
-            slot.last_success_unix = Some(now_unix);
+            slot.last_success_unix = Some(now);
             slot.error = false;
-            Ok((!slot.browse.as_ref().is_some_and(|b| b.is_browsing())).then_some(pixels))
+            Ok((!slot.browse.as_ref().is_some_and(|b| b.is_browsing())).then_some(prepared.pixels))
         } else {
             slot.error = true;
-            Ok(Some(render_error_lcd(choice)))
+            Ok(Some(prepared.pixels))
         }
     }
     fn cancel_fetches(&mut self) {

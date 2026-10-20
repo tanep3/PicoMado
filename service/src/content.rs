@@ -58,6 +58,11 @@ pub struct FetchJob {
     pub retries: u8,
 }
 
+/// Plugin-owned result, computed without the shared application lock.
+pub type PreparedFetch = Box<dyn std::any::Any + Send>;
+pub type FetchPreparation =
+    Box<dyn FnOnce(Result<Vec<u8>, String>) -> Result<PreparedFetch, ContentError> + Send>;
+
 pub struct PluginPlan {
     pub event: Option<Event>,
     pub frame: Option<Vec<u8>>,
@@ -197,6 +202,20 @@ pub trait ContentPlugin: Send + Sync {
         _policy: &FetchPolicy,
     ) -> Option<FetchJob> {
         None
+    }
+    fn fetch_preparation(&self, _job: &FetchJob) -> Result<FetchPreparation, ContentError> {
+        Ok(Box::new(|source| Ok(Box::new(source) as PreparedFetch)))
+    }
+    fn apply_prepared_fetch(
+        &mut self,
+        job: &FetchJob,
+        now_unix: i64,
+        prepared: PreparedFetch,
+    ) -> Result<Option<Vec<u8>>, ContentError> {
+        let source = *prepared
+            .downcast::<Result<Vec<u8>, String>>()
+            .map_err(|_| ContentError::InvalidSource)?;
+        self.complete_fetch(job, now_unix, source)
     }
     fn complete_fetch(
         &mut self,

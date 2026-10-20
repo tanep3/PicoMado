@@ -1038,11 +1038,23 @@ impl App {
         Ok(())
     }
 
-    pub fn complete_plugin_fetch(
+    pub fn prepare_plugin_fetch(&self,job:&FetchJob)->Result<Option<crate::content::FetchPreparation>,AppError>{
+        let Some(device)=self.runtime.world.devices.get(&job.device_id) else{return Ok(None);};
+        if device.incarnation!=job.incarnation || device.settings_revision!=job.settings_revision{return Ok(None);}
+        match self.contents.get(&job.plugin).ok_or(AppError::NotFound)?.fetch_preparation(job){
+            Ok(prepare)=>Ok(Some(prepare)),Err(ContentError::Stale)=>Ok(None),Err(_)=>Err(AppError::Invalid("plugin fetch preparation invalid")),
+        }
+    }
+    pub fn complete_plugin_fetch(&mut self,job:&FetchJob,now:i64,result:Result<Vec<u8>,String>)->Result<bool,AppError>{
+        let Some(prepare)=self.prepare_plugin_fetch(job)? else{return Ok(false);};
+        let prepared=prepare(result).map_err(|_|AppError::Invalid("plugin fetch preparation invalid"))?;
+        self.apply_prepared_plugin_fetch(job,now,prepared)
+    }
+    pub fn apply_prepared_plugin_fetch(
         &mut self,
         job: &FetchJob,
         now_unix: i64,
-        result: Result<Vec<u8>, String>,
+        prepared: crate::content::PreparedFetch,
     ) -> Result<bool, AppError> {
         let Some(device) = self.runtime.world.devices.get(&job.device_id) else {
             return Ok(false);
@@ -1057,7 +1069,7 @@ impl App {
             .get(&job.plugin)
             .ok_or(AppError::NotFound)?
             .clone();
-        let pixels = match content.complete_fetch(job, now_unix, result) {
+        let pixels = match content.apply_prepared_fetch(job, now_unix, prepared) {
             Ok(pixels) => pixels,
             Err(ContentError::Stale) => return Ok(false),
             Err(_) => return Err(AppError::Invalid("plugin fetch result invalid")),

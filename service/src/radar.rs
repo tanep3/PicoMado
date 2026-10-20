@@ -178,6 +178,10 @@ impl RadarContent {
         slot
     }
 }
+struct PreparedRadar {
+    set: Option<RadarSet>,
+    pixels: Vec<u8>,
+}
 impl ContentPlugin for RadarContent {
     fn clone_box(&self) -> Box<dyn ContentPlugin> {
         Box::new(self.clone())
@@ -363,12 +367,52 @@ impl ContentPlugin for RadarContent {
             retries: policy.retries,
         })
     }
+    fn fetch_preparation(
+        &self,
+        job: &FetchJob,
+    ) -> Result<crate::content::FetchPreparation, ContentError> {
+        let slot = self
+            .devices
+            .get(&job.device_id)
+            .ok_or(ContentError::Stale)?;
+        if slot.incarnation != job.incarnation
+            || slot.settings_revision != job.settings_revision
+            || slot.in_flight != Some(job.generation)
+        {
+            return Err(ContentError::Stale);
+        }
+        let job = job.clone();
+        Ok(Box::new(move |result| {
+            let set = result
+                .ok()
+                .and_then(|source| parse_and_render(&source, &job.dataset_id).ok());
+            let pixels = match &set {
+                Some(set) => BASE64
+                    .decode(&set.frames[set.latest_observed].pixels)
+                    .map_err(|_| ContentError::InvalidSource)?,
+                None => error_lcd(),
+            };
+            Ok(Box::new(PreparedRadar { set, pixels }) as crate::content::PreparedFetch)
+        }))
+    }
     fn complete_fetch(
         &mut self,
         job: &FetchJob,
         now: i64,
         result: Result<Vec<u8>, String>,
     ) -> Result<Option<Vec<u8>>, ContentError> {
+        let prepared = self.fetch_preparation(job)?(result)?;
+        self.apply_prepared_fetch(job, now, prepared)
+    }
+    fn apply_prepared_fetch(
+        &mut self,
+        job: &FetchJob,
+        now: i64,
+        prepared: crate::content::PreparedFetch,
+    ) -> Result<Option<Vec<u8>>, ContentError> {
+        let prepared = *prepared
+            .downcast::<PreparedRadar>()
+            .map_err(|_| ContentError::InvalidSource)?;
         let slot = self
             .devices
             .get_mut(&job.device_id)
@@ -380,23 +424,18 @@ impl ContentPlugin for RadarContent {
             return Err(ContentError::Stale);
         }
         slot.in_flight = None;
-        let set = result
-            .ok()
-            .and_then(|source| parse_and_render(&source, &job.dataset_id).ok());
-        if let Some(set) = set {
-            let pixels = BASE64
-                .decode(&set.frames[set.latest_observed].pixels)
-                .map_err(|_| ContentError::InvalidSource)?;
+        if let Some(set) = prepared.set {
             match &mut slot.browse {
                 Some(b) => b.publish(set),
                 None => slot.browse = Some(RadarBrowse::new(set)),
             }
             slot.last_success_unix = Some(now);
             slot.error = false;
-            Ok((!slot.browse.as_ref().is_some_and(|b| b.pinned.is_some())).then_some(pixels))
+            Ok((!slot.browse.as_ref().is_some_and(|b| b.pinned.is_some()))
+                .then_some(prepared.pixels))
         } else {
             slot.error = true;
-            Ok(Some(error_lcd()))
+            Ok(Some(prepared.pixels))
         }
     }
     fn cancel_fetches(&mut self) {
