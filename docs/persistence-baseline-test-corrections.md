@@ -1,0 +1,14 @@
+# D-02試作の回帰失敗と基準コードの切り分け
+
+D-02試作を退避したまま `6f43576` を検証した。
+
+- 対象の診断3試験は個別groupで成功（`d02-diagnostic-baseline-isolated.log`、3件、7.75秒）。
+- 同じ基準コードの全feature並行実行は257成功・2失敗（`d02-all-feature-baseline-classification.log`、77.98秒）。late-poll試験が期待`(1,0)`に対して`(2,0)`を読み、続くreply-error試験は同じfixture mutexのpoisonで失敗した。
+
+診断の`test_count/test_hist`はprocess全体のSTATEを読む。一部の試験だけが共有するDIAGNOSTIC_FIXTUREでは、それ以外のtransport試験からのeventを除外できない。deadlineの結果そのものと、全processのカウンタ差分による帰属を分ける必要がある。テスト専用のthread内tapを追加し、current-thread Tokio fixture自身が発行したevent/durationを照合する。別threadのeventが混ざらない試験も加える。productionの有界ring、try_lock/drop、exportと有効化の動作は変えない。このtapは呼出しを数える試験用観測で、production ringの無欠測を証明しない。
+
+退避試作で発生したもう1件はSettingsがWelcomeより先に出るものだった。基準コードにもBindとWelcomeを別々にqueueへ送る間隙がある。writerはBind後にoutbox refreshを実行できるため、2つのsend間で実行されればSettingsを先に送れる。この存在だけで試作の障害原因を確定しないが、接続開始の契約として間隙を除く。
+
+Helloで成立したsessionとWelcomeを一つのwriter commandとしてenqueueする。writerは同じcommand内でbindし、そのWelcomeを送ってからoutbox/videoへ進む。通常返信の有限queue、cause有無と診断ON/OFFで等しい待機、既存250msのwire送信期限は保つ。wire形式、接続世代、旧Hello排除は変えない。queueへの次のproducer送信を意図的に遅らせてもWelcomeが最初になる試験と、既存のHello順序・ACK reader・cause queueの試験を確認する。
+
+これらはD-02の保存境界実装とは別の基準修正である。全feature回帰を正常化しても、一時入力の保存待ち分離が完了したとは扱わない。
