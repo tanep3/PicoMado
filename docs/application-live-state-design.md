@@ -10,6 +10,8 @@
 
 保存を必要としない入力・配信完了は、公開snapshotから作る一時App上で処理し、短い公開lockの中で新しい一時snapshotへ置き換える。この経路ではDBに接続しない。ACK、準備済みweather/radarのSUB/browse、既存画像の配信進行を対象にする。未知pluginの入力、設定変更、通常モードの選択、新しい永続jobの発行はこの経路へ暗黙に入れない。pluginは一時入力の可否と不変なview状態の受け渡しを共通traitで宣言する。共通層はplugin IDで内容を判断しない。
 
+時計の分更新も既存の一時frame生成・配信に含める。schedulerの購読は公開snapshotから行い、更新対象がある場合だけ一時経路を取る。時刻と分キーを合流し、保存待ち中の分更新を古い時刻へ戻さず、同じ分の画像を重複させない。他plugin・非表示端末への更新は追加しない。LCD/E-inkの年跨ぎ更新を実SQLite待ちと競合させる。
+
 一時Appの遷移には永続投影の不変条件を置く。登録/incarnation、選択、利用設定・順序、plugin設定/保存snapshot、durable jobを変更する試みは保存せず拒否する。frame IDとeffect IDは共通の短い採番区間で予約し、二つの経路の衝突・失敗時の再使用を防ぐ。ACK進行などの純粋な一時更新はSQLiteの書込みを発生させない。
 
 観測のState/Committedはdomain遷移の確定を表し、SQLiteのfsyncと同義にしない。source factのbを`0=従来の未指定、1=永続経路、2=一時経路`として区別する。いずれも同じcause/frameに結び、既存の入力→確定→frame→draw解析を保つ。公開通知は従来どおりsnapshot公開後とする。
