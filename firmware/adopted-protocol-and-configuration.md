@@ -16,7 +16,7 @@
 | 正常EOF | Close/FIN後、受信済みを有限drain。未完成画像を描かず、失効tokenの既描画画素は通常復旧中に保持。hard error・期限は別経路。 | `net.c`、`main.c`、EOF回帰 |
 | 動画時計・統計 | `time_us_64()`を使いtrace OFFの0に期限を依存させない。1秒の任意StreamStatusは観測でありcreditではない。画像・統計を毎回DBへ書かない。 | `video_now_us/poll_video`、実main ON/OFF試験 |
 
-LCDは160×80 RGB565BE/25600B、E-inkは250×122 mono1/4000B。SPI転置はドライバが担当し、内容はサーバのプラグインが所有する。サーバ汎用メニューは依然 [未実装提案](protocol-proposal.md)。
+LCDは160×80 RGB565BE/25600B、E-inkの通信画像は250×122 mono1/3813B（ceil(250×122/8)）。E-inkの4000Bは250列×16byteのパネルRAM用変換後であり、wireのbyte_lenではない。変換・SPI転置はドライバが担当し、内容はサーバのプラグインが所有する。サーバ汎用メニューは依然 [未実装提案](protocol-proposal.md)。
 
 ## 通常値・個体設定・実験設定の区別
 
