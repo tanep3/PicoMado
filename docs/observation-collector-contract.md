@@ -35,3 +35,5 @@ readerは固定長の値を最大256件の保存queueへtry-putする。専用wo
 この単位でD-05全体を閉じない。採取点、source/context、入力とframeの因果、ホスト解析、実ARM/機能回帰、実機負荷のうち未完了の項目は引き続き [追跡表](contracts-observation-design.md) に残す。
 
 部分コマンドの扱い：期限内に1byteも書けなければ未送信取消しとする。LFまで送っていない部分行が残った場合はtransportをdirtyとして閉じ、OFFや次の旧コマンドを続けて書かない。自動LFで別の有効コマンドを完成させることも避ける。全行送信後に返信だけが不明な場合に限り、wire CID付きOFFで採取終了を確認できる。この区別もK-05の回帰対象とする。
+
+同じbootの再接続でsequenceが過去に観測した値より後退した場合はsource契約違反として後続segmentも不完全にする。新bootのsequence初期化は別sourceとして認める。再接続の無欠測をこの区別から推測しない。
