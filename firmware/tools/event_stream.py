@@ -433,12 +433,13 @@ class Collector:
         self.serial_path, self.output, self.socket_path = serial_path, Path(output), Path(socket_path)
         self.seconds, self.reconnects = seconds, reconnects
         self.port_factory, self.ready = port_factory, ready
+        # RNG failure must precede acquisition of worker, output FD and selector.
+        self.mux = Commands(audit=self.audit)
         self.journal = journal_factory(self.output)
         self.sel = selectors.DefaultSelector()
         self.listener = self.port = None
         self.socket_inode = None
         self.clients = {}
-        self.mux = Commands(audit=self.audit)
         self.framing = Lines()
         self.window = None
         self.segments = []

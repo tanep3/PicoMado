@@ -33,3 +33,5 @@ transport_completeは「この採取sourceの開始/終了境界とsequence、�
 `collector-review-fixes-local-pty.log`：19件成功（2.555秒）。既存16件に、旧ownerのCID1/旧event/正しいON境界、誤ったon flag、SIM COMMIT同等空白6表現、reply行/byte上限→queue済みB取消し→遅着A→tag付きOFFを追加した。最初のsandbox実行はUnix socket作成EPERMのため失敗し、同じテストを新規PTYとUnix IPCだけで実行可能なローカル権限に切り替えて成功した。実USB、実端末、サービス、ネットワーク機器は操作していない。
 
 これにより第2-Aの追加ブロッカー3件はソフトウェア試験上解消した。64-bit CIDは認証ではなく偶発衝突の可能性が残る。因果追跡D-05や実機間欠遅延の解消を意味しない。
+
+再レビューP3：RNG取得をJournal worker/FDとselectorの取得より先へ移した。RNG例外注入時にJournal/selectorが一度も呼ばれず、出力ファイルが作られないことを追加検証した。`collector-rng-failure-regression.log`：新規PTY/Unix IPCを含む20件成功（2.614秒）。既存のK-06の「乱数失敗時は開始失敗」に従う初期化順序の是正である。実機操作なし。

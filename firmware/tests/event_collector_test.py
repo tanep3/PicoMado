@@ -308,6 +308,18 @@ class Tests(unittest.TestCase):
                 mux.receive(b'ev1 s 3 1 0 0 0 0 0 0\n')
                 self.assertFalse(stop.result()['status']['on'])
 
+    def test_rng_failure_acquires_no_writer_fd_or_selector(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            with patch.object(ev.secrets,'randbelow',side_effect=OSError('injected RNG failure')), \
+                 patch.object(ev,'Journal') as journal, \
+                 patch.object(ev.selectors,'DefaultSelector') as selector:
+                with self.assertRaisesRegex(OSError,'injected RNG failure'):
+                    ev.Collector('never-open',root/'events',root/'owner',1)
+                journal.assert_not_called();selector.assert_not_called()
+                self.assertFalse((root/'events').exists())
+
     def test_previous_owner_boundary_is_ignored_before_current_snapshot(self):
         class StaleDevice(Device):
             def run(self):
