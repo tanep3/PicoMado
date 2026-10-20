@@ -4319,6 +4319,7 @@ mod tests {
     mod hello_order { use super::*; include!("../tests/support/hello_order.rs"); }
     include!("../tests/support/ack_probe_reader.rs");
     include!("persistence_contract_tests.rs");
+    include!("d02_review_contract_tests.rs");
 
     #[cfg(feature="boundary-observation")]
     include!("causal_contract_tests.rs");

@@ -15,6 +15,7 @@ pub use executor::{CaricatureExecutor, CaricatureSuccess, CaricatureWork};
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use time::{OffsetDateTime, UtcOffset};
 
 use crate::content::{
@@ -448,7 +449,8 @@ pub enum OriginalCodec {
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CaricatureContent {
-    latest: Option<Artwork>,
+    #[serde(with = "shared_artwork")]
+    latest: Option<Arc<Artwork>>,
     generation_failed: bool,
     state: CaricatureState,
     settings: GenerationSettings,
@@ -456,7 +458,7 @@ pub struct CaricatureContent {
     styles: Vec<Selection>,
     history: Vec<HistoryEntry>,
     #[serde(skip)]
-    temporary: BTreeMap<String, (u64, Artwork)>,
+    temporary: BTreeMap<String, (u64, Arc<Artwork>)>,
     #[serde(skip)]
     browsing: BTreeMap<String, HistoryBrowse>,
     next_manual_slot: i64,
@@ -470,10 +472,27 @@ pub struct CaricatureContent {
 #[derive(Clone)]
 struct HistoryBrowse {
     token: crate::SessionToken,
-    start: Artwork,
-    shown: Artwork,
+    start: Arc<Artwork>,
+    shown: Arc<Artwork>,
     cursor_id: String,
     pending_id: Option<String>,
+}
+
+// Keep the existing owned Artwork JSON schema without cloning its pixel Vecs
+// when an application snapshot is forked for ACKs or another plugin's input.
+mod shared_artwork {
+    use super::*;
+    pub fn serialize<S: serde::Serializer>(
+        art: &Option<Arc<Artwork>>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        art.as_deref().serialize(s)
+    }
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> Result<Option<Arc<Artwork>>, D::Error> {
+        Option::<Artwork>::deserialize(d).map(|art| art.map(Arc::new))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1037,11 +1056,11 @@ impl CaricatureContent {
                     {
                         return Ok(plan);
                     }
-                    browse.shown = *artwork;
+                    browse.shown = Arc::from(artwork);
                     browse.pending_id = None;
                 } else {
                     self.temporary
-                        .insert(device_id.clone(), (incarnation, *artwork));
+                        .insert(device_id.clone(), (incarnation, Arc::from(artwork)));
                 }
                 plan.refresh = RefreshTargets::Devices(vec![crate::DeviceToken {
                     device_id,
@@ -1055,7 +1074,7 @@ impl CaricatureContent {
     }
     pub fn set_latest(&mut self, artwork: Artwork) -> Result<(), CaricatureError> {
         artwork.validate()?;
-        self.latest = Some(artwork);
+        self.latest = Some(Arc::new(artwork));
         self.generation_failed = false;
         self.temporary.clear();
         Ok(())
@@ -1069,10 +1088,10 @@ impl CaricatureContent {
         self.generation_failed = true;
     }
     pub fn latest(&self) -> Option<&Artwork> {
-        self.latest.as_ref()
+        self.latest.as_deref()
     }
 
-    fn displayed_artwork(&self, ctx: &PluginContext) -> Option<&Artwork> {
+    fn displayed_artwork(&self, ctx: &PluginContext) -> Option<&Arc<Artwork>> {
         if ctx.mode == crate::Mode::Sub {
             if let Some(browse) = self
                 .browsing
@@ -2496,7 +2515,7 @@ mod tests {
         let sub = browse_ctx("a", Mode::Sub);
         content
             .temporary
-            .insert("a".into(), (1, browse_art("two", 2)));
+            .insert("a".into(), (1, Arc::new(browse_art("two", 2))));
         assert_eq!(content.current_frame(&normal).unwrap()[0], 2);
         content.plan(&normal, ButtonAction::Sub).unwrap();
         content.plan(&sub, ButtonAction::Up).unwrap();
@@ -2568,5 +2587,52 @@ mod tests {
             })
             .expect("confirm must queue an undecorated normal image");
         assert_eq!(confirmed.as_ref(), &browse_art("two", 2).lcd_rgb565be);
+    }
+    #[test]
+    fn d02_review_real_installed_artwork_is_shared_by_application_snapshots() {
+        let mut content = browse_content();
+        let mut large = browse_art("large", 4);
+        large.eink_png.extend(vec![0; 1024 * 1024]);
+        content.set_latest(large).unwrap();
+        let ctx = browse_ctx("pico", Mode::Normal);
+        content.plan(&ctx, ButtonAction::Sub).unwrap();
+        let art = content.latest.clone().unwrap();
+        let cloned = content.clone();
+        let other = cloned.latest.as_ref().unwrap();
+        assert!(Arc::ptr_eq(&art, other));
+        assert_eq!(art.eink_png.as_ptr(), other.eink_png.as_ptr());
+        assert_eq!(art.lcd_rgb565be.as_ptr(), other.lcd_rgb565be.as_ptr());
+        assert!(Arc::ptr_eq(&art, &cloned.browsing["pico"].start));
+        assert!(Arc::ptr_eq(&art, &cloned.browsing["pico"].shown));
+        let snapshot = content.save_state();
+        assert_eq!(
+            snapshot["latest"],
+            serde_json::to_value(art.as_ref()).unwrap()
+        );
+        let mut restored = CaricatureContent::default();
+        restored.load_state(snapshot).unwrap();
+        assert_eq!(restored.latest(), Some(art.as_ref()));
+        drop(cloned);
+        let temp = tempfile::tempdir().unwrap();
+        let mut plugins = crate::plugins::PluginSet::default();
+        plugins
+            .register(Box::new(CaricaturePlugin), Box::new(content))
+            .unwrap();
+        let state = crate::application::App::open_with_plugin_set(
+            &temp.path().join("db"),
+            temp.path(),
+            Arc::new(crate::fetch::SystemClock),
+            plugins,
+        )
+        .unwrap();
+        let installed_count = Arc::strong_count(&art);
+        let published = state.published_snapshot();
+        assert!(Arc::strong_count(&art) > installed_count);
+        let published_count = Arc::strong_count(&art);
+        let live = published.transient_snapshot();
+        assert!(Arc::strong_count(&art) > published_count);
+        drop(live);
+        drop(published);
+        assert_eq!(Arc::strong_count(&art), installed_count);
     }
 }

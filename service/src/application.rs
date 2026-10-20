@@ -385,6 +385,9 @@ pub struct App {
     video_slots: BTreeMap<String, Arc<std::sync::Mutex<crate::lcd_stream::VideoSlot>>>,
     contents: BTreeMap<String, Box<dyn ContentPlugin>>,
     timed_frames: BTreeMap<String, (crate::DisplayToken, i64)>,
+    // Latest content must still be shown after the preceding physical draw.
+    // This obligation is runtime-only and scoped to the current display.
+    content_refresh_debt: BTreeMap<String, crate::DisplayToken>,
     dispatch: crate::shared::Signal,
     work_signal: crate::shared::Signal,
     plugin_root: PathBuf,
@@ -526,6 +529,7 @@ impl App {
             video_slots: BTreeMap::new(),
             contents,
             timed_frames: BTreeMap::new(),
+            content_refresh_debt: BTreeMap::new(),
             dispatch: crate::shared::Signal::new(),
             work_signal: crate::shared::Signal::new(),
             plugin_root: root.to_owned(),
@@ -560,6 +564,7 @@ impl App {
             video_slots:self.video_slots.clone(),
             contents:self.contents.clone(),
             timed_frames:self.timed_frames.clone(),
+            content_refresh_debt:self.content_refresh_debt.clone(),
             dispatch:self.dispatch.clone(),
             work_signal:self.work_signal.clone(),
             plugin_root:self.plugin_root.clone(),
@@ -685,6 +690,11 @@ impl App {
         }
         self.timed_frames
             .retain(|id, _| self.runtime.world.devices.contains_key(id));
+        self.content_refresh_debt.retain(|id, token| {
+            self.runtime.world.devices.get(id).is_some_and(|d| {
+                crate::display_current(d, token) && d.mode == Mode::Normal && d.owner == Owner::Remote
+            })
+        });
         self.reconcile_video_slots();
         self.frame_assets.retain(|handle, _| {
             self.runtime.outbox.values().any(|effect|
@@ -1635,8 +1645,11 @@ impl App {
             .devices
             .get_mut(&token.device_id)
             .expect("checked");
+        let changed = d.last_received_frame != Some(token.frame_id)
+            || d.last_rendered_frame != Some(token.frame_id);
         d.last_received_frame = Some(token.frame_id);
         d.last_rendered_frame = Some(token.frame_id);
+        self.transient_changed |= self.transient_only && changed;
         // Observational counters are transient; never enter SQLite or grant sending credit.
         true
     }
@@ -1974,6 +1987,9 @@ impl App {
         token: &SessionToken,
         applied_revision: u64,
     ) -> Result<(), AppError> {
+        if self.settings_confirmation(token, applied_revision, false)?.is_none() {
+            return Ok(());
+        }
         self.change(|_, state| {
             let device = state
                 .world
@@ -1997,6 +2013,9 @@ impl App {
     /// Pico has written settings to NVM; application of the revision is still
     /// confirmed separately by a heartbeat from the current session.
     pub fn settings_stored(&mut self, token: &SessionToken, revision: u64) -> Result<(), AppError> {
+        if self.settings_confirmation(token, revision, true)?.is_none() {
+            return Ok(());
+        }
         self.change(|_, state| {
             let device = state
                 .world
@@ -2051,6 +2070,9 @@ impl App {
         self.observation_parent = 0;
         self.record_observation(Component::Input, if result.is_ok() { Phase::Completed } else { Phase::Error }, operation, 0, self.runtime.world.revision, 1);
         let changed = result?;
+        if changed && matches!(event, Event::RenderedAck { .. }) {
+            self.queue_due_content_refreshes()?;
+        }
         if changed {
             match &event {
                 Event::ReceiptAck { token } => eprintln!(

@@ -33,6 +33,21 @@ impl App {
         if let Some(snapshot) = self.transient_input_snapshot(message) {
             return Some(snapshot);
         }
+        // A previously confirmed revision has no durable change. Keep it in
+        // wire order while allowing the following ACKs past a stalled writer.
+        let confirmation = match message {
+            W::Heartbeat {
+                applied_revision, ..
+            } => Some((*applied_revision, false)),
+            W::SettingsStored { revision, .. } => Some((*revision, true)),
+            _ => None,
+        };
+        if let Some((revision, stored)) = confirmation {
+            match self.settings_confirmation(token, revision, stored) {
+                Ok(None) | Err(_) => return Some(self.transient_snapshot()),
+                Ok(Some(_)) => return None,
+            }
+        }
         let action = match message {
             W::EnterSub { .. } => ButtonAction::Sub,
             W::Up { .. } => ButtonAction::Up,
@@ -110,7 +125,6 @@ impl App {
         let live_changed = current.runtime.world.devices != base.runtime.world.devices
             || current.runtime.outbox != base.runtime.outbox;
         let mut accepted = BTreeSet::new();
-        let mut refresh = Vec::new();
         for (id, before) in &base.runtime.world.devices {
             let Some(now) = current.runtime.world.devices.get(id) else {
                 continue;
@@ -130,6 +144,16 @@ impl App {
                 continue;
             }
             accepted.insert(id.clone());
+            if current.content_refresh_debt.get(id) != base.content_refresh_debt.get(id) {
+                match current.content_refresh_debt.get(id) {
+                    Some(debt) => {
+                        self.content_refresh_debt.insert(id.clone(), debt.clone());
+                    }
+                    None => {
+                        self.content_refresh_debt.remove(id);
+                    }
+                }
+            }
             if now == before {
                 continue;
             }
@@ -143,8 +167,9 @@ impl App {
             ours.last_sent_frame = now.last_sent_frame;
             ours.last_received_frame = now.last_received_frame;
             ours.last_rendered_frame = now.last_rendered_frame;
-            if content_refresh && ours.mode == Mode::Normal && ours.pending_frame_id.is_none() {
-                refresh.push(crate::session_token(id, ours));
+            if content_refresh && ours.mode == Mode::Normal && ours.owner == Owner::Remote {
+                self.content_refresh_debt
+                    .insert(id.clone(), crate::display_token(id, ours));
             }
             let ctx = PluginContext {
                 token: crate::session_token(id, ours),
@@ -190,13 +215,11 @@ impl App {
                 |effect| matches!(effect,Effect::SendFrame{asset_handle,..}if asset_handle==handle),
             )
         });
-        for token in refresh {
-            let was_transient = self.transient_only;
-            self.transient_only = true;
-            let queued = self.queue_selected_cached_frame(&token);
-            self.transient_only = was_transient;
-            queued?;
-        }
+        let was_transient = self.transient_only;
+        self.transient_only = true;
+        let queued = self.queue_due_content_refreshes();
+        self.transient_only = was_transient;
+        queued?;
         self.runtime.next_effect_id = self.runtime.next_effect_id.max(
             *self
                 .effect_counter
@@ -249,6 +272,68 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    fn queue_due_content_refreshes(&mut self) -> Result<(), AppError> {
+        self.content_refresh_debt.retain(|id, token| {
+            self.runtime.world.devices.get(id).is_some_and(|d| {
+                crate::display_current(d, token)
+                    && d.mode == Mode::Normal
+                    && d.owner == Owner::Remote
+            })
+        });
+        let ready: Vec<_> = self
+            .content_refresh_debt
+            .iter()
+            .filter_map(|(id, _)| {
+                let d = self.runtime.world.devices.get(id)?;
+                d.pending_frame_id
+                    .is_none()
+                    .then(|| crate::session_token(id, d))
+            })
+            .collect();
+        for token in ready {
+            self.queue_selected_cached_frame(&token)?;
+            if self.runtime.world.devices[&token.device_id]
+                .pending_frame_id
+                .is_some()
+            {
+                self.content_refresh_debt.remove(&token.device_id);
+            }
+        }
+        Ok(())
+    }
+
+    // Return the prospective durable record, or None for a validated no-op.
+    fn settings_confirmation(
+        &self,
+        token: &SessionToken,
+        revision: u64,
+        stored: bool,
+    ) -> Result<Option<crate::settings::DeviceRecord>, AppError> {
+        let d = self
+            .runtime
+            .world
+            .devices
+            .get(&token.device_id)
+            .ok_or(AppError::NotFound)?;
+        if !session_current(d, token) {
+            return Err(AppError::Conflict("stale session"));
+        }
+        let before = self
+            .runtime
+            .settings
+            .devices
+            .get(&token.device_id)
+            .ok_or(AppError::NotFound)?;
+        let mut next = before.clone();
+        if stored {
+            next.mark_stored(token.incarnation, revision)
+        } else {
+            next.heartbeat(token.incarnation, revision)
+        }
+        .map_err(settings_error)?;
+        Ok((next != *before).then_some(next))
     }
 }
 fn effect_device(effect: &Effect) -> &str {

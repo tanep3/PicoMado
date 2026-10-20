@@ -39,4 +39,23 @@
 
 ## 独立レビューによる受入の再開
 
-7ff1480の既存テスト通過後、部分ACK時の再描画義務消失、実readerで重複Heartbeatが後続ACKを阻害、実CaricatureContent画像の深いclone、StreamStatusの公開欠落を独立レビューで再現した。D-02は追加修正・再検証中である。修正前に[追加契約](application-live-state-review-corrections.md)を保存した。過去の通過数はこれら4件の解決を示さない。
+7ff1480の既存テスト通過後、部分ACK時の再描画義務消失、実readerで重複Heartbeatが後続ACKを阻害、実CaricatureContent画像の深いclone、StreamStatusの公開欠落を独立レビューで再現した。D-02は追加修正後の独立再レビュー待ちである。修正前に[追加契約](application-live-state-review-corrections.md)を保存した。過去の通過数はこれら4件の解決を示さない。
+
+## 4件の追加修正後の検証
+
+先行契約`2b825e3`に従って4件を修正した。共通層の表示scopeに束縛した再描画義務を保持し、実readerの検証済み重複確認を保存なしで処理する。実CaricatureContentの全Artwork保持箇所をArcで共有し、StreamStatusの実変更を公開する。保存schema、wire/API、通常選択の保存後公開は維持した。
+
+| 最終チェック | 結果 | 証拠 |
+| --- | --- | --- |
+| 追加再現・境界試験 | 6成功、0失敗、0.84秒 | `d02-review-final-targeted.log` |
+| 全feature unit | 278成功、0失敗、78.61秒 | `d02-review-complete-all-features.log` |
+| 通常unit | 257成功、0失敗、76.92秒 | `d02-review-complete-default.log` |
+| bin / 保存済みJMA integration | 1成功 / 4成功、0失敗（JMA 2.18秒） | `d02-review-offline-integration.log` |
+
+追加試験では実SQLite transaction停止中に実writerの送信を完了させ、LCD/E-ink×送信完了のみ/ReceiptAckありの4条件で旧画像の描画待ちを保つ。保存合流後、後着RenderedAckで最新画像を送る。actual serve_split readerへ重複Heartbeat+SettingsStored+両ACKを一つのpayloadで渡し、SQL解放前のACK公開を確認した。未来revision・旧sessionの拒否と新確認の永続経路も確認した。
+
+約1MiBのPNGを持つ実風刺画contentをAppへ導入して公開/一時snapshotで同じArtworkが共有されることと既存保存形式での復元を確認した。StreamStatusは初回のprogress変更だけ通知し、重複/異なるgenerationで追加通知しない。選択・plugin有効化設定・再接続・待機・削除の5条件では旧再描画義務を消し、後着ACKが新しい画像effectを追加しない。
+
+初期の全体試行2回は各277成功/1失敗だった。失敗は新しいguard試験のfixtureで、無関係な設定変更での有効な描画ACKを拒否すると期待した点と、送信完了前のeffectを残していた点に限られた。既存挙動に合わせてfixtureを修正し、上記の最終結果を得た。4件の修正実装を変更して通したものではない。
+
+追加修正もサーバRustのみでファーム更新は不要。実機、サービス、本番DB・設定、SSH、共有SDKへの書込みは行っていない。本番ソースは`ffb62d6`のまま差分なし。SDKの既存submodule差分を保持し、cyw43_ll.cのSHA-256は基準の`a4e6baa503b9332a0a445c8b22deb4bee62793c441dc74a200b0fe8065c397c7`と一致した。実機の間欠遅延解消は引き続き未検証であり、独立再レビューと本番反映は別途行う。D-03/D-04の未完了範囲も維持する。

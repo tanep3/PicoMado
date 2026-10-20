@@ -479,3 +479,144 @@ fn sqlite_wait_keeps_visible_clock_minute_delivery_and_time_after_other_settings
         );
     }
 }
+
+#[test]
+fn d02_review_confirmation_fast_path_keeps_session_revision_and_noop_guards() {
+    use crate::protocol::WireMessage as W;
+    let temp = tempfile::tempdir().unwrap();
+    let (mut state, token) = commit_prefix_fixture(&temp.path().join("db"), temp.path());
+    state.heartbeat(&token, 1).unwrap();
+    state.settings_stored(&token, 1).unwrap();
+    let before = state.runtime.settings.clone();
+    let notices = state.dispatch_notifications();
+    state.pause_next_persistence(Box::new(|| {
+        panic!("duplicate/rejected confirmation entered SQLite")
+    }));
+    for stored in [false, true] {
+        for revision in [0, 1, 2] {
+            for stale_session in [false, true] {
+                let mut bound = token.clone();
+                if stale_session {
+                    bound.session_epoch += 1;
+                }
+                let message = if stored {
+                    W::SettingsStored {
+                        incarnation: bound.incarnation,
+                        revision,
+                    }
+                } else {
+                    W::Heartbeat {
+                        incarnation: bound.incarnation,
+                        session_epoch: bound.session_epoch,
+                        applied_revision: revision,
+                    }
+                };
+                let mut live = state
+                    .transient_button_snapshot(&bound, &message)
+                    .expect("validated no-op or rejection cannot wait for durable owner");
+                let result = if stored {
+                    live.settings_stored(&bound, revision)
+                } else {
+                    live.heartbeat(&bound, revision)
+                };
+                assert_eq!(result.is_ok(), !stale_session && revision <= 1);
+                assert!(!live.transient_was_changed());
+                assert_eq!(live.runtime.settings, before);
+            }
+        }
+    }
+    assert!(!notices.has_changed().unwrap());
+    let mut unconfirmed = state.published_snapshot();
+    let record = unconfirmed
+        .runtime
+        .settings
+        .devices
+        .get_mut(&token.device_id)
+        .unwrap();
+    record.confirmed.revision = 0;
+    record.stored_revision = 0;
+    for message in [
+        W::Heartbeat {
+            incarnation: token.incarnation,
+            session_epoch: token.session_epoch,
+            applied_revision: 1,
+        },
+        W::SettingsStored {
+            incarnation: token.incarnation,
+            revision: 1,
+        },
+    ] {
+        assert!(
+            unconfirmed
+                .transient_button_snapshot(&token, &message)
+                .is_none(),
+            "new durable confirmation must still save before publication"
+        );
+    }
+}
+
+#[test]
+fn d02_review_refresh_obligation_is_cancelled_by_display_invalidation() {
+    for invalidation in ["selection", "settings", "reconnect", "standby", "delete"] {
+        let temp = tempfile::tempdir().unwrap();
+        let (mut state, token) = commit_prefix_fixture(&temp.path().join("db"), temp.path());
+        state.queue_selected_cached_frame(&token).unwrap();
+        let (sent_effect, old) = state
+            .pending_effects()
+            .into_iter()
+            .find_map(|(id, e)| match e {
+                Effect::SendFrame { token, .. } => Some((id, token)),
+                _ => None,
+            })
+            .unwrap();
+        state.complete_effect(sent_effect).unwrap();
+        let d = &state.runtime.world.devices[&token.device_id];
+        state.content_refresh_debt.insert(
+            token.device_id.clone(),
+            crate::display_token(&token.device_id, d),
+        );
+        match invalidation {
+            "selection" => {
+                state.button(&token, ButtonAction::Down).unwrap();
+            }
+            "settings" => {
+                let revision = state.runtime.world.devices[&token.device_id].settings_revision;
+                state
+                    .set_enabled(
+                        &token.device_id,
+                        token.incarnation,
+                        revision,
+                        "commit-b",
+                        false,
+                    )
+                    .unwrap();
+            }
+            "reconnect" => {
+                state
+                    .hello(&token.device_id, ["lcd".into()].into(), 2)
+                    .unwrap();
+            }
+            "standby" => {
+                state.button(&token, ButtonAction::Power).unwrap();
+            }
+            "delete" => {
+                state
+                    .delete_device(&token.device_id, token.incarnation)
+                    .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        assert!(state.content_refresh_debt.is_empty(), "{invalidation}");
+        let effects = state.pending_effects();
+        // An unrelated enable-setting revision may leave the current draw
+        // valid. Its completion may be accepted, but must not revive the debt.
+        state
+            .terminal_event(Event::RenderedAck { token: old })
+            .unwrap();
+        assert_eq!(
+            state.pending_effects(),
+            effects,
+            "old completion cannot create a refresh in a new scope"
+        );
+    }
+}

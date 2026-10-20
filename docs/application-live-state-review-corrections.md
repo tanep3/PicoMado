@@ -27,3 +27,15 @@ actual serve_split readerへ一つのbinary payloadを渡し、実SQLite transac
 ## 検証と報告
 
 上記の再現ケースと旧D-02のSQLite成功/失敗・部分成功・panic・構造変更・時計・旧/native/static/videoの回帰を実施する。通常featureと全featureのローカルテストを実施し、実機の間欠遅延解消とは区別して報告する。
+
+## 修正実装と新しい試験
+
+`content_refresh_debt`は端末ごとのDisplayTokenに束縛した一時mapである。保存完了時の合流で再描画義務を保ち、古いRenderedAckの適用後、現在scopeでpendingが空になった端末だけ最新のcacheから一度queueする。構造的な表示失効で古い義務を除く。通信間隔等の無関係なhardware設定は元から表示を失効させないため、その設定変更を理由に描画ACKを新たに拒否しない。
+
+Heartbeat/SettingsStoredは現在sessionとprospective DeviceRecordを先に検証する。recordが変わらない場合と即時拒否の場合だけ一時経路へ入り、新しい永続確認は既存所有者へ送る。wire順序は変えていない。
+
+風刺画のlatest/temporary/browse start/shownをすべて不変Arc<Artwork>にした。owned Artworkの公開APIとserdeの既存JSON表現は維持する。実Appへ導入した約1MiB PNGと25600B LCDのArtworkに対し、公開/一時snapshotの共有所有権増加、直接cloneの画素アドレス、保存後の復元を検証する。
+
+StreamStatusはaccepted frameのprogressが変わったときだけ一時公開flagを立てる。重複statusや異なるgenerationでは通知しない。
+
+追加6試験は`d02-review-final-targeted.log`で6件成功、0失敗、0.84秒。初回の4再現も4/4成功。新しいguard試験のfixtureは、無関係な設定変更でのACK受理と、ACK前の実送信完了を既存仕様へ合わせて修正した。これらの試験修正で4件の実装は変更していない。全体・通常構成の最終結果は検証書へ追記する。
