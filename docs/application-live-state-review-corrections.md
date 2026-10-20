@@ -39,3 +39,13 @@ Heartbeat/SettingsStoredは現在sessionとprospective DeviceRecordを先に検�
 StreamStatusはaccepted frameのprogressが変わったときだけ一時公開flagを立てる。重複statusや異なるgenerationでは通知しない。
 
 追加6試験は`d02-review-final-targeted.log`で6件成功、0失敗、0.84秒。初回の4再現も4/4成功。新しいguard試験のfixtureは、無関係な設定変更でのACK受理と、ACK前の実送信完了を既存仕様へ合わせて修正した。これらの試験修正で4件の実装は変更していない。全体・通常構成の最終結果は検証書へ追記する。
+
+## 再レビュー：表示を保つ改訂と再描画義務
+
+551445aの前4件は独立再レビューで解消と確認された。追加P2として、実SQLite待ち中のlatest取得を合流した後、未選択pluginを無効化すると、settings revisionだけの変更で再描画義務が消えることが再現した。現在の画面がweatherのままでも、後着RenderedAckで新画像が出ない。
+
+表示の同一性はincarnation/session、display/screen-owner epoch、選択、mode/owner、onlineと表示能力で判定する。これらを保つ改訂では更新義務を新しいsettings revisionへ引き継ぐ。未選択pluginの有効化・設定変更を、表示自体の置換として扱わない。具体plugin名で分岐しない。実際の選択・接続・所有者・表示内容の世代変更は従来どおり旧義務を失効させる。
+
+同じ区別を保存完了時の合流にも適用する。表示を保つ改訂の保存中に進んだACK/配信を捨てたり、完了済みの旧pendingを復活させたりしない。表示を置換する設定変更では既存fenceを維持し、数値の世代衝突を理由に旧viewを戻さない。
+
+受入：LCD/E-inkで実取得更新・実writer・実SQLite停止を使い、内容更新後に未選択pluginの有効化設定を変更してから旧RenderedAckを受ける場合と、その設定の保存停止中に旧RenderedAckを受ける場合を検証する。最新画像を一度だけ送り、設定と表示の現在scopeを保つ。以前の「無関係な有効化改訂で義務を消す」guard試験は、この追加契約に従って引継ぎを検証する。選択・再接続・待機・削除の失効試験は維持する。
