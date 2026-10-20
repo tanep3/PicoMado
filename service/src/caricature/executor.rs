@@ -60,6 +60,7 @@ pub struct CaricatureExecutor {
     pub codex: PathBuf,
     pub python: PathBuf,
     pub generated_root: PathBuf,
+    pub retention: std::sync::Arc<super::retention::RetentionMaintenance>,
 }
 
 impl Default for CaricatureExecutor {
@@ -68,6 +69,7 @@ impl Default for CaricatureExecutor {
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".codex")));
         Self {
+            retention: Default::default(),
             codex: "codex".into(),
             python: "python3".into(),
             generated_root: codex_home
@@ -78,6 +80,9 @@ impl Default for CaricatureExecutor {
 }
 
 impl PluginJobExecutor for CaricatureExecutor {
+    fn maintenance(&self) -> Option<&dyn crate::maintenance::PluginMaintenanceExecutor> {
+        self.retention.enabled().then_some(self.retention.as_ref())
+    }
     fn execute(
         &self,
         payload: Value,
@@ -372,6 +377,7 @@ mod tests {
             codex: "/absent/codex".into(),
             python: "/absent/python".into(),
             generated_root: temp.path().join("none"),
+            retention: Default::default(),
         };
         let result = executor
             .execute(
@@ -420,6 +426,7 @@ mod tests {
             codex: "/absent/codex".into(),
             python: "/absent/python".into(),
             generated_root: temp.path().join("none"),
+            retention: Default::default(),
         };
         for _ in 0..2 {
             let (_sender, receiver) = tokio::sync::watch::channel(false);

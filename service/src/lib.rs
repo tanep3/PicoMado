@@ -14,6 +14,7 @@ pub mod fetch;
 pub mod host;
 pub mod socket_progress;
 pub mod lcd_stream;
+pub mod maintenance;
 mod lcd_text;
 pub mod playback;
 mod plugin_adapters;

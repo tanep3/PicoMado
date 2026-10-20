@@ -17,3 +17,7 @@ D-02のサーバ実装保存点は`7ff1480`。全feature272件、通常251件、
 新しい受信を許す前に、描画中bufferと受信assemblyの所有をドライバまで確認する。SPI送出やbusy待ち中にどの画素領域を参照するかは、この調査ではまだ確定していない。最新pending画像はtoken・更新metadata・CRC検証済み画素を同じ所有単位として有界に保持し、古い描画結果で新しいpendingを完了扱いにしない。取消し・切断・待機・新sessionでは旧pendingを失効させ、busy解除後に現在の最新画面へ進む契約を先に定める。
 
 受入は純粋モデルと実mainを使うC試験で、busy中の新Start/chunk/完了、複数世代、部分受信、不正CRC、取消し/切断/再接続、旧ACK、時計更新metadataとAPI_PENDING/COMPLETED/REJECTEDの対応を確認する。既存`eink_app_test.c`、`eink_test.c`、API結果試験を維持し、ARMのRAM/stackとLCD非影響も確認する。物理パネルの受入とファーム反映は別途であり、今回実施していない。
+
+## 実装後の追跡
+
+この文書の「現在」は着手時の調査である。D03A `53cb612`でstartup hookとopaqueなジョブ参照へ分離し、D04は`bae0575`まで実装・ソフトウェア検証を行った。描画中の同一token再送の追加契約`dcbb78a`と[検証記録](eink-pending-frame-verification.md)を参照する。D03Bは`69d6187`の[契約](plugin-maintenance-contract.md)を先に保存して実装し、[検証記録](plugin-maintenance-verification.md)で結果を追跡する。独立レビューと本番・実機反映は別の工程である。

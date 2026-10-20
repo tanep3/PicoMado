@@ -398,8 +398,7 @@ pub struct App {
     // or failed Welcome; old pending sockets must not resurrect a past attempt.
     // Runtime only: a restarted process/App starts with a fresh acceptance order.
     hello_accept_order: BTreeMap<String, std::num::NonZeroU64>,
-    #[cfg(feature = "caricature-retention-delete")]
-    last_retention_day: Option<String>,
+    maintenance_plugin: Option<String>,
 }
 
 #[derive(Debug)]
@@ -537,8 +536,7 @@ impl App {
             persistence_us: 0,
             image_preparation_us: 0,
             hello_accept_order: BTreeMap::new(),
-            #[cfg(feature = "caricature-retention-delete")]
-            last_retention_day: None,
+            maintenance_plugin: None,
         })
     }
 
@@ -574,7 +572,7 @@ impl App {
             hello_accept_order:self.hello_accept_order.clone(),
             #[cfg(feature="boundary-observation")] frame_causes:self.frame_causes.clone(),
             #[cfg(feature="boundary-observation")] view_causes:self.view_causes.clone(),
-            #[cfg(feature="caricature-retention-delete")] last_retention_day:self.last_retention_day.clone(),
+            maintenance_plugin:self.maintenance_plugin.clone(),
         }
     }
     pub(crate) fn defer_publication_signals(&self){self.dispatch.defer();self.work_signal.defer();}
@@ -713,7 +711,6 @@ impl App {
         Ok(result)
     }
 
-    #[cfg(any(test, feature = "caricature-retention-delete"))]
     fn plugin_retention_references(&self, plugin: &str) -> BTreeSet<String> {
         let jobs: Vec<_> = self.runtime.jobs.jobs.values()
             .filter(|record| record.job.token.plugin == plugin && !record.status.finished())
@@ -722,95 +719,6 @@ impl App {
         self.contents.get(plugin)
             .map(|content| content.retention_references_for_jobs(&jobs))
             .unwrap_or_default()
-    }
-
-    #[cfg(any(test, feature = "caricature-retention-delete"))]
-    pub(crate) fn sweep_caricature_retention(
-        &mut self,
-        today: time::Date,
-    ) -> Result<usize, AppError> {
-        use crate::caricature::retention::{
-            begin_pending_delete, expired_candidates, finish_pending_delete, ProtectionLedger,
-        };
-        use crate::caricature::store::ArtworkStore;
-        let paths = self.plugin_paths("caricature").ok_or(AppError::NotFound)?;
-        let root = paths.data.join("artwork");
-        let cache = paths.cache.join("artwork_variants");
-        let ledger = ProtectionLedger::new(root.clone());
-        let store = ArtworkStore::new(root.clone());
-        let pins = self.plugin_retention_references("caricature");
-        let candidates = expired_candidates(
-            &store
-                .history()
-                .map_err(|_| AppError::Conflict("caricature archive unavailable"))?,
-            today,
-            &ledger
-                .snapshot()
-                .map_err(|_| AppError::Conflict("caricature protection unavailable"))?,
-            &pins,
-        )
-        .map_err(|_| AppError::Conflict("caricature expiry invalid"))?;
-        let mut removed = 0;
-        for id in candidates {
-            ledger
-                .locked(|| {
-                    let pins = self.plugin_retention_references("caricature");
-                    let current =
-                        expired_candidates(&store.history()?, today, &ledger.read()?, &pins)?;
-                    if !current.contains(&id) {
-                        return Ok(());
-                    }
-                    let mut content = self
-                        .contents
-                        .get("caricature")
-                        .expect("installed plugin")
-                        .clone();
-                    content
-                        .retire_artwork(&id)
-                        .map_err(|_| crate::caricature::CaricatureError::InvalidTransition)?;
-                    let snapshot = content.save_state();
-                    begin_pending_delete(&root, &id)?;
-                    self.change(|_, state| {
-                        state.plugin_states.insert("caricature".into(), Arc::new(snapshot));
-                        let revision = state
-                            .managed_revisions
-                            .entry("caricature".into())
-                            .or_insert(1);
-                        *revision = revision
-                            .checked_add(1)
-                            .ok_or(AppError::Conflict("plugin revision exhausted"))?;
-                        Ok(())
-                    })
-                    .map_err(|_| crate::caricature::CaricatureError::Io)?;
-                    self.contents.insert("caricature".into(), content);
-                    let connection=self.connection.lock().map_err(|_|crate::caricature::CaricatureError::Io)?;
-                    finish_pending_delete(&ledger,&cache,&connection,&id)?;
-                    removed += 1;
-                    Ok(())
-                })
-                .map_err(|_| AppError::Conflict("caricature retention failed"))?;
-        }
-        Ok(removed)
-    }
-
-    #[cfg(feature = "caricature-retention-delete")]
-    pub fn run_scheduled_caricature_retention(&mut self) -> Result<(), AppError> {
-        if !crate::caricature::retention::deletion_enabled() {
-            return Ok(());
-        }
-        let now = time::OffsetDateTime::from_unix_timestamp(self.clock.unix_seconds())
-            .map_err(|_| AppError::Conflict("clock unavailable"))?
-            .to_offset(time::UtcOffset::from_hms(9, 0, 0).expect("JST"));
-        if now.hour() != 3 {
-            return Ok(());
-        }
-        let day = now.date().to_string();
-        if self.last_retention_day.as_deref() == Some(&day) {
-            return Ok(());
-        }
-        self.sweep_caricature_retention(now.date())?;
-        self.last_retention_day = Some(day);
-        Ok(())
     }
 
     #[cfg(test)]
@@ -1298,6 +1206,7 @@ impl App {
                 {
                     return None;
                 }
+                if self.maintenance_blocks(d.selected.as_deref()) { return None; }
                 let plugin = self.contents.get(d.selected.as_ref()?)?;
                 let ctx = PluginContext {
                     token: crate::session_token(id, d),
@@ -3395,3 +3304,4 @@ mod clock_tests {
 mod contract_tests;
 
 include!("application_live.rs");
+include!("application_maintenance.rs");

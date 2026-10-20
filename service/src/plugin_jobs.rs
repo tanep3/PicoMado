@@ -230,10 +230,12 @@ pub struct AssetDescriptor {
     pub content_type: String,
 }
 
-/// External work may await or use spawn_blocking, and is never called with an
-/// App mutex held. Cancellation must stop/wait children before returning;
+/// Job execute/render may await or use spawn_blocking, and run without the
+/// application owner. Optional maintenance follows its separate explicit
+/// publication/finish protocol. Cancellation must stop/wait children before returning;
 /// dropping a future must not leave a child process running.
 pub trait PluginJobExecutor: Send + Sync {
+    fn maintenance(&self) -> Option<&dyn crate::maintenance::PluginMaintenanceExecutor> { None }
     fn execute(
         &self,
         payload: Value,

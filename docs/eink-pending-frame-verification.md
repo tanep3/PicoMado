@@ -21,7 +21,7 @@ driverのqueued/active trace contextも分けた。局所描画中にremoteをqu
 | 観測・共通契約 | `d04-observation-contracts.log`：EV1 ON/OFF、境界catalog、共有USB parser、部分書込み、u64飽和、metadataの既存script成功。 |
 | ARM | dummy sample LCD/0/2ボタンE-inkの変更前後、計6build成功。`d04-arm-baseline`、`d04-arm-changed`にELF/map/.suを保存。観測ON E-ink_1も成功し`d04-arm-observed`へ保存。 |
 
-## RAM・stack
+## 初回実装（034fb2d）のRAM・stack
 
 `d04-arm-comparison.json`はmapとRAM addressに属するsectionを集計した。初期化dataも含め、heap/stack予約は別計上する。Berkeley形式のsize出力だけを静的RAMと見なしていない。
 

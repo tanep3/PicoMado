@@ -1,6 +1,6 @@
 //! Independent long-work worker. JMA scheduling never waits for this queue.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,6 +29,12 @@ pub async fn run_work(
         .map_err(|_| AppError::Conflict("application unavailable"))?
         .work_notifications();
     let mut tasks = JoinSet::new();
+    let maintainers: Vec<_> = executors.iter()
+        .filter(|(_, executor)| executor.maintenance().is_some())
+        .map(|(id, executor)| (id.clone(), executor.clone())).collect();
+    let mut maintenance_tasks = JoinSet::new();
+    let mut maintaining = BTreeSet::new();
+    let mut maintenance_tick = tokio::time::interval(Duration::from_secs(60));
     let mut running = BTreeMap::<u64, Running>::new();
     let (progress_tx, mut progress_rx) = mpsc::channel(64);
     let mut tick = tokio::time::interval(Duration::from_secs(1));
@@ -88,7 +94,7 @@ pub async fn run_work(
                 });
             }
         }
-        if stopping && tasks.is_empty() {
+        if stopping && tasks.is_empty() && maintenance_tasks.is_empty() {
             return Ok(());
         }
         tokio::select! {
@@ -104,11 +110,23 @@ pub async fn run_work(
                 crate::diagnostics::tick(crate::diagnostics::Domain::Work,&mut diagnostic_tick);
                 let mut guard = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Work).map_err(|_| AppError::Conflict("application unavailable"))?;
                 guard.plan_scheduled_work()?;
-                #[cfg(feature = "caricature-retention-delete")]
-                if let Err(error) = guard.run_scheduled_caricature_retention() {
-                    eprintln!("picomado caricature retention deferred: {error:?}");
-                }
                 inspect = true;
+            }
+            _ = maintenance_tick.tick(), if !stopping && !maintainers.is_empty() => {
+                for (plugin, executor) in &maintainers {
+                    if !maintaining.insert(plugin.clone()) { continue; }
+                    let app = app.clone(); let plugin = plugin.clone(); let executor = executor.clone();
+                    maintenance_tasks.spawn_blocking(move || {
+                        let result = executor.maintenance().map_or(Ok(false), |handler|
+                            crate::maintenance::run_once(&app, &plugin, handler));
+                        (plugin, result)
+                    });
+                }
+            }
+            Some(result) = maintenance_tasks.join_next(), if !maintenance_tasks.is_empty() => {
+                let (plugin, result) = result.map_err(|_| AppError::Conflict("plugin maintenance worker interrupted"))?;
+                maintaining.remove(&plugin);
+                if let Err(error) = result { eprintln!("picomado plugin maintenance deferred plugin={plugin}: {error:?}"); }
             }
             changed = notifications.changed(), if !stopping => {
                 if changed.is_err() { return Err(AppError::Conflict("application unavailable")); }

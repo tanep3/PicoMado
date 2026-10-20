@@ -169,11 +169,16 @@ async fn update_caricature_protections(
     tokio::task::spawn_blocking(move || {
         let store = crate::caricature::store::ArtworkStore::new(paths.data.join("artwork"));
         crate::caricature::retention::ProtectionLedger::new(paths.data.join("artwork"))
-            .update(
+            .update_guarded(
                 &store,
                 body.expected_revision,
                 &body.artwork_ids,
                 body.protect,
+                || {
+                    let current = app.read().map_err(|_| crate::caricature::CaricatureError::Io)?;
+                    current.maintenance_references("caricature")
+                        .map_err(|_| crate::caricature::CaricatureError::Io)
+                },
             )
             .map(Json)
     })

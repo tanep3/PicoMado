@@ -47,3 +47,11 @@
 設計・状態モデル試験は実transport、DB待ち、物理描画を全て含まない。既存worker分離試験も重い取得完了と全状態永続化の遅延を保証しない。正常な短い採取から、間欠遅延の不存在や原因を結論しない。観測による時間・IRQ・USB負荷、ARMメモリ、高水位、実機画面は別の受入証拠を要する。
 
 次段階は各逸脱の設計／受入条件を先に更新し、その単位で実装と回帰を行う。既存の端末選択・有効化・共通並び順、秘密設定、動画の正常挙動を変えない。SSH、push、ファーム書込み、サービス再起動、E-ink操作はこの文書整理には含めない。
+
+## 隔離実装での後続修正
+
+着手時の上記表を履歴として残す。D01（取得準備・session照合）、D02（一時view/ACK/公開と保存）、D03A（登録済みstartup/opaque参照）はそれぞれ先行契約と独立レビューを経た。D02の表示identityを保つ設定改訂の追加修正は`a6c7cf4`。
+
+D04は`bae0575`で、描画中最新pendingと同一token再送のdispatch時合流まで実装した。[E-ink検証記録](eink-pending-frame-verification.md)にhost、API、観測、sanitizer、ARM配置と自己stack frameの証拠・限界を残す。実パネルと間欠遅延の受入は未実施。
+
+D03Bは`69d6187`の[plugin maintenance契約](plugin-maintenance-contract.md)を先に固定し、共通保存・明示公開とplugin所有のprepare/stage/finishへ分離した。[検証記録](plugin-maintenance-verification.md)で、実SQLite/finish停止、他plugin進行、参照・保護・再起動・部分失敗を追跡する。削除gateの既定OFF、保存schema 2、既存選択/有効化/共通順序を保つ。ここまでの隔離実装・試験は、本番反映、実機遅延の改善、物理描画受入の完了を意味しない。

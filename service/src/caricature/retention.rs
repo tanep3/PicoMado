@@ -25,6 +25,16 @@ pub struct ProtectionLedger {
     root: PathBuf,
 }
 
+pub(crate) struct ProtectionGuard {
+    lock: File,
+}
+impl Drop for ProtectionGuard {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        let _ = unsafe { libc::flock(self.lock.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
 impl ProtectionLedger {
     pub fn new(root: PathBuf) -> Self {
         Self { root }
@@ -34,6 +44,11 @@ impl ProtectionLedger {
         &self,
         action: impl FnOnce() -> Result<T, CaricatureError>,
     ) -> Result<T, CaricatureError> {
+        let _guard = self.lock_guard()?;
+        action()
+    }
+
+    pub(crate) fn lock_guard(&self) -> Result<ProtectionGuard, CaricatureError> {
         fs::create_dir_all(&self.root).map_err(|_| CaricatureError::Io)?;
         let lock = OpenOptions::new()
             .create(true)
@@ -45,10 +60,7 @@ impl ProtectionLedger {
         if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } != 0 {
             return Err(CaricatureError::Io);
         }
-        let result = action();
-        #[cfg(unix)]
-        let _ = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_UN) };
-        result
+        Ok(ProtectionGuard { lock })
     }
 
     pub(crate) fn read(&self) -> Result<ProtectionSnapshot, CaricatureError> {
@@ -73,7 +85,23 @@ impl ProtectionLedger {
         ids: &[String],
         protect: bool,
     ) -> Result<ProtectionSnapshot, CaricatureError> {
-        if ids.is_empty() || ids.len() > 100 {
+        self.update_guarded(store, expected_revision, ids, protect, || {
+            Err(CaricatureError::InvalidTransition)
+        })
+    }
+
+    pub(crate) fn update_guarded(
+        &self,
+        store: &ArtworkStore,
+        expected_revision: u64,
+        ids: &[String],
+        protect: bool,
+        current: impl FnOnce() -> Result<
+            (std::sync::Arc<serde_json::Value>, BTreeSet<String>),
+            CaricatureError,
+        >,
+    ) -> Result<ProtectionSnapshot, CaricatureError> {
+        if ids.is_empty() || ids.len() > 100 || ids.iter().any(|id| !valid_retention_id(id)) {
             return Err(CaricatureError::InvalidRequest);
         }
         self.locked(|| {
@@ -81,7 +109,28 @@ impl ProtectionLedger {
             if snapshot.revision != expected_revision {
                 return Err(CaricatureError::Stale);
             }
+            let pending: BTreeSet<_> = if protect {
+                ids.iter()
+                    .filter(|id| pending_path(&self.root, id).exists())
+                    .cloned()
+                    .collect()
+            } else {
+                BTreeSet::new()
+            };
+            let current = if pending.is_empty() {
+                None
+            } else {
+                Some(current()?)
+            };
             for id in ids {
+                if let Some((snapshot, references)) = &current {
+                    if pending.contains(id)
+                        && !references.contains(id)
+                        && !snapshot_references_artwork(snapshot, id)?
+                    {
+                        return Err(CaricatureError::InvalidRequest);
+                    }
+                }
                 if store.artwork(id)?.is_none() {
                     return Err(CaricatureError::InvalidRequest);
                 }
@@ -110,7 +159,6 @@ pub(crate) fn pending_path(root: &Path, id: &str) -> PathBuf {
     root.join(format!(".retention-pending-{id}.json"))
 }
 
-#[cfg(any(test, feature = "caricature-retention-delete"))]
 pub(crate) fn begin_pending_delete(root: &Path, id: &str) -> Result<(), CaricatureError> {
     atomic_write(&pending_path(root, id), b"{}")
 }
@@ -356,36 +404,93 @@ pub(crate) fn finish_pending_delete(
     connection: &rusqlite::Connection,
     id: &str,
 ) -> Result<(), CaricatureError> {
-    let marker = pending_path(&ledger.root, id);
-    if !marker.exists() {
-        return Ok(());
-    }
     let body: String = connection
         .query_row("SELECT body FROM app_state WHERE id=1", [], |row| {
             row.get(0)
         })
         .map_err(|_| CaricatureError::Io)?;
-    let value: serde_json::Value =
+    let root: serde_json::Value =
         serde_json::from_str(&body).map_err(|_| CaricatureError::InvalidSource)?;
-    let plugin = value
+    let plugin = root
         .pointer("/plugin_states/caricature")
         .ok_or(CaricatureError::InvalidSource)?;
-    let still_referenced = plugin.pointer("/latest/id").and_then(|x| x.as_str()) == Some(id)
+    let jobs: crate::plugin_jobs::JobState = match root.get("jobs") {
+        Some(value) => {
+            serde_json::from_value(value.clone()).map_err(|_| CaricatureError::InvalidSource)?
+        }
+        None => Default::default(),
+    };
+    let own: Vec<_> = jobs
+        .jobs
+        .values()
+        .filter(|r| r.job.token.plugin == super::ID && !r.status.finished())
+        .map(|r| &r.job)
+        .collect();
+    let refs = crate::content::ContentPlugin::retention_references_for_jobs(
+        &super::CaricatureContent::default(),
+        &own,
+    );
+    match finish_pending_delete_snapshot(ledger, cache_root, plugin, &refs, id)? {
+        PendingDeleteResult::Referenced => Err(CaricatureError::InvalidTransition),
+        _ => Ok(()),
+    }
+}
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum PendingDeleteResult {
+    Removed,
+    Referenced,
+    Protected,
+}
+
+pub(crate) fn snapshot_references_artwork(
+    plugin: &serde_json::Value,
+    id: &str,
+) -> Result<bool, CaricatureError> {
+    let history = plugin
+        .get("history")
+        .and_then(|v| v.as_array())
+        .ok_or(CaricatureError::InvalidSource)?;
+    let mut found = false;
+    for entry in history {
+        let existing = entry
+            .get("artwork_id")
+            .and_then(|v| v.as_str())
+            .ok_or(CaricatureError::InvalidSource)?;
+        found |= existing == id;
+    }
+    Ok(found
+        || plugin.pointer("/latest/id").and_then(|v| v.as_str()) == Some(id)
         || plugin
             .pointer("/state/latest_artwork_id")
-            .and_then(|x| x.as_str())
-            == Some(id)
-        || plugin
-            .pointer("/history")
-            .and_then(|x| x.as_array())
-            .is_some_and(|items| {
-                items
-                    .iter()
-                    .any(|item| item.get("artwork_id").and_then(|x| x.as_str()) == Some(id))
-            });
-    if still_referenced {
-        fs::remove_file(marker).map_err(|_| CaricatureError::Io)?;
-        return Err(CaricatureError::InvalidTransition);
+            .and_then(|v| v.as_str())
+            == Some(id))
+}
+fn remove_pending_marker(root: &Path, id: &str) -> Result<(), CaricatureError> {
+    match fs::remove_file(pending_path(root, id)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err(CaricatureError::Io),
+    }
+    File::open(root)
+        .and_then(|f| f.sync_all())
+        .map_err(|_| CaricatureError::Io)
+}
+fn finish_pending_delete_snapshot(
+    ledger: &ProtectionLedger,
+    cache_root: &Path,
+    plugin: &serde_json::Value,
+    references: &BTreeSet<String>,
+    id: &str,
+) -> Result<PendingDeleteResult, CaricatureError> {
+    if !pending_path(&ledger.root, id).exists() {
+        return Ok(PendingDeleteResult::Removed);
+    }
+    if snapshot_references_artwork(plugin, id)? || references.contains(id) {
+        remove_pending_marker(&ledger.root, id)?;
+        return Ok(PendingDeleteResult::Referenced);
+    }
+    if ledger.read()?.protected_ids.contains(id) {
+        return Ok(PendingDeleteResult::Protected);
     }
     let latest = ledger.root.join("latest.json");
     if latest.exists() {
@@ -397,7 +502,12 @@ pub(crate) fn finish_pending_delete(
         }
     }
     let publications = ledger.root.join("publications");
-    for entry in fs::read_dir(publications).map_err(|_| CaricatureError::Io)? {
+    let entries = match fs::read_dir(&publications) {
+        Ok(entries) => Some(entries),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => return Err(CaricatureError::Io),
+    };
+    for entry in entries.into_iter().flatten() {
         let path = entry.map_err(|_| CaricatureError::Io)?.path();
         if path.extension().is_some_and(|ext| ext == "json") {
             let data = fs::read(&path).map_err(|_| CaricatureError::Io)?;
@@ -429,7 +539,20 @@ pub(crate) fn finish_pending_delete(
             }
         }
     }
-    fs::remove_file(marker).map_err(|_| CaricatureError::Io)
+    for directory in [
+        &ledger.root,
+        &ledger.root.join("archive"),
+        &publications,
+        &cache_root.to_path_buf(),
+    ] {
+        if directory.exists() {
+            File::open(directory)
+                .and_then(|f| f.sync_all())
+                .map_err(|_| CaricatureError::Io)?;
+        }
+    }
+    remove_pending_marker(&ledger.root, id)?;
+    Ok(PendingDeleteResult::Removed)
 }
 
 #[cfg(test)]
@@ -772,9 +895,14 @@ mod tests {
         ledger
             .update(&store, 0, &["protected".into()], true)
             .unwrap();
-        let today = Date::from_calendar_date(2026, Month::April, 30).unwrap();
-        let mut app = App::open(&db).unwrap();
-        assert_eq!(app.sweep_caricature_retention(today).unwrap(), 0);
+        struct Clock;
+        impl crate::fetch::Clock for Clock {
+            fn unix_seconds(&self) -> i64 { unix_jst(2026, Month::April, 30) + 3 * 3600 }
+            fn today_jst(&self) -> String { "2026-04-30".into() }
+        }
+        let app = std::sync::Arc::new(crate::shared::Application::new(
+            App::open_with_clock(&db, std::sync::Arc::new(Clock)).unwrap()));
+        crate::maintenance::run_once(&app, super::super::ID, &RetentionMaintenance::for_test()).unwrap();
         assert!(store.artwork("old").unwrap().is_some());
         drop(app);
         body["plugin_states"]["caricature"]["latest"] =
@@ -789,13 +917,14 @@ mod tests {
             )
             .unwrap();
         drop(connection);
-        let mut app = App::open(&db).unwrap();
-        assert_eq!(app.sweep_caricature_retention(today).unwrap(), 1);
+        let app = std::sync::Arc::new(crate::shared::Application::new(
+            App::open_with_clock(&db, std::sync::Arc::new(Clock)).unwrap()));
+        crate::maintenance::run_once(&app, super::super::ID, &RetentionMaintenance::for_test()).unwrap();
         assert!(store.artwork("old").unwrap().is_none());
         assert!(store.artwork("protected").unwrap().is_some());
         assert!(store.artwork("current").unwrap().is_some());
         assert_eq!(
-            app.plugin_web_view("caricature").unwrap().data["history"]
+            app.read().unwrap().plugin_web_view("caricature").unwrap().data["history"]
                 .as_array()
                 .unwrap()
                 .len(),
@@ -811,4 +940,8 @@ mod tests {
             settings
         );
     }
+    include!("retention_maintenance_tests.rs");
+
 }
+
+include!("retention_maintenance.rs");

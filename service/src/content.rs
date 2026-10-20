@@ -72,6 +72,10 @@ pub struct PluginPlan {
 }
 
 pub trait ContentPlugin: Send + Sync {
+    /// Pure plan on a clone. Files, expiry and proposal meaning belong to the plugin.
+    fn plan_maintenance(&mut self, _ctx: &CommandContext, _proposal: &Value, _jobs: &[&PluginJob]) -> Result<crate::maintenance::MaintenancePlan, ContentError> {
+        Err(ContentError::Unsupported)
+    }
     /// Archive IDs that remain in a plugin's live display or browse state.
     fn retention_references(&self) -> BTreeSet<String> {
         BTreeSet::new()

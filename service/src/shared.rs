@@ -144,6 +144,13 @@ impl Application {
             result => result,
         }
     }
+    #[cfg(test)]
+    pub(crate) fn poison_publication_for_test(&self) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = self.published.write().unwrap();
+            panic!("fixture publication unavailable");
+        }));
+    }
     pub fn read(&self) -> Result<Arc<App>, AccessError> {
         if self.poisoned.load(Ordering::Acquire) || self.slot.is_poisoned() {
             return Err(AccessError::Poisoned);
@@ -280,6 +287,57 @@ pub struct Lease<'a> {
     app: Option<App>,
     modified: bool,
     base: Arc<App>,
+}
+impl Lease<'_> {
+    pub(crate) fn reserve_maintenance(&mut self, plugin: &str) -> Result<(), AppError> {
+        let mut published = self
+            .owner
+            .published
+            .write()
+            .map_err(|_| AppError::Conflict("application publication unavailable"))?;
+        let app = self.app.as_mut().expect("application lease");
+        app.merge_transient_since(&self.base, &published)?;
+        app.begin_maintenance_scope(plugin)?;
+        let snapshot = Arc::new(app.published_snapshot());
+        *published = snapshot.clone();
+        self.base = snapshot;
+        self.modified = true;
+        Ok(())
+    }
+    /// Publish a successful commit prefix before effects, retaining the owner
+    /// to keep reference-changing durable operations ordered through finish.
+    pub(crate) fn publish_now(&mut self) -> Result<(), AppError> {
+        let result = (|| {
+            let mut published = self
+                .owner
+                .published
+                .write()
+                .map_err(|_| AppError::Conflict("application publication unavailable"))?;
+            let app = self.app.as_mut().expect("application lease");
+            app.merge_transient_since(&self.base, &published)?;
+            app.reconcile_video_slots();
+            let snapshot = Arc::new(app.published_snapshot());
+            *published = snapshot.clone();
+            self.base = snapshot;
+            self.modified = false;
+            Ok(())
+        })();
+        if result.is_err() {
+            self.owner.poisoned.store(true, Ordering::Release);
+        } else {
+            let app = self.app.as_ref().expect("application lease");
+            app.resume_publication_signals();
+            app.defer_publication_signals();
+        }
+        result
+    }
+    pub(crate) fn release_maintenance(&mut self) {
+        self.app
+            .as_mut()
+            .expect("application lease")
+            .end_maintenance_scope();
+        self.modified = true;
+    }
 }
 impl Deref for Lease<'_> {
     type Target = App;

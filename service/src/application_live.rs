@@ -56,6 +56,9 @@ impl App {
             _ => return None,
         };
         let d = self.runtime.world.devices.get(&token.device_id)?;
+        if self.maintenance_blocks(d.selected.as_deref()) {
+            return None;
+        }
         if !session_current(d, token)
             || !matches!(
                 (&d.mode, action),
@@ -296,6 +299,9 @@ impl App {
             .iter()
             .filter_map(|(id, _)| {
                 let d = self.runtime.world.devices.get(id)?;
+                if self.maintenance_blocks(d.selected.as_deref()) {
+                    return None;
+                }
                 d.pending_frame_id
                     .is_none()
                     .then(|| crate::session_token(id, d))

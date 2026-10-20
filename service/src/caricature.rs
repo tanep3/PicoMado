@@ -1123,6 +1123,14 @@ fn artwork_position(artwork: &Artwork) -> Result<PluginPosition, ContentError> {
 }
 
 impl ContentPlugin for CaricatureContent {
+    fn plan_maintenance(
+        &mut self,
+        _ctx: &crate::plugin_jobs::CommandContext,
+        proposal: &serde_json::Value,
+        jobs: &[&crate::plugin_jobs::PluginJob],
+    ) -> Result<crate::maintenance::MaintenancePlan, ContentError> {
+        retention::plan_retention(self, proposal, jobs)
+    }
     fn retention_references(&self) -> BTreeSet<String> {
         let mut ids = BTreeSet::new();
         if let Some(art) = &self.latest {
