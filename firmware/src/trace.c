@@ -57,6 +57,17 @@ int pm_logf(const char *format,...){
     }
     restore_interrupts(irq);return n;
 }
+#if PM_ACK_PATH_PROBE
+// Frozen probe export shares the ordinary line queue: partial USB writes from
+// different producers must never interleave within a line. Never evict here.
+bool pm_trace_try_line(const char *line,size_t length){
+    if(length>=TEXT_CAP)return false;
+    uint32_t irq=save_and_disable_interrupts();
+    if(count>=RECORDS/2){restore_interrupts(irq);return false;}
+    record *r=reserve();r->kind=UINT32_MAX;memcpy(r->data.text,line,length);r->data.text[length]=0;
+    restore_interrupts(irq);return true;
+}
+#endif
 static void flush_one(void){
     // At most one bounded record/write per call. Keep partial output; never wait.
     if(!pending_length){

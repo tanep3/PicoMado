@@ -38,7 +38,14 @@ impl WriteProgress {
 pub struct TrackedIo<I> { inner: I, progress: WriteProgress }
 impl<I: AsyncRead + Unpin> AsyncRead for TrackedIo<I> {
     fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.get_mut().inner).poll_read(cx, buf)
+        #[cfg(not(feature="ack-path-probe"))]
+        {Pin::new(&mut self.get_mut().inner).poll_read(cx, buf)}
+        #[cfg(feature="ack-path-probe")]
+        {let this=self.get_mut();let connection=this.progress.accept_order().get();let before=buf.filled().len();
+         crate::ack_probe::record(crate::ack_probe::Event::RawPoll,connection,0,0,0,0,0,0);
+         let result=Pin::new(&mut this.inner).poll_read(cx,buf);
+         let event=match &result{Poll::Pending=>crate::ack_probe::Event::RawPending,Poll::Ready(Ok(()))=>crate::ack_probe::Event::RawReady,Poll::Ready(Err(_))=>crate::ack_probe::Event::RawError};
+         crate::ack_probe::record(event,connection,0,0,0,0,(buf.filled().len()-before)as u64,0);result}
     }
 }
 impl<I: AsyncWrite + Unpin> AsyncWrite for TrackedIo<I> {

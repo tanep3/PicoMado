@@ -1,4 +1,6 @@
 //! Pure PicoMado kernel contract. No IO is performed here.
+#[cfg(feature="ack-path-probe")]
+pub mod ack_probe;
 
 pub mod diagnostics;
 pub mod application;

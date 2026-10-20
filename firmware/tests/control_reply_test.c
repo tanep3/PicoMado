@@ -1,4 +1,7 @@
 // Real production parser with the established hardware/network mocks.
+#ifndef PM_CONTROL_TEST_ENTRY
+#define PM_CONTROL_TEST_ENTRY main
+#endif
 #define PM_APP_TEST_ENTRY pm_fixture_entry
 #include "app_timing_test.c"
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
@@ -131,7 +134,7 @@ static void recorded_frame_paths(void){
 #endif
 #endif
 #if defined(PM_TEST_OLD_FIRMWARE) && PM_TEST_OLD_FIRMWARE
-int main(void){
+int PM_CONTROL_TEST_ENTRY(void){
  for(unsigned kind=10;kind<=17;kind+=7){
   setup();unsigned id=++serial;reply(kind,1,1,1,"sub",false);
   start(id,1,1,"sub");chunk(id,1,1,0,256);finish_image(id,1,1,256);
@@ -140,7 +143,7 @@ int main(void){
  puts("old deployed firmware accepts new context fields and frame/ACK contract PASS");return 0;
 }
 #else
-int main(void){
+int PM_CONTROL_TEST_ENTRY(void){
  native_reception();
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
  video_reception();

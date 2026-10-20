@@ -960,6 +960,8 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
     let mut writer = tokio::spawn(writer_loop_with_progress(sink, rx, app.clone(),None,write_progress));
     let mut decoder = Decoder::default();
     let mut current: Option<SessionToken> = None;
+    #[cfg(feature="ack-path-probe")]
+    let mut probe_bind_pending=false;
     let mut writer_finished = false;
     static NEXT_CONNECTION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let connection_id = NEXT_CONNECTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -978,7 +980,12 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
                 writer_finished = true;
                 break;
             }
-            incoming = stream.next() => incoming,
+            incoming = async {
+                #[cfg(feature="ack-path-probe")]
+                {crate::ack_probe::next(&mut stream,accept_order.get()).await}
+                #[cfg(not(feature="ack-path-probe"))]
+                {stream.next().await}
+            } => incoming,
         };
         let message = match incoming {
             Some(Ok(message)) => message,
@@ -1015,6 +1022,10 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
             }
         };
         rx_bytes += bytes.len() as u64;
+        #[cfg(feature="ack-path-probe")]
+        crate::ack_probe::record(crate::ack_probe::Event::DecodeBegin,accept_order.get(),rx_messages+1,0,0,0,bytes.len()as u64,0);
+        #[cfg(feature="ack-path-probe")]
+        if crate::ack_probe::active(accept_order.get()){decoder.probe_bind(accept_order.get(),rx_messages);}
         let messages = match decoder.push(&bytes) {
             Ok(messages) => messages,
             Err(_) => {
@@ -1030,8 +1041,18 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
             rx_messages += 1;
             let kind = wire_label(&message);
             let was_unbound = current.is_none();
+            #[cfg(feature="ack-path-probe")]
+            let probe_identity=crate::ack_probe::identity(&message);
+            #[cfg(feature="ack-path-probe")]
+            crate::ack_probe::record(crate::ack_probe::Event::ProcessBegin,accept_order.get(),rx_messages,probe_identity.0,probe_identity.1,probe_identity.2,0,0);
+            #[cfg(feature="ack-path-probe")]
+            let probe_process_started=crate::ack_probe::active(accept_order.get()).then(std::time::Instant::now);
             match process_on_connection(&app, &mut current, message, &mut diagnostics, Some(accept_order)) {
                 Ok(reply) => {
+                    #[cfg(feature="ack-path-probe")]
+                    {if was_unbound {probe_bind_pending=true;}if probe_bind_pending {if let Some(token)=&current {probe_bind_pending=!crate::ack_probe::bind_accepted(&app,token,accept_order.get());}}}
+                    #[cfg(feature="ack-path-probe")]
+                    crate::ack_probe::record(crate::ack_probe::Event::ProcessDone,accept_order.get(),rx_messages,probe_identity.0,probe_identity.1,probe_identity.2,probe_process_started.as_ref().map_or(0,|started|started.elapsed().as_micros()as u64),1);
                     if was_unbound {
                         if let Some(token) = &current {
                             if tx.send(WriterCommand::Bind(token.clone())).await.is_err() {
@@ -1044,17 +1065,23 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
                     }
                     if let Some(reply) = reply {
                         let queued = std::time::Instant::now();
+                        #[cfg(feature="ack-path-probe")]
+                        crate::ack_probe::record(crate::ack_probe::Event::ReplyQueueBegin,accept_order.get(),rx_messages,probe_identity.0,probe_identity.1,probe_identity.2,tx.capacity()as u64,0);
                         if enqueue_reply(&tx,reply,current.as_ref().map_or(0,|s|s.session_epoch)).await.is_err() {
                             end_reason = "writer_command_closed";
                             failed = true;
                             break;
                         }
+                        #[cfg(feature="ack-path-probe")]
+                        crate::ack_probe::record(crate::ack_probe::Event::ReplyQueueDone,accept_order.get(),rx_messages,probe_identity.0,probe_identity.1,probe_identity.2,queued.elapsed().as_micros()as u64,0);
                         if queued.elapsed() > Duration::from_millis(100) {
                             eprintln!("picomado reply_queue_wait connection_id={} request={} elapsed_ms={}",connection_id,kind,queued.elapsed().as_millis());
                         }
                     }
                 }
                 Err(code) => {
+                    #[cfg(feature="ack-path-probe")]
+                    crate::ack_probe::record(crate::ack_probe::Event::ProcessDone,accept_order.get(),rx_messages,probe_identity.0,probe_identity.1,probe_identity.2,probe_process_started.as_ref().map_or(0,|started|started.elapsed().as_micros()as u64),0);
                     end_reason = "protocol_rejected";
                     end_detail = code;
                     let (id, incarnation, session_epoch) = session_identity(&current);
@@ -1067,10 +1094,16 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
                 }
             }
         }
+        #[cfg(feature="ack-path-probe")]
+        if crate::ack_probe::active(accept_order.get()){decoder.probe_bind(accept_order.get(),rx_messages);}
         if failed {
             break;
         }
     }
+    #[cfg(feature="ack-path-probe")]
+    crate::ack_probe::record(crate::ack_probe::Event::End,accept_order.get(),rx_messages,0,0,0,0,0);
+    #[cfg(feature="ack-path-probe")]
+    crate::ack_probe::unbind(accept_order.get());
     if !writer_finished {
         let _ = tx.send(WriterCommand::Stop).await;
         let _ = writer.await;
@@ -4177,4 +4210,6 @@ mod tests {
 
     include!("../tests/transport_recovery.rs");
     mod hello_order { use super::*; include!("../tests/support/hello_order.rs"); }
+    include!("../tests/support/ack_probe_reader.rs");
+
 }

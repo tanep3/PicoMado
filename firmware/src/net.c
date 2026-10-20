@@ -1,4 +1,5 @@
 #include "trace.h"
+#include "ack_probe.h"
 #include "net.h"
 #include "core.h"
 #include "stream_diag.h"
@@ -96,21 +97,57 @@ static void consume(size_t n) {
     if(pcb && credit)tcp_recved(pcb,(u16_t)credit);
     RX_OBSERVE(pm_rx_consume,(uint32_t)n,(uint32_t)credit,);
 }
+static uint16_t ack_probe_flags(void){
+#if PM_ACK_PATH_PROBE
+ return pcb?(uint16_t)(1u|(pcb->unsent?2u:0u)|(pcb->unacked?4u:0u)|((pcb->flags&TF_NODELAY)?8u:0u)):0;
+#else
+ return 0;
+#endif
+}
 static bool send_raw(const void *p, size_t n) {
-    if(!pcb){pm_logf("%s\n","net send_failed=no_socket");RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,0,);stage=PM_NET_FAILED;return false;}
+    if(!pcb){pm_ack_probe_net(PM_AP_WRITE_REJECT,0,1,(uint32_t)n,0,(uint32_t)stage);pm_logf("%s\n","net send_failed=no_socket");RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,0,);stage=PM_NET_FAILED;return false;}
     if(n>tcp_sndbuf(pcb)){
+        pm_ack_probe_net(PM_AP_WRITE_REJECT,ack_probe_flags(),2,(uint32_t)n,tcp_sndbuf(pcb),(uint32_t)stage);
         pm_logf("%s\n","net send_failed=send_buffer_full");RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,0,);stage=PM_NET_FAILED;return false;
     }
+    pm_ack_probe_net(PM_AP_WRITE_BEGIN,ack_probe_flags(),
+#if PM_ACK_PATH_PROBE
+        pcb->snd_nxt,pcb->lastack,pcb->cwnd,pcb->snd_wnd
+#else
+        0,0,0,0
+#endif
+    );
     uint64_t write_started=pm_trace_clock();
     err_t result=tcp_write(pcb,p,n,TCP_WRITE_FLAG_COPY);
+    pm_ack_probe_net(PM_AP_WRITE_END,ack_probe_flags(),(uint32_t)result,tcp_sndbuf(pcb),
+#if PM_ACK_PATH_PROBE
+        pcb->snd_queuelen,pcb->snd_lbb
+#else
+        0,0
+#endif
+    );
     pm_trace_event(PM_TRACE_TCP_WRITE,pm_trace_current_frame(),result,
         (uint32_t)(pm_trace_clock()-write_started));
     if(result!=ERR_OK){
         pm_logf("net tcp_write_failed sdk_result=%d\n",(int)result);
         RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,(int)result,);stage=PM_NET_FAILED; return false;
     }
+    pm_ack_probe_net(PM_AP_TX_POSITION,ack_probe_flags(),
+#if PM_ACK_PATH_PROBE
+        pcb->snd_lbb-(uint32_t)n,pcb->snd_lbb,pcb->snd_nxt,pcb->lastack
+#else
+        0,0,0,0
+#endif
+    );
     uint64_t output_started=pm_trace_clock();
     err_t output_result=tcp_output(pcb);
+    pm_ack_probe_net(PM_AP_OUTPUT_END,ack_probe_flags(),(uint32_t)output_result,
+#if PM_ACK_PATH_PROBE
+        pcb->snd_nxt,pcb->lastack,tcp_sndbuf(pcb)
+#else
+        0,0,0
+#endif
+    );
     pm_trace_event(PM_TRACE_TCP_OUTPUT,pm_trace_current_frame(),output_result,
         (uint32_t)(pm_trace_clock()-output_started));
     // Preserve existing queueing semantics; output result is diagnostic, not arrival ACK.
@@ -356,6 +393,7 @@ static pm_net_stage state_unlocked(void){return stage;}
 static bool send_unlocked(uint8_t kind, const char *json) {
     if(ws_closed || (stage!=PM_NET_READY && stage!=PM_NET_DRAINING && stage!=PM_NET_DRAINED) || !pcb)return false;
     size_t n=strlen(json);if(n>1024)return false;
+    pm_ack_probe_encoded(kind,json);
     uint8_t *packet=tx_packet;size_t k=0;
     packet[k++]=0x82;
     size_t len=n+6;
@@ -479,7 +517,8 @@ again:
 // Background IRQ owns RX writes; main owns app/pixel decoding. Copy/consume
 // transport buffers under the SDK lock, then release it before rendering.
 void pm_net_close(void){cyw43_arch_lwip_begin();close_unlocked();cyw43_arch_lwip_end();}
-void pm_net_begin(const pm_profile *p){cyw43_arch_lwip_begin();begin_unlocked(p);cyw43_arch_lwip_end();}
+void pm_net_begin(const pm_profile *p){
+    pm_ack_probe_connection();cyw43_arch_lwip_begin();begin_unlocked(p);cyw43_arch_lwip_end();}
 void pm_net_poll(void){
     uint64_t started=pm_trace_clock();cyw43_arch_poll();
     uint64_t waiting=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,waiting);
@@ -489,6 +528,9 @@ void pm_net_poll(void){
 #endif
     pm_diag_drain_error();
     if(pm_diag_sample_due(started))pm_diag_sample((uint32_t)rx_used,(uint32_t)app_used,(uint32_t)rx_flow.uncredited,pcb?pcb->rcv_wnd:0,pcb?pcb->rcv_nxt:0);
+    #if PM_ACK_PATH_PROBE
+    if(pm_ack_probe_sample_due())pm_ack_probe_sample(ack_probe_flags(),pcb?pcb->snd_nxt:0,pcb?pcb->lastack:0,pcb?pcb->cwnd:0,pcb?pcb->snd_wnd:0);
+#endif
     cyw43_arch_lwip_end();
     pm_stats_note(PM_STAT_NET_POLL,started);pm_trace_slow(PM_TRACE_SLOW_POLL,started,2);
 }
@@ -497,8 +539,9 @@ pm_net_stage pm_net_checkpoint(void){
     cyw43_arch_lwip_begin();check_failure_unlocked();pm_net_stage result=stage;cyw43_arch_lwip_end();return result;
 }
 bool pm_net_send(uint8_t kind,const char *json){
+    pm_ack_probe_before_lock(kind,json);
     uint64_t started=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,started);
-    bool ok=send_unlocked(kind,json);cyw43_arch_lwip_end();pm_stats_note(PM_STAT_NET_SEND,started);return ok;
+    pm_ack_probe_locked(kind);bool ok=send_unlocked(kind,json);cyw43_arch_lwip_end();pm_ack_probe_send_return(kind,ok);pm_stats_note(PM_STAT_NET_SEND,started);return ok;
 }
 bool pm_net_take(uint8_t *kind,char *json,size_t cap){
     uint64_t started=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,started);
@@ -515,9 +558,10 @@ bool pm_net_take(uint8_t *kind,char *json,size_t cap){
 
 // Optional video telemetry must not turn send-buffer pressure into a retry.
 bool pm_net_send_optional(uint8_t kind,const char *json){
+    pm_ack_probe_before_lock(kind,json);
     uint64_t started=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,started);
     bool room=stage==PM_NET_READY && pcb && strlen(json)+14<=tcp_sndbuf(pcb);
-    bool ok=room && send_unlocked(kind,json);cyw43_arch_lwip_end();pm_stats_note(PM_STAT_NET_SEND,started);return ok;
+    bool ok=room && send_unlocked(kind,json);cyw43_arch_lwip_end();pm_ack_probe_send_return(kind,ok);pm_stats_note(PM_STAT_NET_SEND,started);return ok;
 }
 
 #if PM_TRACE_STATS

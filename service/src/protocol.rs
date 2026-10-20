@@ -151,7 +151,7 @@ pub enum WireMessage {
 }
 
 impl WireMessage {
-    fn kind(&self) -> u8 {
+    pub(crate) fn kind(&self) -> u8 {
         match self {
             Self::Hello { .. } => 1,
             Self::Welcome { .. } => 2,
@@ -394,9 +394,16 @@ fn decode_frame_bytes(body: &[u8]) -> Result<WireMessage, ProtocolError> {
 #[derive(Default)]
 pub struct Decoder {
     buffer: Vec<u8>,
+    #[cfg(feature="ack-path-probe")]
+    probe_connection:u64,
+    #[cfg(feature="ack-path-probe")]
+    probe_message:u64,
 }
 
 impl Decoder {
+    #[cfg(feature="ack-path-probe")]
+    pub(crate) fn probe_bind(&mut self,connection:u64,message:u64){self.probe_connection=connection;self.probe_message=message;}
+
     pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<WireMessage>, ProtocolError> {
         if bytes.len() > MAX_CHUNK_BYTES
             || self.buffer.len().saturating_add(bytes.len()) > MAX_CHUNK_BYTES
@@ -463,6 +470,8 @@ impl Decoder {
                 self.buffer.clear();
                 return Err(ProtocolError::InvalidLength);
             }
+            #[cfg(feature="ack-path-probe")]
+            if self.probe_connection!=0 {self.probe_message+=1;crate::ack_probe::decoded(self.probe_connection,self.probe_message,kind,&frame[2..],&message);}
             messages.push(message);
             self.buffer.drain(..length + 4);
         }

@@ -9,6 +9,7 @@ path = "src/lib.rs"
 [features]
 default = []
 stream-diagnostics = []
+ack-path-probe = []
 caricature-retention-delete = []
 
 [dependencies]

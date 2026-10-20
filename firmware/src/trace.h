@@ -26,6 +26,9 @@ typedef enum {
     PM_TRACE_TCP_WRITE, PM_TRACE_TCP_OUTPUT, PM_TRACE_SLOW_POLL,
     PM_TRACE_SLOW_LOOP
 } pm_trace_kind;
+#if PM_ACK_PATH_PROBE
+bool pm_trace_try_line(const char *line,size_t length);
+#endif
 #if PM_TRACE_ENABLE
 uint64_t pm_trace_clock(void);
 void pm_trace_event(pm_trace_kind kind,uint64_t frame,int32_t a,uint32_t b);

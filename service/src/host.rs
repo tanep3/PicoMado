@@ -110,6 +110,8 @@ pub async fn serve_plugins_on_listener(
     shutdown: watch::Receiver<bool>,
 ) -> Result<(), HostError> {
     crate::diagnostics::start_from_env();
+    #[cfg(feature="ack-path-probe")]
+    crate::ack_probe::start_from_env();
     serve_with_runner(
         listener,
         app,

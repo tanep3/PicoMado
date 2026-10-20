@@ -1,8 +1,12 @@
 #include "trace.h"
+#include "ack_probe.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "pico/stdlib.h"
+#if PM_ACK_PATH_PROBE
+#include "pico/rand.h"
+#endif
 #include "pico/cyw43_arch.h"
 #include "pico/unique_id.h"
 #include "pico/stdio_usb.h"
@@ -169,6 +173,11 @@ static void log_usb_snapshot(void){
     static bool was_connected;
     static uint32_t last_ms;
     bool connected=stdio_usb_connected();
+#if PM_ACK_PATH_PROBE
+    pm_ack_probe_live(session_epoch,state==ACTIVE);
+    if(connected)for(unsigned n=0;n<16;n++){int ch=getchar_timeout_us(0);if(ch<0)break;pm_ack_probe_input(ch);}
+#endif
+    pm_ack_probe_poll(connected);
     if(connected && !was_connected)pm_net_rx_snapshot();
     pm_stats_usb_poll(connected);
     if(!connected){was_connected=false;return;}
@@ -233,6 +242,7 @@ static void store_settings(void) {
     restore_interrupts(irq);
 }
 static void invalidate_display_context(void){
+    if(pending_render_ack)pm_ack_probe_note(PM_AP_PENDING_CLEAR,9,pending_render_token.session_epoch,pending_render_token.frame_id,(uint32_t)state,0,0,0);
     owner_epoch++;reset_assembly();have_display=false;pending_render_ack=false;
 }
 static void local(const char *one,const char *two) {
@@ -258,7 +268,8 @@ static void standby(void){
     pm_display_standby();
     if(pm_display_busy()){
         if(!panel_standby)owner_epoch++;
-        panel_standby=true;reset_assembly();pending_render_ack=false;
+        if(pending_render_ack)pm_ack_probe_note(PM_AP_PENDING_CLEAR,9,pending_render_token.session_epoch,pending_render_token.frame_id,(uint32_t)state,0,0,0);
+    panel_standby=true;reset_assembly();pending_render_ack=false;
         pending_standby=false;wifi_off();return;
     }
 #endif
@@ -266,6 +277,7 @@ static void standby(void){
 #if PM_DIAGNOSTIC_BOOT
     pm_logf("%s\n","lcd black: standby");
 #endif
+    if(pending_render_ack)pm_ack_probe_note(PM_AP_PENDING_CLEAR,9,pending_render_token.session_epoch,pending_render_token.frame_id,(uint32_t)state,0,0,0);
     owner_epoch++;reset_assembly();have_display=false;pending_render_ack=false;
     wifi_off();pending_standby=false;state=STANDBY;
 }
@@ -441,6 +453,7 @@ static bool token_from(const char *j,pm_token *t) {
         number(j,"frame_id",&t->frame_id);
 }
 static bool send_simple(uint8_t kind,const char *type){
+    pm_ack_probe_context(session_epoch,0);
     
     int n=snprintf(outbound_json,sizeof outbound_json,
         "{\"type\":\"%s\",\"data\":{\"incarnation\":%llu,\"session_epoch\":%llu}}",
@@ -448,6 +461,8 @@ static bool send_simple(uint8_t kind,const char *type){
     return n>0 && (size_t)n<sizeof outbound_json && pm_net_send(kind,outbound_json);
 }
 static bool send_ack(uint8_t kind,const char *type,pm_token t){
+    pm_ack_probe_context(t.session_epoch,t.frame_id);
+    pm_ack_probe_note(PM_AP_ACK_BUILD,kind,t.session_epoch,t.frame_id,(uint32_t)t.display_epoch,(uint32_t)(t.display_epoch>>32),(uint32_t)t.screen_owner_epoch,(uint32_t)(t.screen_owner_epoch>>32));
     int n=snprintf(outbound_json,sizeof outbound_json,
         "{\"type\":\"%s\",\"data\":{\"token\":{\"device_id\":\"%s\","
         "\"incarnation\":%llu,\"session_epoch\":%llu,\"display_epoch\":%llu,"
@@ -461,14 +476,15 @@ static bool send_ack(uint8_t kind,const char *type,pm_token t){
     pm_trace_event(before,t.frame_id,kind,0);
     bool ok=n>0 && (size_t)n<sizeof outbound_json && pm_net_send(kind,outbound_json);
     pm_trace_event(after,t.frame_id,ok?1:0,0);
-    pm_trace_frame_context(0);return ok;
+    pm_trace_frame_context(0);pm_ack_probe_context(0,0);return ok;
 }
 static bool send_pending_render_ack(void){
     if(state!=ACTIVE || !pending_render_ack)return true;
     pm_token t=pending_render_token;pending_render_ack=false;
-    if(!pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch))return true;
+    pm_ack_probe_note(PM_AP_PENDING_TAKE,9,t.session_epoch,t.frame_id,0,0,0,0);
+    if(!pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch)){pm_ack_probe_note(PM_AP_PENDING_SKIP,9,t.session_epoch,t.frame_id,1,0,0,0);return true;}
     // The peer ended application input; do not send data after its WS Close.
-    if(pm_net_state()==PM_NET_DRAINED)return true;
+    if(pm_net_state()==PM_NET_DRAINED){pm_ack_probe_note(PM_AP_PENDING_SKIP,9,t.session_epoch,t.frame_id,2,0,0,0);return true;}
     return send_ack(9,"rendered_ack",t);
 }
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
@@ -568,7 +584,12 @@ static void receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t
     if(state!=ACTIVE || await_selection || !pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch) ||
        !assembly.active || !pm_token_equal(assembly.token,t)){pm_diag_event(PM_D_CONTEXT,t.session_epoch,t.frame_id,0,0);return;}
     bool complete;
-    if(!pm_chunk(&assembly,t,offset,bytes,count,&complete)){pm_diag_event(PM_D_INVALID,t.session_epoch,t.frame_id,0,(uint32_t)offset);pm_net_rx_frame_end(PM_RX_INVALID,0);return;}
+    if(!pm_chunk(&assembly,t,offset,bytes,count,&complete)){
+#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
+        if(!receiving_stream)
+#endif
+        {pm_ack_probe_note(PM_AP_FRAME_CHECK,0,t.session_epoch,t.frame_id,1,0,0,0);}
+        pm_diag_event(PM_D_INVALID,t.session_epoch,t.frame_id,0,(uint32_t)offset);pm_net_rx_frame_end(PM_RX_INVALID,0);return;}
     pm_rx_progress((uint32_t)assembly.used);
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
     if(receiving_stream)pm_diag_progress((uint32_t)assembly.used);
@@ -576,6 +597,10 @@ static void receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t
     if(!complete)return;
     pm_net_rx_frame_end(PM_RX_COMPLETE,0);
     pm_trace_event(PM_TRACE_CRC_OK,t.frame_id,0,PM_IMAGE_BYTES);
+    #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
+    if(!receiving_stream)
+#endif
+    pm_ack_probe_note(PM_AP_FRAME_CHECK,0,t.session_epoch,t.frame_id,0,0,0,0);
     if(!pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch))return;
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
     if(receiving_stream){
@@ -596,6 +621,7 @@ static void receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t
         if(recover_transport_failure())return;
 #endif
         pm_trace_frame_context(t.frame_id);
+        pm_ack_probe_note(PM_AP_DRAW_BEGIN,0,t.session_epoch,t.frame_id,0,0,0,0);
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
         bool same_display=have_display && last_rendered.incarnation==t.incarnation &&
             last_rendered.session_epoch==t.session_epoch && last_rendered.display_epoch==t.display_epoch &&
@@ -607,6 +633,7 @@ static void receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t
         bool drawn=pm_display_frame(assembly.pixels,PM_IMAGE_BYTES);
 #endif
         pm_trace_frame_context(0);
+        pm_ack_probe_note(PM_AP_DRAW_END,0,t.session_epoch,t.frame_id,drawn,0,0,0);
         if(!drawn){retry();return;}
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
         drawing=true;drawing_token=t;return;
@@ -620,7 +647,9 @@ static void receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t
         pm_logf("lcd SPI complete: frame %llu\n",(unsigned long long)t.frame_id);
 #endif
     }
+    if(pending_render_ack)pm_ack_probe_note(PM_AP_PENDING_REPLACED,9,pending_render_token.session_epoch,pending_render_token.frame_id,(uint32_t)t.frame_id,(uint32_t)(t.frame_id>>32),0,0);
     pending_render_token=t;pending_render_ack=true;
+    pm_ack_probe_note(PM_AP_PENDING_SET,9,t.session_epoch,t.frame_id,0,0,0,0);
 }
 static uint64_t binary_u64(const uint8_t *p){uint64_t v=0;for(unsigned i=0;i<8;i++)v=(v<<8)|p[i];return v;}
 static void process_frame_bytes(const uint8_t *p,size_t length){
@@ -739,6 +768,10 @@ static void process(uint8_t kind,const char *j){
             if(string_equals(j,"mode","normal"))sub_mode=false;
             else if(string_equals(j,"mode","sub"))sub_mode=true;
             pm_trace_event(PM_TRACE_FRAME_START,t.frame_id,0,0);
+            #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
+            if(!receiving_stream)
+#endif
+            pm_ack_probe_note(PM_AP_FRAME,0,t.session_epoch,t.frame_id,(uint32_t)t.display_epoch,(uint32_t)(t.display_epoch>>32),(uint32_t)t.screen_owner_epoch,(uint32_t)(t.screen_owner_epoch>>32));
             pm_net_rx_frame_start(t.frame_id,t.session_epoch);
         }
         return;
@@ -755,13 +788,17 @@ static void poll_display(void){
         if(drawn && state==ACTIVE && !await_selection && !panel_standby &&
            pm_token_current(drawing_token,incarnation,session_epoch,display_epoch,owner_epoch)){
             have_display=true;last_rendered=drawing_token;
+            if(pending_render_ack)pm_ack_probe_note(PM_AP_PENDING_REPLACED,9,pending_render_token.session_epoch,pending_render_token.frame_id,(uint32_t)drawing_token.frame_id,(uint32_t)(drawing_token.frame_id>>32),0,0);
             pending_render_token=drawing_token;pending_render_ack=true;
+            pm_ack_probe_note(PM_AP_DRAW_END,0,drawing_token.session_epoch,drawing_token.frame_id,drawn,0,0,0);
+            pm_ack_probe_note(PM_AP_PENDING_SET,9,drawing_token.session_epoch,drawing_token.frame_id,0,0,0,0);
         }
     }
     if(panel_standby && !pm_display_busy()){panel_standby=false;standby();}
 }
 #endif
 static void button(unsigned i,bool long_press){
+    if(state==ACTIVE)pm_ack_probe_button(session_epoch,display_epoch,owner_epoch,i,long_press);
 #if PM_DIAGNOSTIC_STAGE
     pm_logf("diag button=%u state=%u\n",i,(unsigned)state);
 #endif
@@ -815,6 +852,11 @@ static void finish_loop(uint64_t started){
 }
 int main(void){
     stdio_init_all();
+#if PM_ACK_PATH_PROBE
+    pm_ack_probe_init_boot(((uint64_t)get_rand_32()<<32)|get_rand_32());
+#else
+    pm_ack_probe_init();
+#endif
     bool net_ok=pm_net_init();
 #if PM_AWAY_EEX1
     pm_endpoint_client_init(&endpoint_client,pm_endpoint_sdk_io());
@@ -871,6 +913,9 @@ int main(void){
         bool draining=panel_standby;
         poll_display();
         if(draining){finish_loop(loop_started);sleep_ms(5);continue;}
+#endif
+#if PM_ACK_PATH_PROBE
+        pm_ack_probe_usb_state(stdio_usb_connected());
 #endif
         for(unsigned i=0;i<input_count();i++){
             bool pressed=!gpio_get(button_pins[i]);
