@@ -72,6 +72,6 @@ TX1 READは非activeかつboot/run一致の場合だけ。STATUSのover、change
 
 ## 検証と限界
 
-`bash firmware/tests/run_usb_tx_tests.sh` が仮想FSM、共有USB parser、実mainの0/2/4入力、元送信wrapper／SDK lock競合、AP2の実exportと既存Python28件を検証する。`ASAN_OPTIONS=detect_leaks=0 SANITIZE=1 bash firmware/tests/run_usb_tx_tests.sh` はASan/UBSan。LeakSanitizerはこの実行環境のptrace下では動作しないため無効化する。診断実装は動的確保を行わない。`python3 firmware/tests/usb_button_trial_test.py` は無実機の有限controller14件の試験（各serial段階の例外、COMMIT ACK消失、STOP/reap、旧保存SHA／boot照合、TX/SIM回収・digest破損・run誤対応拒否・永続化）を行う。独立レビューで発見した run A COMMIT→FREEZE/RELEASE→run B ARM の再現ケースもC回帰試験へ追加した。既存 `run_host_tests.sh` と実SDKのNagle試験も維持する。
+`bash firmware/tests/run_usb_tx_tests.sh` が仮想FSM、共有USB parser、実mainの0/2/4入力、元送信wrapper／SDK lock競合、AP2の実exportと既存Python28件を検証する。`ASAN_OPTIONS=detect_leaks=0 SANITIZE=1 bash firmware/tests/run_usb_tx_tests.sh` はASan/UBSan。LeakSanitizerはこの実行環境のptrace下では動作しないため無効化する。診断実装は動的確保を行わない。`python3 firmware/tests/usb_button_trial_test.py` は無実機の有限controller16件の試験（各serial段階の例外、COMMIT ACK消失、STOP/reap、旧保存SHA／boot照合、TX/SIM回収・digest破損・run誤対応拒否・永続化）を行う。独立レビューで発見した run A COMMIT→FREEZE/RELEASE→run B ARM の再現ケースもC回帰試験へ追加した。既存 `run_host_tests.sh` と実SDKのNagle試験も維持する。
 
 ARMのBSS／stack使用量、UF2 SHA、差分と試験ログは候補ディレクトリのレビュー成果物を正とする。静的stackサイズはlibcやSDK callbackを含む実測ピークではない。hook時間／loop gap／実USBとRF／実パネルの影響は、独立レビュー後のLCD1台への書込みと有限採取で確認する。ビルド成功やホスト試験だけで実機合格とはしない。

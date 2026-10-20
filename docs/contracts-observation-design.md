@@ -46,6 +46,18 @@ Pico は既存 trace の32件キューを共用する。EV1 有効後は通常�
 
 ## 受入条件
 
+本書は既存の正しい設計意図を実装へ戻す**契約の明確化**であり、方針変更ではない。最初の実装単位は端末API・局所入力判断・共通観測・登録契約である。次の逸脱はその完了に含めない。
+
+| 追跡項目 | 修正範囲・完了条件 |
+| --- | --- |
+| D-01 取得完了の重い処理 | 未修正。ロック外のdecode/renderとロック内の世代・設定・request照合／原子的適用を分離する。重い完了を止めても別端末入力・動画が進み、旧設定・削除・再取得の後着結果を拒否する試験で閉じる。 |
+| D-02 全状態の同期保存 | 未修正。設計第3節の原子性を保ち、serialize/commit/公開、競合改訂、失敗、crash/replayを先に設計する。ディスク待ちを注入しても他端末を不必要に止めず、未保存状態を公開しない試験と実負荷測定で閉じる。background化だけでは閉じない。 |
+| D-03 共通Appの風刺画固有処理 | 未修正。固有保存・保護・期限・削除をプラグインへ戻す。表示中・進行中jobの保持、途中削除からの再開試験を維持し、共通実行経路から具体ID判断が消えたことを確認して閉じる。 |
+| D-04 E-inkの描画中受信 | 未修正。「描画中FrameStartを無視」を要件化しない。pendingの所有世代、完了後の最新画面、取消し・切断・旧ACK拒否をモデルと実main試験で確認する。実パネル受入は別とする。 |
+| D-05 実用的な切替追跡 | 未完了。C-08を通し、transport試験の成功だけで調査能力の完成としない。 |
+
+既存挙動は [採用済み通信・Pico設定](../firmware/adopted-protocol-and-configuration.md) を比較基準とする。
+
 - C-01：全ローカル状態×0/2/4ボタン×サブ状態×入力で旧判断と一致。既存 LCD/E-ink、動画、EOF、世代・ACK 回帰を通す。
 - C-02：未知 kind / kind-type 不一致を拒否。既知ハンドラの副作用順と pending/completed を保つ。追加テスト API を表へ登録するだけで router を変更しない。
 - C-03：観測無効、満杯、USB不在・ゼロ容量・部分writeでも機能の結果と進行を変えない。event producer での整形・IO・SDK 再入がない。
@@ -53,3 +65,19 @@ Pico は既存 trace の32件キューを共用する。EV1 有効後は通常�
 - C-05：ホストは唯一の USB owner。クライアント切断・低速保存・保存容量上限・disk errorでも有限メモリを維持し、不完全な採取を成功としない。ツール試験は擬似端末だけを使う。
 - C-06：追加の静止画プラグインと再生プラグインを共通登録契約で注入し、入力・frame・video配送に個別 ID 分岐が不要なことを試験する。
 - C-07：実 ARM のサイズ・stack、既存ソースとSDKの不変性を確認する。実 USB の時間・高水位、負荷比較、遅延再発の採取は今回の実機未反映段階では未検証とする。
+- C-08：ホストで一つの入力から同じsession/display/frameの受信、判断、出力、CRC完了、対応する描画開始・完了まで追えること。既存IDで入力と出力が一意にならなければ不明とする。欠測を注入した区間はincomplete、完備した区間の拒否・期限超過は該当境界の結果として区別する。遅延閾値・完了待ち期限はホスト解析の設定とし、ファームに症状別freeze検出器を追加しない。有限期限・明示停止・保存watermarkで閉じ、欠測を成功扱いしない。
+
+### 回帰と証拠の対応
+
+| 契約 | 実際の試験・証拠 |
+| --- | --- |
+| LCDだけのNODELAY、HOME/AWAY・再接続、E-ink不変 | `net_nagle_test.c`、`run_nagle_sdk_tests.py`（実lwIP関数、変更前後、SDK SHA） |
+| 遅れた旧Helloが現動画を置換しない | `service/tests/support/hello_order.rs`、`hello_order_matrix.rs`、transport試験 |
+| FrameStart先着・chunks間の制御応答、旧ACK、動画取消し | `control_reply_test.c`（trace ON/OFF、LCD/E-ink）、protocol/transport/queue試験 |
+| pending ACK取得・取消し・重複と再送方針 | `ack_pending_semantics_test.c`、`ack_net_semantics_test.c`、`run_usb_tx_tests.sh` |
+| 正常EOF、Close、部分画像、既描画の保持 | `net_eof_recovery_test.c`、`run_net_eof_recovery_tests.sh`、実main回帰（`run_host_tests.sh`から実行） |
+| 旧run COMMIT再発火禁止、DTR取消し、実入力優先 | `usb_run_binding_test.c`、`button_sim_batch_test.c`、`usb_main_input_test.c`。EV1有効の組合せも追加実行する。 |
+| 混在・部分write・返信枠・digest | `usb_multiplex_test.c`、`ack_probe_v2_test.py`、`usb_button_trial_test.py`、追加EV1試験。controllerは16件。 |
+| 私有SDK出自と送信・エラーの保持 | `run_cyw43_inner_tests.py`、`run_inner_tests.sh`、source/SDK/UF2 manifest。共有SDK不変、ON/OFFのbus trace比較。 |
+
+用途別の回帰であり、実機の絶対的な無回帰保証ではない。重い処理と保存、実USBの時間・高水位、物理パネル、C-08は結果を別記する。

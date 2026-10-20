@@ -1,5 +1,7 @@
 # PicoMado firmware (LCD / E-ink)
 
+2026-10-20のソース保存点で採用済みの動画protocol、世代・ACK・取消し・EOF、Pico通常値と診断variantの区別は [採用済み通信と設定](adopted-protocol-and-configuration.md) にまとめています。過去の「現在」「未転送」は各記録時点であり、ソース更新を実機書込みと混同しません。
+
 LCD 接続で小さい制御送信が ACK 待ちに重なる条件に対し、新規 PCB の接続開始前に Nagle を無効にする候補を隔離検証しました。HOME/AWAY/再接続と E-ink の設定維持、同 SDK の送出挙動はローカル試験済みです。既知正常版も Nagle は有効だったため、実機悪化の原因確定や改善確認とは扱いません。後続の承認済み LCD 版へ反映し、ソースも保存しました。実機経過と残る制約は検証記録の末尾にあります。[候補と検証範囲](nagle-candidate-verification-2026-10-19.md)。
 
 160×80 ST7735S LCD・4 ボタンと、250×122 Waveshare Pico-ePaper V4・2／0 ボタンの Pico W 用です。`picomado_selftest` はネット資格情報を使わない LCD/ボタン診断、`picomado_lcd` は端末通信を含むファームです。既存 YouTube 端末の配線・ガンマ・180 度画素回転を照合して実装しました。
