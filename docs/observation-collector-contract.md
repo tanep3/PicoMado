@@ -12,7 +12,7 @@
 
 ## 収集区間と欠測
 
-ON応答のboot・sequence・dropを開始境界にし、OFF応答を終了境界にする。同じbootで開始より後・終了以下の全sequenceが順に届き、drop増分0、飽和0、decode/行あふれ/host欠測0、最後の保存fsync成功の場合だけ `transport_complete=true` とする。実機処理や対応描画の完了を意味しない。ON snapshot直後のIRQ記録がON返信より先に並ぶ可能性があるため、境界前の記録を最大32件保持して照合する。超過時は不完全とする。受信記録は境界前も捨てずjournalへ保存する。
+ON応答のboot・sequence・dropを開始境界にし、OFF応答を終了境界にする。同じbootで開始より後・終了以下の全sequenceが順に届き、drop増分0、飽和0、decode/行あふれ/host欠測0、最後の保存fsync成功の場合だけ `transport_complete=true` とする。実機処理や対応描画の完了を意味しない。ON snapshot直後のIRQ記録がON返信より先に並ぶ可能性があるため、境界前の記録を最大32件保持して照合する。超過時は不完全とする。受信記録は境界前も捨てずjournalへ保存する。CRC不正行と切断時の途中行も上限内の元データを保持する。summaryのcompleteはtransport_completeの互換別名であり、application_completeは未判定ならnullとする。
 
 CRC破損、過長行、seq重複/逆転/欠落、boot変更、不一致CID、採取境界の応答期限超過、切断、途中行、保存障害を別の理由として保持する。通常コマンドの返信不明はcommand_uncertainとして別記し、EV1区間の無欠測と操作成功を混同しない。未送信のqueue取消しはcommand_cancelled、部分/全量送信後の結果不明はcommand_uncertainと区別する。旧返信prefixは配送条件だけで、boot/run/cidと意味の検証は既存クライアントの契約を維持する。欠測を「処理されなかった」証拠にしない。clockの異なるPicoとPiの時刻を直接減算しない。
 
@@ -33,3 +33,5 @@ readerは固定長の値を最大256件の保存queueへtry-putする。専用wo
 - K-05：旧コマンドtimeout後の遅着を誤対応させず、tag付きOFFと有限終了を維持する。既存controllerは変更しない。実USB、SDK由来stdoutの所有統合と実負荷は別の受入である。
 
 この単位でD-05全体を閉じない。採取点、source/context、入力とframeの因果、ホスト解析、実ARM/機能回帰、実機負荷のうち未完了の項目は引き続き [追跡表](contracts-observation-design.md) に残す。
+
+部分コマンドの扱い：期限内に1byteも書けなければ未送信取消しとする。LFまで送っていない部分行が残った場合はtransportをdirtyとして閉じ、OFFや次の旧コマンドを続けて書かない。自動LFで別の有効コマンドを完成させることも避ける。全行送信後に返信だけが不明な場合に限り、wire CID付きOFFで採取終了を確認できる。この区別もK-05の回帰対象とする。
