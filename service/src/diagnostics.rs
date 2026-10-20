@@ -190,6 +190,12 @@ mod enabled {
     static ACTIVE: AtomicBool = AtomicBool::new(false);
     static STARTED: AtomicBool = AtomicBool::new(false);
     static CONTENDED: AtomicU64 = AtomicU64::new(0);
+    #[cfg(test)]
+    thread_local! {
+        // Current-thread Tokio fixtures inspect their own hook calls, not
+        // unrelated tests using the process-wide production exporter.
+        static TEST_STATE: std::cell::RefCell<Option<State>> = const { std::cell::RefCell::new(None) };
+    }
     pub fn mark() -> u64 {
         if !ACTIVE.load(Ordering::Relaxed) {
             return 0;
@@ -203,6 +209,12 @@ mod enabled {
         if us == 0 {
             return;
         }
+        #[cfg(test)]
+        TEST_STATE.with(|state| {
+            if let Some(state) = state.borrow_mut().as_mut() {
+                state.events[kind as usize] = state.events[kind as usize].saturating_add(1);
+            }
+        });
         let hook = Instant::now();
         if let Ok(mut s) = STATE.try_lock() {
             s.events[kind as usize] = s.events[kind as usize].saturating_add(1);
@@ -226,6 +238,12 @@ mod enabled {
         }
         let now = mark();
         let elapsed = now.saturating_sub(start);
+        #[cfg(test)]
+        TEST_STATE.with(|state| {
+            if let Some(state) = state.borrow_mut().as_mut() {
+                state.hist[kind as usize].add(elapsed);
+            }
+        });
         let hook = Instant::now();
         if let Ok(mut s) = STATE.try_lock() {
             s.hist[kind as usize].add(elapsed);
@@ -350,21 +368,49 @@ mod enabled {
     #[cfg(test)]
     pub fn test_enable() {
         let _ = EPOCH.get_or_init(Instant::now);
+        TEST_STATE.with(|state| *state.borrow_mut() = Some(State::new()));
         ACTIVE.store(true, Ordering::Release);
     }
     #[cfg(test)]
     pub fn test_hist(kind: Kind) -> (u64, u64) {
+        if let Some(result) = TEST_STATE.with(|state| {
+            state.borrow().as_ref().map(|state| {
+                let h = state.hist[kind as usize];
+                (h.count, h.max_us)
+            })
+        }) {
+            return result;
+        }
         let s = STATE.lock().unwrap();
         let h = s.hist[kind as usize];
         (h.count, h.max_us)
     }
     #[cfg(test)]
     pub fn test_count(kind: Kind) -> u64 {
+        if let Some(count) = TEST_STATE.with(|state| {
+            state.borrow().as_ref().map(|state| state.events[kind as usize])
+        }) {
+            return count;
+        }
         STATE.lock().unwrap().events[kind as usize]
     }
     #[cfg(test)]
     mod tests {
         use super::*;
+        #[test]
+        fn fixture_counters_and_histograms_exclude_other_threads() {
+            test_enable();
+            event(Kind::FragmentDeadline, 1, 1, 0, 0, 0);
+            duration(Kind::DeadlineWake, mark(), 1, 1, 0);
+            std::thread::spawn(|| {
+                event(Kind::FragmentDeadline, 2, 2, 0, 0, 0);
+                duration(Kind::DeadlineWake, mark(), 2, 2, 0);
+            })
+            .join()
+            .unwrap();
+            assert_eq!(test_count(Kind::FragmentDeadline), 1);
+            assert_eq!(test_hist(Kind::DeadlineWake).0, 1);
+        }
         #[test]
         fn bounded_ring_and_all_sample_histogram() {
             let mut s = State::new();

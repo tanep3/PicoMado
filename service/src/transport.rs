@@ -391,30 +391,38 @@ struct QueuedReply {
     #[cfg(feature="stream-diagnostics")]
     enqueued_at: u64,
 }
-enum WriterCommand {Bind(SessionToken),Reply(QueuedReply),Stop}
+enum WriterCommand {
+    #[cfg(test)]
+    Bind(SessionToken),
+    BoundReply(SessionToken, QueuedReply),
+    Reply(QueuedReply),
+    Stop,
+}
 impl WriterCommand {
     #[cfg(test)]
     #[inline(always)]
-    fn reply(message:WireMessage)->Self {Self::reply_observed(message,None)}
-    fn reply_observed(message:WireMessage,cause:Option<crate::observation::Cause>)->Self {
-        Self::Reply(QueuedReply{message,cause,#[cfg(feature="stream-diagnostics")] enqueued_at:crate::diagnostics::mark()})
+    fn reply(message:WireMessage)->Self {Self::reply_observed(message,None,None)}
+    fn reply_observed(message:WireMessage,cause:Option<crate::observation::Cause>,binding:Option<SessionToken>)->Self {
+        let reply=QueuedReply{message,cause,#[cfg(feature="stream-diagnostics")] enqueued_at:crate::diagnostics::mark()};
+        match binding {Some(token)=>Self::BoundReply(token,reply),None=>Self::Reply(reply)}
     }
 }
+#[cfg(all(test,feature="boundary-observation"))]
 async fn enqueue_observed_reply(tx:&tokio::sync::mpsc::Sender<WriterCommand>,message:WireMessage,session:u64,cause:Option<crate::observation::Cause>)->Result<(),()> {
-    enqueue_reply_common(tx,message,session,cause).await
+    enqueue_reply_common(tx,message,session,cause,None).await
 }
 async fn enqueue_reply(tx:&tokio::sync::mpsc::Sender<WriterCommand>,message:WireMessage,session:u64)->Result<(),()> {
-    enqueue_reply_common(tx,message,session,None).await
+    enqueue_reply_common(tx,message,session,None,None).await
 }
-async fn enqueue_reply_common(tx:&tokio::sync::mpsc::Sender<WriterCommand>,message:WireMessage,_session:u64,cause:Option<crate::observation::Cause>)->Result<(),()> {
+async fn enqueue_reply_common(tx:&tokio::sync::mpsc::Sender<WriterCommand>,message:WireMessage,_session:u64,cause:Option<crate::observation::Cause>,binding:Option<SessionToken>)->Result<(),()> {
     #[cfg(not(feature="stream-diagnostics"))]
-    {tx.send(WriterCommand::reply_observed(message,cause)).await.map_err(|_|())}
+    {tx.send(WriterCommand::reply_observed(message,cause,binding)).await.map_err(|_|())}
     #[cfg(feature="stream-diagnostics")]
     {
         let start=crate::diagnostics::mark();
         let permit=tx.reserve().await.map_err(|_|())?;
         crate::diagnostics::duration(crate::diagnostics::Kind::ReplyCapacity,start,_session,0,0);
-        permit.send(WriterCommand::reply_observed(message,cause));Ok(())
+        permit.send(WriterCommand::reply_observed(message,cause,binding));Ok(())
     }
 }
 const SEND_TIMEOUT: Duration = Duration::from_millis(250);
@@ -755,9 +763,17 @@ async fn writer_loop_with_progress<S>(
         tokio::select! {
             biased;
             command=async {if pending_command.is_some(){pending_command.take()}else{rx.recv().await}}=>match command {
+                #[cfg(test)]
                 Some(WriterCommand::Bind(token))=>{
                     video_rx=crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).ok().and_then(|mut a|a.subscribe_lcd_video(&token));
                     current=Some(token);refresh=true;video_pending=true;
+                },
+                Some(WriterCommand::BoundReply(token,reply))=>{
+                    video_rx=crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).ok().and_then(|mut a|a.subscribe_lcd_video(&token));
+                    current=Some(token);refresh=true;video_pending=true;
+                    // This internal reply is ready before every refresh branch,
+                    // independent of when the producer next gets scheduled.
+                    pending_command=Some(WriterCommand::Reply(reply));
                 },
                 Some(WriterCommand::Reply(reply))=>{
                     #[cfg(feature="stream-diagnostics")]
@@ -1103,21 +1119,12 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
                     {if was_unbound {probe_bind_pending=true;}if probe_bind_pending {if let Some(token)=&current {probe_bind_pending=!crate::ack_probe::bind_accepted(&app,token,accept_order.get());}}}
                     #[cfg(feature="ack-path-probe")]
                     crate::ack_probe::record(crate::ack_probe::Event::ProcessDone,accept_order.get(),rx_messages,probe_identity.0,probe_identity.1,probe_identity.2,probe_process_started.as_ref().map_or(0,|started|started.elapsed().as_micros()as u64),1);
-                    if was_unbound {
-                        if let Some(token) = &current {
-                            if tx.send(WriterCommand::Bind(token.clone())).await.is_err() {
-                                end_reason = "writer_command_closed";
-                                failed = true;
-                                break;
-                            }
-                            eprintln!("picomado websocket_bound connection_id={} id={} incarnation={} session_epoch={}",connection_id,token.device_id,token.incarnation,token.session_epoch);
-                        }
-                    }
+                    let binding=if was_unbound {current.clone()}else{None};
                     if let Some(reply) = reply {
                         let queued = std::time::Instant::now();
                         #[cfg(feature="ack-path-probe")]
                         crate::ack_probe::record(crate::ack_probe::Event::ReplyQueueBegin,accept_order.get(),rx_messages,probe_identity.0,probe_identity.1,probe_identity.2,tx.capacity()as u64,0);
-                        if enqueue_observed_reply(&tx,reply,current.as_ref().map_or(0,|s|s.session_epoch),cause).await.is_err() {
+                        if enqueue_reply_common(&tx,reply,current.as_ref().map_or(0,|s|s.session_epoch),cause,binding).await.is_err() {
                             end_reason = "writer_command_closed";
                             failed = true;
                             break;
@@ -1126,6 +1133,11 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
                         crate::ack_probe::record(crate::ack_probe::Event::ReplyQueueDone,accept_order.get(),rx_messages,probe_identity.0,probe_identity.1,probe_identity.2,queued.elapsed().as_micros()as u64,0);
                         if queued.elapsed() > Duration::from_millis(100) {
                             eprintln!("picomado reply_queue_wait connection_id={} request={} elapsed_ms={}",connection_id,kind,queued.elapsed().as_millis());
+                        }
+                        if was_unbound {
+                            if let Some(token)=&current {
+                                eprintln!("picomado websocket_bound connection_id={} id={} incarnation={} session_epoch={}",connection_id,token.device_id,token.incarnation,token.session_epoch);
+                            }
                         }
                     }
                 }
@@ -1804,6 +1816,61 @@ mod tests {
         ) -> Poll<Result<(), Self::Error>> {
             Poll::Ready(Ok(()))
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn bound_welcome_precedes_outbox_without_a_second_producer_command() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = crate::test_support::manual_frames_app(&temp.path().join("db")).unwrap();
+        let token = state.hello("welcome", ["lcd".into()].into(), 1).unwrap();
+        let app = Arc::new(std::sync::Mutex::new(state));
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let count = Arc::new(AtomicUsize::new(0));
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        let writer = tokio::spawn(writer_loop(
+            MockSink {
+                count: count.clone(),
+                limit: usize::MAX,
+                recorded: Some(recorded.clone()),
+            },
+            rx,
+            app,
+        ));
+        enqueue_reply_common(
+            &tx,
+            WireMessage::Welcome {
+                incarnation: token.incarnation,
+                session_epoch: token.session_epoch,
+            },
+            token.session_epoch,
+            None,
+            Some(token.clone()),
+        )
+        .await
+        .unwrap();
+        // No second producer command can supply a missing Welcome. The
+        // writer must send it, then discover Settings in the bound outbox.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while count.load(Ordering::SeqCst) < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let messages: Vec<_> = recorded
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|message| match message {
+                Message::Binary(bytes) => Decoder::default().push(bytes).unwrap(),
+                _ => Vec::new(),
+            })
+            .collect();
+        assert!(matches!(messages.first(), Some(WireMessage::Welcome { incarnation, session_epoch })
+            if *incarnation == token.incarnation && *session_epoch == token.session_epoch));
+        assert!(matches!(messages.get(1), Some(WireMessage::Settings { .. })));
+        tx.send(WriterCommand::Stop).await.unwrap();
+        assert_eq!(writer.await.unwrap(), "requested_stop");
     }
 
     #[tokio::test]

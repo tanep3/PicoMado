@@ -12,3 +12,5 @@ D-02試作を退避したまま `6f43576` を検証した。
 Helloで成立したsessionとWelcomeを一つのwriter commandとしてenqueueする。writerは同じcommand内でbindし、そのWelcomeを送ってからoutbox/videoへ進む。通常返信の有限queue、cause有無と診断ON/OFFで等しい待機、既存250msのwire送信期限は保つ。wire形式、接続世代、旧Hello排除は変えない。queueへの次のproducer送信を意図的に遅らせてもWelcomeが最初になる試験と、既存のHello順序・ACK reader・cause queueの試験を確認する。
 
 これらはD-02の保存境界実装とは別の基準修正である。全feature回帰を正常化しても、一時入力の保存待ち分離が完了したとは扱わない。
+
+修正後：`d02-baseline-corrections-all-feature.log` は全feature **261件成功、失敗0、75.69秒**。通常構成も `baseline-corrections-default-feature.log` で **240件成功、失敗0、69.62秒**。新しいforeign-thread除外試験と、producerから次のcommandを送らなくてもWelcome→Settingsの順を保つ試験を含む。既存のcause queue/Hello順序/ACK reader/静止画・動画の回帰も含み、実機・サービスの操作は行っていない。
