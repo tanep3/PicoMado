@@ -13,6 +13,7 @@ bool pm_display_take_result(bool *ok){if(!panel_result)return false;panel_result
 #endif
 static unsigned serial;
 static void setup(void){
+ net_send_rejected=display_frame_rejected=false;
  defaults();state=ACTIVE;network_stage=PM_NET_READY;wifi_enabled=false;
  incarnation=session_epoch=display_epoch=1;owner_epoch=42;sub_mode=false;
  pending_standby=pending_sub_cancel=pending_render_ack=have_display=await_selection=false;

@@ -585,35 +585,36 @@ static bool settings_message(const char *j){
         (unsigned long long)incarnation,(unsigned long long)settings.revision);
     return n>0&&(size_t)n<sizeof outbound_json && pm_net_send(4,outbound_json);
 }
-static void receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t count){
+static pm_api_result receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t count){
     if(state!=ACTIVE || await_selection || !pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch) ||
-       !assembly.active || !pm_token_equal(assembly.token,t)){pm_diag_event(PM_D_CONTEXT,t.session_epoch,t.frame_id,0,0);return;}
-    bool complete;
-    if(!pm_chunk(&assembly,t,offset,bytes,count,&complete)){
+       !assembly.active || !pm_token_equal(assembly.token,t)){pm_diag_event(PM_D_CONTEXT,t.session_epoch,t.frame_id,0,0);return PM_API_REJECTED;}
+    bool complete;bool valid_offset=offset<=UINT32_MAX;
+    if(!valid_offset)pm_reset(&assembly);
+    if(!valid_offset || !pm_chunk(&assembly,t,offset,bytes,count,&complete)){
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
         if(!receiving_stream)
 #endif
         {pm_ack_probe_note(PM_AP_FRAME_CHECK,0,t.session_epoch,t.frame_id,1,0,0,0);}
-        pm_diag_event(PM_D_INVALID,t.session_epoch,t.frame_id,0,(uint32_t)offset);pm_net_rx_frame_end(PM_RX_INVALID,0);return;}
+        pm_diag_event(PM_D_INVALID,t.session_epoch,t.frame_id,0,(uint32_t)offset);pm_net_rx_frame_end(PM_RX_INVALID,0);return PM_API_REJECTED;}
     pm_rx_progress((uint32_t)assembly.used);
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
     if(receiving_stream)pm_diag_progress((uint32_t)assembly.used);
 #endif
-    if(!complete)return;
+    if(!complete)return PM_API_PENDING;
     pm_net_rx_frame_end(PM_RX_COMPLETE,0);
     pm_trace_event(PM_TRACE_CRC_OK,t.frame_id,0,PM_IMAGE_BYTES);
     #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
     if(!receiving_stream)
 #endif
     pm_ack_probe_note(PM_AP_FRAME_CHECK,0,t.session_epoch,t.frame_id,0,0,0,0);
-    if(!pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch))return;
+    if(!pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch))return PM_API_REJECTED;
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
     if(receiving_stream){
         pm_diag_frame_done();
-        pm_video_offer(&video,t,receiving_sequence,assembly.pixels,PM_IMAGE_BYTES);return;
+        return pm_video_offer(&video,t,receiving_sequence,assembly.pixels,PM_IMAGE_BYTES)?PM_API_PENDING:PM_API_REJECTED;
     }
 #endif
-    if(!send_ack(8,"receipt_ack",t)){if(!recover_transport_failure())retry();return;}
+    if(!send_ack(8,"receipt_ack",t)){if(!recover_transport_failure())retry();return PM_API_ERROR;}
     if(!have_display || !pm_token_equal(last_rendered,t)) {
 #if PM_DIAGNOSTIC_BOOT
         size_t nonzero=0;
@@ -623,7 +624,7 @@ static void receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t
         pm_display_reference_pattern();sleep_ms(500);
 #endif
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
-        if(recover_transport_failure())return;
+        if(recover_transport_failure())return PM_API_ERROR;
 #endif
         pm_trace_frame_context(t.frame_id);
         pm_ack_probe_note(PM_AP_DRAW_BEGIN,0,t.session_epoch,t.frame_id,0,0,0,0);
@@ -639,9 +640,9 @@ static void receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t
 #endif
         pm_trace_frame_context(0);
         pm_ack_probe_note(PM_AP_DRAW_END,0,t.session_epoch,t.frame_id,drawn,0,0,0);
-        if(!drawn){retry();return;}
+        if(!drawn){retry();return PM_API_ERROR;}
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
-        drawing=true;drawing_token=t;return;
+        drawing=true;drawing_token=t;return PM_API_PENDING;
 #else
         retained_pixels=false;have_display=true;last_rendered=t;
 #endif
@@ -655,6 +656,7 @@ static void receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t
     if(pending_render_ack)pm_ack_probe_note(PM_AP_PENDING_REPLACED,9,pending_render_token.session_epoch,pending_render_token.frame_id,(uint32_t)t.frame_id,(uint32_t)(t.frame_id>>32),0,0);
     pending_render_token=t;pending_render_ack=true;
     pm_ack_probe_note(PM_AP_PENDING_SET,9,t.session_epoch,t.frame_id,0,0,0,0);
+    return PM_API_COMPLETED;
 }
 static uint64_t binary_u64(const uint8_t *p){uint64_t v=0;for(unsigned i=0;i<8;i++)v=(v<<8)|p[i];return v;}
 static void process_frame_bytes(const uint8_t *p,size_t length){
@@ -788,9 +790,8 @@ static pm_api_result api_frame(uint8_t kind,const char *j){
         return assembly.active?PM_API_PENDING:PM_API_REJECTED;
     }
     uint64_t offset;size_t count;
-    if(number(j,"offset",&offset) && parse_bytes(j,&count))receive_chunk(t,offset,fragment,count);
-    else return PM_API_REJECTED;
-    return PM_API_COMPLETED;
+    if(number(j,"offset",&offset) && parse_bytes(j,&count))return receive_chunk(t,offset,fragment,count);
+    return PM_API_REJECTED;
 }
 static const pm_device_api device_apis[]={
     {2,"welcome",api_welcome},{3,"settings",api_settings},

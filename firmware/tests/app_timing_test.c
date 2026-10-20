@@ -36,6 +36,7 @@ size_t pm_trace_usb_write(const char *p,size_t n){
 static unsigned wake_trial,wake_loops,frame_receipts,frame_renders,stream_status_count;
 static char stream_status_last[768];
 static bool checking_frame;
+static bool net_send_rejected,display_frame_rejected;
 static const unsigned ignored_wake_buttons[]={0,1,3};
 static const char *last_lcd_one,*last_lcd_two;
 static pm_net_stage network_stage=PM_NET_DOWN;
@@ -79,6 +80,7 @@ void pm_display_status(const char *a,const char *b){
 }
 bool pm_display_frame(uint8_t *p,size_t n){
     assert(p && n==PM_IMAGE_BYTES);
+    if(display_frame_rejected)return false;
     if(checking_frame){
         assert(frame_receipts>frame_renders);
         pm_trace_event(PM_TRACE_SPI_BEGIN,pm_trace_current_frame(),0,0);clock_ms+=14;
@@ -111,6 +113,7 @@ pm_net_failure pm_net_last_failure(void){return PM_NET_FAIL_PROTOCOL;}
 #endif
 bool pm_net_send(uint8_t kind,const char *j){
     assert(j && network_stage==PM_NET_READY);
+    if(net_send_rejected)return false;
     if(kind==1){hello_count++;welcome_available=true;}
     if(kind==5)heartbeat_count++;
     if(kind==8){frame_receipts++;clock_ms++;}

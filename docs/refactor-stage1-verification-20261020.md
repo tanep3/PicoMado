@@ -39,3 +39,7 @@ ARMの静的frame値はmain496B、pm_observe64B、pm_logf168B。予約main stack
 D-01重い取得完了、D-02同期全状態保存、D-03風刺画固有処理、D-04E-ink非同期受信、D-05入力から対応描画までの完全な因果追跡は未修正/未受入。EV1のenumが存在するだけで全境界に採取点があるとはしない。SDK由来を含む全stdoutの所有統合と、host collectorの実用的な保存区間確認も残る。transport単体成功を切替原因の診断能力完成と報告しない。
 
 本番リポジトリは既存作業checkpoint `ffb62d6`以外変更せず、隔離した別リポジトリで作業した。元候補・採取証拠・個体config・共有SDKを保持。SSH、push、install、サービス再起動、ファーム書込み、実USB接続、E-ink操作は行っていない。実機の滑らかさ、間欠遅延、USB時間・IRQ時間・動的高水位、物理パネルは未検証であり、無回帰の絶対保証も遅延解消も主張しない。
+
+## 第1段階の独立レビュー修正
+
+E-ink通信画像3813BとパネルRAM変換後4000Bを区別した。`receive_chunk`から実際のAPI結果を返し、`api_frame`で受理失敗をCOMPLETEDへ変換しない。無効offset、u32超過、旧token、CRC不正をREJECTED、部分受理・動画待ち・E-ink描画待ちをPENDING、同期描画完了をCOMPLETED、ACK送信/描画失敗をERRORとして検証した。`run_api_result_tests.sh` は実main/handler/assemblyと既存IO doublesを使い、LCD・E-ink0/2ボタンの3構成で通常/ASan/UBSan成功。ログは `stage1-review-api-tests.log` と `stage1-review-api-sanitize.log`。実機の確認ではない。収集器の次段階作業とは別の修正として保存する。
