@@ -11,7 +11,7 @@
 
 ## 共通状態と責務
 
-純粋な切替案内モデルは要求/応答の接続内序数、要求時刻、表示世代の下限、CRC済み候補と案内の表示状態だけを持つ。IO・plugin ID・画素bufferを持たない。mainが入力送信→モデル遷移→既存受信検証→描画adapterの順を所有し、network callback内で描画しない。
+純粋な切替案内モデルは要求/応答の接続内序数、要求時刻、表示世代の下限、CRC済み候補と案内の表示状態だけを持つ。IO・plugin ID・画素bufferを持たない。CRC済み候補の画素は、組立の置換/破棄、videoへのcopy、描画adapterへの移譲に対応する寿命を持つ。組立bufferを上書きするときは、まだ組立内にある候補だけを失効し、video/adapterへ移譲済みの候補は保持する。失われた候補を到着/描画完了に使わない。mainが入力送信→モデル遷移→既存受信検証→描画adapterの順を所有し、network callback内で描画しない。
 
 現サーバは各入力へInputAcceptedまたはPluginPositionを1回返し、同じTCP列の応答順を保つ。既存input_contextのsession/epochと接続内応答序数を使い、連打時はまだ返答されていない要求が残す表示世代下限を保持する。正常な切替はepochを進め、画像を返さないno-opはepochを進めない。FrameStartが応答より先でもCRC済み候補を保持し、下限が確定したら描画する。新しいwire識別子やサーバ変更を追加しない。任意の外部更新と入力を完全なaction IDで因果同定する保証は既存wireにはなく、現行session/owner/epochと応答順の範囲で判定する。
 
@@ -32,6 +32,6 @@ E-inkは案内を未開始jobとして合流し、remote画像を最優先する
 
 ## 検証
 
-純粋モデルと実mainの試験で、199,999 / 200,000 / 200,001 µs、期限直前のCRC完了、headerのみ/部分/CRC不正、期限後到着、連打・応答順・frame先行・旧世代・旧session、SUB正常/no-op・サブ端、動画継続、送信/描画失敗・再接続を確認する。E-ink実adapterでbusy中の案内、未開始/準備中の取消し、remote優先、物理refresh後の合流、元画像復元、ACK非生成を検証する。LCD実adapterでbitmap・復元とSPI順序を確認する。
+純粋モデルと実mainの試験で、199,999 / 200,000 / 200,001 µs、期限直前のCRC完了、headerのみ/部分/CRC不正、期限後到着、連打・応答順・frame先行・CRC済候補の次FrameStartによる置換/破棄・旧世代・旧session、SUB正常/no-op・サブ端、動画継続、送信/描画失敗・再接続を確認する。E-ink実adapterでbusy中の案内、未開始/準備中の取消し、remote優先、物理refresh後の合流、元画像復元、ACK非生成を検証する。LCD実adapterでbitmap・復元とSPI順序を確認する。
 
 既存host/USB-domain/表示変換・V4更新・native wire・世代回帰を保ち、LCD（既存PR155 flags）と両E-ink（通常版、NODELAY）をARM buildする。個別設定/board bindingとUF2設定予約領域非包含を照合する。描画サンプルを目視する。実機の200 ms精度・文字視認性・ちらつき・入力/動画への影響は未検証として引き渡し、書込みは別承認とする。
