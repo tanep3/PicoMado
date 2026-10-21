@@ -142,3 +142,7 @@ The hardware host40 value is a cleanup observation, not a recorded rejection-tim
 ### Exhaustive identity projection
 
 The model explicitly classifies every Rust WireMessage variant by token-session, direct-session or sessionless meaning. The generated match has no wildcard: adding/removing an unclassified variant is a compiler error. The public identity adapter delegates exactly to this projection. In particular StreamStatus cannot silently become session0 through a fallback. Outputs are project configuration; the shared generator contains no Pico path or plugin names.
+
+### Review-correction contract
+
+[Three scoped corrections](changes/OBS-20261021-01-review-fix-contract.md) fix non-circular workflow evidence, immutable completion and actual build lineage before implementation. They do not replace the existing aggregate, generated model or adapters.

@@ -11,11 +11,15 @@
   "standard": "development/standard/v1/standard.md",
   "stages": {
     "design": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        "afbbd4b",
+        "d76617d",
+        "fa9bf58"
+      ]
     },
     "implementation": {
-      "state": "not_started",
+      "state": "in_progress",
       "evidence": []
     },
     "independent_verification": {
@@ -58,5 +62,17 @@
     "active AGENTS/root route invocation proof",
     "parent closure record after effectiveness confirmation"
   ],
-  "zero_bug_guarantee": false
+  "zero_bug_guarantee": false,
+  "design_commit": "fa9bf58af23a6968038a94f7c8e89f9c66cc5026",
+  "design_artifacts": [
+    "docs/contracts-observation-design.md",
+    "docs/development-process.md",
+    "contracts/observation-domain.json",
+    "docs/changes/OBS-20261021-01-review-fix-contract.md"
+  ],
+  "review_corrections": [
+    "P2-01 workflow and evidence binding",
+    "P2-02 immutable verified completion",
+    "P2-03 actual build lineage"
+  ]
 }
