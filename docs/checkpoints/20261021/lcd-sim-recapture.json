@@ -35,5 +35,18 @@
     "draw completion unknown due source loss",
     "pre-first-read/kernel arrival unknown",
     "root cause of retransmission unproven"
-  ]
+  ],
+  "evidence_analysis_checks": 22,
+  "observed_slow_output_flags": {
+    "source_sequence": 6211,
+    "event": "NET_OUTPUT",
+    "result": 0,
+    "raw_flags": 13,
+    "pcb_present": true,
+    "unsent": false,
+    "unacked": true,
+    "nodelay": true,
+    "source_code": "firmware/src/net.c:307",
+    "meaning": "snapshot after initial tcp_output; not a radio delivery guarantee"
+  }
 }
