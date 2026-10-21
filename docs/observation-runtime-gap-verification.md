@@ -20,3 +20,14 @@ V-05は平均帯域だけで合格にしない。1loop当たりのproducer burst
 今回完了しているのは、保存ログの全4切替のcause/frame照合、同一sourceの区間和、journal同一stream順序、server上限、Pi clock pairingの条件付き下限、source欠番885とdrop増分885／host保存欠落0の一致の確認である。[実測照合](manual-switch-analysis-20261020.md)とcheckpoint JSONを参照する。
 
 設計コミット `d70dd84` 後の実装・ローカル試験と識別限界は [実装検証](observation-runtime-gap-implementation.md) に追記する。上記「未実施」は設計先行時点の記録であり、実機受入は引き続き別工程。
+
+## 独立レビューP2の追加受入条件（修正前）
+
+対象は `58b6d14`。独立レビュー `review-outcome.json` の2件に対し、コード修正より先に次を契約化する。TCP相関・元hookへの1回転送・非待機・固定メモリ・counter非再帰・観測以前unknownを維持する。
+
+| 条件 | 必須の検証 |
+| --- | --- |
+| V-11 原子的ON/OFF | 実trace.c＋usb_control.cで、各合法なIRQ復帰点へ同一coreのNetwork producerを注入する。begin=1とON返信watermark=1が一致し、復帰直後のIRQ事実2をcollectorが失わず受理する。endとOFF返信も一致し、OFF復帰後のproducerは新seqを作らない。IRQ禁止中には整形/enqueue/USB writeをしないことを検査。full queueで境界がdropする場合は欠測を保持し、準備完了/完全性を捏造しない |
+| V-12 begin単一受理 | 同一boot/seqのCRC有効な重複beginを、ON応答前、応答後、前後にまたがる場合の全てで注入。単一chunkとbyte分割を使い、durable prefixが進んでもcausal_ready callback=0、causal_complete=false、明示品質エラーとなること。正常なbegin1件は応答前/後とも成功する。直接Windowと新規PTYの保存JSONL/summary、canonical interval_sourceの判定を照合する。遅い重複を後から受けた場合も、その後のstatusと最終品質をfalseへ落とす |
+
+同一core IRQ fixtureと新規PTYのみを使い、実USBや本番サービスへ触れない。既存host/contract/ASan・collector/因果parserを回帰し、変更したfirmwareのARM buildとRAM差を照合する。サーバコードが変わらなければ全server/長時間動画試験は再実行せず、既存の固定SHA検証を継承する。
