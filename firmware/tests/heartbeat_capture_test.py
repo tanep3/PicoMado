@@ -51,11 +51,11 @@ def fixture():
     extra = dict(trigger=dict(b='1', r='a', mode='1', o='7', g='7', m='8', flags='0'),
                  EV1=dict(b='1',on='0',sat='0',seq='0'),tx_status=dict(b='1', r='a', gen='1', active='0', n='1', ok='1',
                                 over='0', bad='0', changed='0', h='0'), tx_rows=[tx], SDK_inner=inner)
-    worker = dict(event='worker_finished', packets=1, packet_stats=dict(kernel_drops=0),
+    worker = dict(event='worker_finished', packets=1, reason='stop_command',capture_started=True,capture_seconds=37.05,max_queue_sample_gap_ns=100000000,packet_stats=dict(kernel_drops=0,kernel_packets=1),
                   sockets_closed=True, payload_copied=False, payload_persisted=False)
-    headers = dict(complete_interval=True, payload_copied_or_persisted=False, scope_valid=True,
+    headers = dict(controller=dict(clock='CLOCK_MONOTONIC',start_request_before_ns=100000000000,start_confirm_after_ns=100200000000,DTR_low_before_ns=101000000000,DTR_low_after_ns=101001000000,required_end_ns=137100000000,stop_request_before_ns=137100000000,finished_after_ns=137200000000,wait_budget_ns=16000000000,errors=[]),complete_interval=True, payload_copied_or_persisted=False, scope_valid=True,
                    target_binding={k:ready[k] for k in ['pico_boot','host_boot','run','device','host_connection','session']},
-                   metadata_events=[worker],SHA256={n:hashlib.sha256(raw).hexdigest() for n,raw in
+                   metadata_events=[dict(event='started',clock=dict(mono_before_ns=100100000000,mono_after_ns=100100001000)),worker],SHA256={n:hashlib.sha256(raw).hexdigest() for n,raw in
                        [('headers.jsonl',b'{"scope_valid":true}\n'),('recvq.jsonl',b'')]})
     return [pico, host, extra, ready, headers]
 
@@ -122,7 +122,7 @@ class Validation(unittest.TestCase):
                 lambda f:f[2]['SDK_inner']['quality'].update(depth='1'),
                 lambda f:f[2]['SDK_inner'].update(no_diagnostic_loss=False),
                 lambda f:f[4].update(scope_valid=False),
-                lambda f:f[4]['metadata_events'][0]['packet_stats'].update(kernel_drops=1)]
+                lambda f:next(e for e in f[4]['metadata_events']if e['event']=='worker_finished')['packet_stats'].update(kernel_drops=1)]
         for fault in faults:
             with self.subTest(fault=fault):
                 f=fixture();fault(f);self.assertFalse(self.result(f)['complete'])
@@ -208,7 +208,7 @@ class Prepare(unittest.TestCase):
             def wait(n):
                 log.append(('wait',n))
                 if fail:raise RuntimeError('stop')
-            args=(lambda x:log.append(('dtr',x)),lambda:log.append(('headers','start')),lambda:log.append(('headers','stop')))
+            args=(lambda x:log.append(('dtr',x)),lambda:(log.append(('headers','start'))or dict(event='started')),lambda:log.append(('headers','stop')))
             if fail:
                 with self.assertRaises(RuntimeError):hc.observe(*args,wait=wait)
             else:hc.observe(*args,wait=wait)
@@ -299,7 +299,7 @@ class Retention(unittest.TestCase):
             root=Path(d);f=fixture();calls=[];_,usb,host=self.collect(f,root,calls)
             saved=json.loads((root/'saved.json').read_text());self.assertIn('headers.jsonl',saved['hashes'])
             (root/'headers.jsonl').unlink();before=len(calls)
-            with self.assertRaises(FileNotFoundError):hc.release(usb,host,f[3],saved,root)
+            with self.assertRaises(ValueError):hc.release(usb,host,f[3],saved,root)
             self.assertEqual(len(calls),before)
 
     def test_quality_failure_saved_without_discard_or_retry(self):

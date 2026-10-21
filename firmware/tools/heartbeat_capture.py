@@ -87,7 +87,7 @@ def header_evidence(result, packets, target, ready):
 
 
 def observe(set_dtr, begin_headers, end_headers, *, wait=time.sleep,
-            max_wait=MAX_WAIT):
+            max_wait=MAX_WAIT, clock_ns=time.monotonic_ns):
     """Callbacks belong to the same owner; no USB reads/writes in this interval.
 
     The target-only observer is already prepared. At most 36.1s with the current
@@ -95,16 +95,30 @@ def observe(set_dtr, begin_headers, end_headers, *, wait=time.sleep,
     triggers are caught by USB-overlap/window quality, never declared complete.
     """
     require(0 < max_wait <= MAX_WAIT, 'finite heartbeat wait bound')
-    begin_headers()
+    controller=dict(clock='CLOCK_MONOTONIC',start_request_before_ns=clock_ns(),
+                    wait_budget_ns=int(max_wait*1000000000),errors=[])
+    try:started=begin_headers()
+    except BaseException:
+        end_headers()
+        raise
+    controller['start_confirm_after_ns']=clock_ns()
+    if not isinstance(started,dict)or started.get('event')!='started':
+        end_headers()
+        raise ValueError('observer START unconfirmed; DTR gate not opened')
     try:
+        controller['DTR_low_before_ns']=clock_ns()
+        controller['required_end_ns']=controller['DTR_low_before_ns']+int((max_wait+WINDOW+.1)*1000000000)
         set_dtr(False)
+        controller['DTR_low_after_ns']=clock_ns()
         wait(max_wait + WINDOW + .1)
     finally:
+        controller['stop_request_before_ns']=clock_ns()
         try:
             headers = end_headers()
+            controller['finished_after_ns']=clock_ns()
         finally:
             set_dtr(True)
-    return headers
+    return (headers or {})|dict(controller=controller)
 
 
 def collect(usb, host, ready, out, headers):
@@ -143,11 +157,7 @@ def collect(usb, host, ready, out, headers):
         path = root / name
         require(path.stat().st_size <= 524288 and hashlib.sha256(path.read_bytes()).hexdigest() == expected_hash,
                 'header raw evidence missing/changed; retain capture')
-    names = [n + '.json' for n in ['pico', 'host', 'extra', 'headers', 'quality']] + list(raw_hashes)
-    hashes = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in names}
-    ap.persist(root / 'saved.json', dict(ready=ready, hashes=hashes, pico_digest=int(pico['status']['digest'], 16),
-               host_digest=server['status']['digest'], quality=result, released=False))
-    return result
+    return confirm_saved(root,ready)
 
 
 def release(usb, host, ready, saved, out):
@@ -155,12 +165,12 @@ def release(usb, host, ready, saved, out):
     require(saved['ready'] == ready, 'saved identity mismatch')
     root = Path(out)
     require(json.loads((root / 'saved.json').read_text()) == saved, 'saved manifest changed')
-    require(all(hashlib.sha256((root / n).read_bytes()).hexdigest() == h
-                for n, h in saved['hashes'].items()), 'saved evidence changed; retain capture')
-    pb, hb, run = ready['pico_boot'], ready['host_boot'], ready['run']
-    ps = one(usb, f'AP2 RELEASE {pb} {run} {saved["pico_digest"]:x}', 'ap2 status ')
+    checked=validate_directory(root)
+    require(checked['evidence_confirmed'],'saved evidence changed/rejected: '+str(checked['errors']))
+    declared=checked['release'];p=declared['pico'];h=declared['host']
+    ps = one(usb, f'AP2 RELEASE {p["boot"]} {p["run"]} {p["digest"]:x}', 'ap2 status ')
     require(ps['state'] == '0', 'Pico release unconfirmed')
-    hs = host(dict(op='release', boot=hb, run=run, digest=saved['host_digest']))
+    hs = host(dict(op='release', **h))
     require(hs['phase'] == 'idle', 'host release unconfirmed')
     ap.persist(Path(out) / 'released.json', dict(pico=ps, host=hs, owner_must_close=True))
 
@@ -244,6 +254,8 @@ def validate(pico, host, extra, ready, headers):
     workers = [x for x in headers.get('metadata_events', []) if x.get('event') == 'worker_finished']
     ck(len(workers) == 1 and workers[0]['packet_stats']['kernel_drops'] == 0
        and workers[0]['sockets_closed'] and not workers[0]['payload_copied'] and not workers[0]['payload_persisted'], 'header loss/scope lifecycle')
+    from heartbeat_evidence import coverage_ok
+    ck(coverage_ok(headers),'observer does not cover controller window')
     return dict(complete=not errors, errors=errors, trigger='natural_heartbeat',
                 input_count=sum(r['event'] in [1, 24] for r in rows),
                 input_before_or_during=bool(int(tr['flags'], 16) & 1),
@@ -251,9 +263,25 @@ def validate(pico, host, extra, ready, headers):
                 clocks_subtracted=False, RF_departure_proven=False)
 
 
+def confirm_saved(root,ready):
+    from heartbeat_evidence import confirm_saved as common
+    return common(root,ready)
+
+
+def confirm_partial(root,identity,host_captured):
+    from heartbeat_evidence import confirm_partial as common
+    return common(root,identity,host_captured)
+
+
+def validate_directory(root):
+    from heartbeat_evidence import validate_directory as common
+    return common(root)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory', type=Path)
     args = parser.parse_args()
-    read = lambda name: json.loads((args.directory / (name + '.json')).read_text())
-    print(json.dumps(validate(read('pico'), read('host'), read('extra'), read('ready'), read('headers')), ensure_ascii=False))
+    result=validate_directory(args.directory)
+    print(json.dumps(result,ensure_ascii=False))
+    raise SystemExit(0 if result['complete']else 1)

@@ -191,7 +191,7 @@ impl State {
                 self.trigger_message = r.message;
             }
         } else if self.hb_mode && r.event == Event::Decoded
-            && (r.message <= self.expected_message || r.connection != self.hb_connection || r.session != self.hb_session) {
+            && (r.message <= self.expected_message || r.connection != self.hb_connection || (matches!(r.kind,5|6|7|8|9|14|15|16|19) && r.session != self.hb_session)) {
             bad_origin = true;
         }
         let at = (self.head + self.count) % CAP;
@@ -388,7 +388,7 @@ pub fn unbind(connection: u64) {
 }
 pub fn identity(message: &WireMessage) -> (u64, u64, u8) {
     let (s, f) = match message {
-        WireMessage::ReceiptAck { token } | WireMessage::RenderedAck { token } => {
+        WireMessage::ReceiptAck { token } | WireMessage::RenderedAck { token } | WireMessage::StreamStatus { token, .. } => {
             (token.session_epoch, token.frame_id)
         }
         WireMessage::Up { session_epoch, .. }
@@ -725,6 +725,32 @@ mod tests {
         s.accept(3,10);assert_eq!(s.last_message,0);s.seen(2,999);assert_eq!(s.last_message,0);
         s.seen(3,1);s.seen(3,0);assert_eq!(s.last_message,1);
         s.arm(1,1).unwrap();s.freeze(2);s.seen(3,2);assert_eq!(s.last_message,1);
+    }
+    #[test]
+    fn heartbeat_real_stream_status_decoder_identity_and_session() {
+        use crate::protocol::{encode,Decoder};
+        for session in [9,10,0] {
+            let token=crate::FrameToken{device_id:"lcd".into(),incarnation:1,session_epoch:session,
+                display_epoch:1,screen_owner_epoch:1,frame_id:77};
+            let message=WireMessage::StreamStatus{token,generation:1,received_frames:2,rendered_frames:2,
+                dropped_frames:0,elapsed_ms:1000,max_gap_us:10};
+            let bytes=encode(&message).unwrap();
+            let parsed=Decoder::default().push(&bytes).unwrap().pop().unwrap();
+            let (seen,frame,kind)=identity(&parsed);
+            assert_eq!((seen,frame,kind),(session,77,19));
+            let mut state=State::new("lcd".into());state.accept(2,9);state.last_message=7;hb_arm(&mut state,7).unwrap();
+            state.push(hb_row(200,8,5));
+            state.push(Record{us:1000200,event:Event::Decoded,connection:2,message:9,session:seen,frame,kind,..Record::default()});
+            assert_eq!(state.phase,if session==9{Phase::Recording}else{Phase::Frozen});
+        }
+    }
+    #[test]
+    fn heartbeat_sessionless_metadata_does_not_imply_session_change() {
+        let parsed=crate::protocol::Decoder::default().push(&crate::protocol::encode(&WireMessage::Error{code:"test".into()}).unwrap()).unwrap().pop().unwrap();
+        let (session,frame,kind)=identity(&parsed);assert_eq!(session,0);
+        let mut state=State::new("lcd".into());state.accept(2,9);state.last_message=7;hb_arm(&mut state,7).unwrap();state.push(hb_row(200,8,5));
+        state.push(Record{us:201,event:Event::Decoded,connection:2,message:9,session,frame,kind,..Record::default()});
+        assert_eq!(state.phase,Phase::Recording);
     }
     #[test]
     fn heartbeat_origin_requires_baseline_and_exact_ordinal() {
