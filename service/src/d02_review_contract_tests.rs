@@ -124,18 +124,22 @@ async fn d02_review_partial_completion_retains_latest_until_rendered() {
             tokio::task::spawn_blocking(move || worker.join().unwrap())
                 .await
                 .unwrap();
-            assert!(app
+            assert_eq!(app
                 .read()
                 .unwrap()
-                .frame_waiting_for_render(&token, old_frame.frame_id));
+                .frame_waiting_for_render(&token, old_frame.frame_id), screen == "lcd");
             assert!(app
                 .read()
                 .unwrap()
                 .pending_effects()
                 .iter()
                 .all(|(_, e)| !matches!(e, crate::Effect::SendFrame { .. })));
-            // No redraw before physical completion; receiving bytes is not drawing.
-            assert_eq!(recorded.lock().unwrap().len(), offset);
+            // The legacy LCD waits for physical completion; E-ink may accept
+            // a new complete image into its bounded firmware pending slot.
+            if screen == "lcd" { assert_eq!(recorded.lock().unwrap().len(), offset); }
+            let early = if screen == "eink" {
+                Some(wait_persist_frame(&recorded, offset, bytes).await)
+            } else { None };
             process(
                 &app,
                 &mut current,
@@ -145,7 +149,10 @@ async fn d02_review_partial_completion_retains_latest_until_rendered() {
                 &mut AckDiagnostics::default(),
             )
             .unwrap();
-            let (new_frame, _) = wait_persist_frame(&recorded, offset, bytes).await;
+            let (new_frame, _) = match early {
+                Some(delivered) => delivered,
+                None => wait_persist_frame(&recorded, offset, bytes).await,
+            };
             assert!(new_frame.frame_id > old_frame.frame_id);
             assert_eq!(app.read().unwrap().session_mode(&token), Some("normal"));
             assert_ne!(

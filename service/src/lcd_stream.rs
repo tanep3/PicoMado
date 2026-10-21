@@ -1,21 +1,31 @@
-//! Negotiated LCD video: one current frame plus one replaceable latest frame.
+//! Negotiated image delivery: one current frame plus one replaceable latest frame.
 //! No per-frame persistence, and application drawing ACKs never grant credit.
 
 use crate::{FrameToken, SessionToken};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::watch;
 
 pub const SOCKET_SEND_BUFFER_BYTES: usize = 32 * 1024;
 pub const WEBSOCKET_WRITE_BUFFER_BYTES: usize = 32 * 1024;
 pub const MAX_FPS: u32 = 30;
+const ORDINARY_STARTED_CAP: usize = 16;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeliveryKind {
+    Video,
+    Ordinary,
+}
 
 #[derive(Clone, Debug)]
 pub struct VideoFrame {
     pub token: FrameToken,
+    pub delivery: DeliveryKind,
     pub fps: u32,
     pub sequence: u64,
     pub generation: u64,
     pub mode: &'static str,
+    pub eink_refresh: Option<crate::protocol::EinkRefresh>,
     pub pixels: Arc<Vec<u8>>,
 }
 
@@ -26,6 +36,8 @@ pub struct VideoSlot {
     pub last_reported: u64,
     pub first_issued: u64,
     pub generation: u64,
+    /// Exact ordinary frame IDs started by the writer, not merely published.
+    pub ordinary_started: VecDeque<u64>,
 }
 
 impl VideoSlot {
@@ -37,6 +49,7 @@ impl VideoSlot {
             last_reported: 0,
             first_issued: 0,
             generation: 0,
+            ordinary_started: VecDeque::new(),
         }
     }
     pub fn publish(&mut self, frame: VideoFrame) {
@@ -52,10 +65,23 @@ impl VideoSlot {
         }
     }
     pub fn clear(&mut self) {
+        self.ordinary_started.clear();
         if let Some(_old)=self.latest.send_replace(None) {
             #[cfg(feature="stream-diagnostics")]
             crate::diagnostics::event(crate::diagnostics::Kind::Clear,_old.token.session_epoch,_old.token.frame_id,_old.sequence,_old.generation,std::sync::Arc::strong_count(&_old) as u64);
         }
+    }
+    pub fn start_ordinary(&mut self, frame: &VideoFrame) -> bool {
+        if frame.delivery != DeliveryKind::Ordinary || self.session.device_id != frame.token.device_id
+            || self.session.incarnation != frame.token.incarnation
+            || self.session.session_epoch != frame.token.session_epoch
+            || !self.latest.borrow().as_ref().is_some_and(|current| current.token == frame.token)
+        { return false; }
+        if !self.ordinary_started.contains(&frame.token.frame_id) {
+            if self.ordinary_started.len() == ORDINARY_STARTED_CAP { self.ordinary_started.pop_front(); }
+            self.ordinary_started.push_back(frame.token.frame_id);
+        }
+        true
     }
 }
 
@@ -81,15 +107,15 @@ impl VideoTransfer {
             crate::protocol::encode_observed(&WireMessage::FrameStart {
                 token: self.frame.token.clone(),
                 mode: Some(self.frame.mode.into()),
-                eink_refresh: None,
-                stream: Some(StreamFrame {
+                eink_refresh: self.frame.eink_refresh.clone(),
+                stream: (self.frame.delivery == DeliveryKind::Video).then_some(StreamFrame {
                     fps: self.frame.fps,
                     sequence: self.frame.sequence,
                     generation: self.frame.generation,
                 }),
-                width: 160,
-                height: 80,
-                format: "rgb565be".into(),
+                width: if self.frame.pixels.len() == crate::eink::FRAME_BYTES { 250 } else { 160 },
+                height: if self.frame.pixels.len() == crate::eink::FRAME_BYTES { 122 } else { 80 },
+                format: if self.frame.pixels.len() == crate::eink::FRAME_BYTES { "mono1" } else { "rgb565be" }.into(),
                 byte_len: self.frame.pixels.len() as u32,
                 crc32: crc32fast::hash(&self.frame.pixels),
             },self.cause)?
@@ -124,12 +150,29 @@ mod tests {
                 screen_owner_epoch: 1,
                 frame_id: id,
             },
+            delivery: DeliveryKind::Video,
             fps,
             sequence: id,
             generation: 1,
             mode: "normal",
+            eink_refresh: None,
             pixels: Arc::new(vec![id as u8; 25_600]),
         }
+    }
+    #[test]
+    fn started_ordinary_ids_follow_the_current_display_epoch() {
+        let session = SessionToken { device_id: "lcd".into(), incarnation: 1, session_epoch: 1 };
+        let mut slot = VideoSlot::new(session);
+        let mut old = frame(1, 0);
+        old.delivery = DeliveryKind::Ordinary;
+        slot.publish(old.clone());
+        let mut current = frame(2, 0);
+        current.delivery = DeliveryKind::Ordinary;
+        current.token.display_epoch = 2;
+        slot.publish(current.clone());
+        assert!(!slot.start_ordinary(&old));
+        assert!(slot.start_ordinary(&current));
+        assert_eq!(slot.ordinary_started.iter().copied().collect::<Vec<_>>(), vec![2]);
     }
     #[test]
     fn latest_slots_skip_overload_and_finish_started_frames_at_6_24_30_fps() {

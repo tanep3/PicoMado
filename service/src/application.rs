@@ -838,6 +838,9 @@ impl App {
         if bytes.len() != crate::protocol::LCD_FRAME_BYTES {
             return Err(AppError::Invalid("invalid LCD frame length"));
         }
+        if self.supports_latest_delivery(token) {
+            return self.queue_lcd_latest(token, Some(plugin), bytes);
+        }
         if self.frame_assets.len() >= 128 {
             return Err(AppError::Conflict("transient frame asset limit"));
         }
@@ -848,6 +851,50 @@ impl App {
         let frame = self.request_frame(token, plugin, &handle)?;
         let bytes = self.compose_lcd_frame(&token.device_id, bytes);
         self.frame_assets.insert(handle, Arc::new(bytes));
+        Ok(frame)
+    }
+
+    /// Ordinary images use the existing bounded writer slot. Pico still
+    /// sends both legacy ACKs, but neither ACK grants another send.
+    fn queue_lcd_latest(
+        &mut self,
+        token: &SessionToken,
+        plugin: Option<&str>,
+        pixels: Vec<u8>,
+    ) -> Result<FrameToken, AppError> {
+        let d = self.runtime.world.devices.get(&token.device_id).ok_or(AppError::NotFound)?;
+        if !session_current(d, token) || d.owner != Owner::Remote
+            || !matches!(d.mode, Mode::Normal | Mode::Sub)
+            || d.selected.as_deref() != plugin
+            || (plugin.is_none() && d.mode != Mode::Normal)
+            || pixels.len() != crate::protocol::LCD_FRAME_BYTES
+        {
+            return Err(AppError::Conflict("LCD image no longer selected"));
+        }
+        self.subscribe_lcd_video(token).ok_or(AppError::Conflict("LCD latest unavailable"))?;
+        let frame_id = {
+            let mut counter = self.frame_counter.lock().map_err(|_| AppError::Conflict("frame allocator unavailable"))?;
+            let id = *counter;
+            *counter = counter.checked_add(1).ok_or(AppError::Conflict("frame counter exhausted"))?;
+            id
+        };
+        let d = &self.runtime.world.devices[&token.device_id];
+        let frame = FrameToken {
+            device_id: token.device_id.clone(), incarnation: d.incarnation,
+            session_epoch: d.session_epoch, display_epoch: d.display_epoch,
+            screen_owner_epoch: d.screen_owner_epoch, frame_id,
+        };
+        let eink_refresh = self.frame_eink_refresh(&frame);
+        let pixels = Arc::new(self.compose_lcd_frame(&token.device_id, pixels));
+        let slot = self.video_slots.get(&token.device_id).ok_or(AppError::Conflict("LCD latest unavailable"))?;
+        let mut slot = slot.lock().map_err(|_| AppError::Conflict("LCD latest unavailable"))?;
+        if slot.session != *token { return Err(AppError::Conflict("stale LCD latest slot")); }
+        slot.publish(crate::lcd_stream::VideoFrame {
+            token: frame.clone(), delivery: crate::lcd_stream::DeliveryKind::Ordinary,
+            fps: 0, sequence: frame_id, generation: 0,
+            mode: if d.mode == Mode::Sub { "sub" } else { "normal" }, eink_refresh, pixels,
+        });
+        self.runtime.world.next_frame_id = self.runtime.world.next_frame_id.max(frame_id + 1);
         Ok(frame)
     }
 
@@ -1150,7 +1197,7 @@ impl App {
         if !session_current(device, token)
             || device.owner != Owner::Remote
             || !matches!(device.mode, Mode::Normal | Mode::Sub)
-            || device.pending_frame_id.is_some()
+            || (device.pending_frame_id.is_some() && !self.supports_latest_delivery(token))
         {
             return Ok(());
         }
@@ -1202,7 +1249,7 @@ impl App {
                 if !d.online
                     || d.owner != Owner::Remote
                     || d.mode != Mode::Normal
-                    || d.pending_frame_id.is_some()
+                    || (d.pending_frame_id.is_some() && !self.supports_latest_delivery(&crate::session_token(id, d)))
                 {
                     return None;
                 }
@@ -1227,6 +1274,10 @@ impl App {
     }
 
     fn queue_logo_frame(&mut self, token: &SessionToken) -> Result<(), AppError> {
+        if self.supports_latest_delivery(token) {
+            self.queue_lcd_latest(token, None, crate::lcd_text::logo_frame())?;
+            return Ok(());
+        }
         if self.frame_assets.len() >= 128 {
             return Err(AppError::Conflict("transient frame asset limit"));
         }
@@ -1479,11 +1530,19 @@ impl App {
             })
     }
 
+    pub fn supports_latest_delivery(&self, token: &SessionToken) -> bool {
+        self.supports_lcd_push(token) || self.runtime.world.devices.get(&token.device_id).is_some_and(|d|
+            session_current(d, token)
+                && d.capabilities.contains("eink")
+                && !d.capabilities.contains("lcd")
+                && d.capabilities.contains(crate::protocol::FRAME_BYTES_CAPABILITY))
+    }
+
     pub fn subscribe_lcd_video(
         &mut self,
         token: &SessionToken,
     ) -> Option<tokio::sync::watch::Receiver<Option<Arc<crate::lcd_stream::VideoFrame>>>> {
-        if !self.supports_lcd_push(token) {
+        if !self.supports_latest_delivery(token) {
             return None;
         }
         let slot = self
@@ -1504,8 +1563,16 @@ impl App {
             .get(&frame.token.device_id)
             .is_some_and(|d| {
                 frame_current(d, &frame.token)
-                    && self.supports_lcd_push(&crate::session_token(&frame.token.device_id, d))
+                    && self.supports_latest_delivery(&crate::session_token(&frame.token.device_id, d))
+                    && (frame.delivery == crate::lcd_stream::DeliveryKind::Ordinary || self.supports_lcd_push(&crate::session_token(&frame.token.device_id, d)))
             })
+    }
+
+    pub fn start_lcd_latest_send(&self, frame: &crate::lcd_stream::VideoFrame) -> bool {
+        if frame.delivery != crate::lcd_stream::DeliveryKind::Ordinary || !self.lcd_video_is_current(frame) { return false; }
+        self.video_slots.get(&frame.token.device_id)
+            .and_then(|slot| slot.lock().ok().map(|mut slot| slot.start_ordinary(frame)))
+            .unwrap_or(false)
     }
 
     pub(super) fn queue_lcd_video(&mut self,session:&SessionToken,fps:u32,sequence:u64,generation:u64,pixels:Vec<u8>)->Result<(),AppError>{
@@ -1524,7 +1591,7 @@ impl App {
         let slot=self.video_slots.get(&session.device_id).ok_or(AppError::Conflict("video slot unavailable"))?;
         let mut slot=slot.lock().map_err(|_|AppError::Conflict("video slot unavailable"))?;
         if slot.session!=*session{return Err(AppError::Conflict("stale video slot"));}
-        slot.publish(crate::lcd_stream::VideoFrame{token,fps,sequence,generation,mode,pixels});Ok(())
+        slot.publish(crate::lcd_stream::VideoFrame{token,delivery:crate::lcd_stream::DeliveryKind::Video,fps,sequence,generation,mode,eink_refresh:None,pixels});Ok(())
     }
 
     pub fn lcd_stream_status(&mut self, token: &FrameToken, generation: u64) -> bool {
@@ -1539,6 +1606,7 @@ impl App {
         if slot.session.incarnation != token.incarnation
             || slot.session.session_epoch != token.session_epoch
             || slot.generation != generation
+            || !slot.latest.borrow().as_ref().is_some_and(|f| f.delivery == crate::lcd_stream::DeliveryKind::Video)
             || token.frame_id < slot.first_issued
             || token.frame_id > slot.last_issued
             || token.frame_id < slot.last_reported
@@ -1558,6 +1626,29 @@ impl App {
         d.last_rendered_frame = Some(token.frame_id);
         self.transient_changed |= self.transient_only && changed;
         // Observational counters are transient; never enter SQLite or grant sending credit.
+        true
+    }
+
+    /// An ordinary LCD or E-ink still reports ACKs. Keep the
+    /// observation monotonic without turning it into delivery credit.
+    pub fn lcd_latest_ack(&mut self, token: &FrameToken, rendered: bool) -> bool {
+        let Some(d) = self.runtime.world.devices.get(&token.device_id) else { return false; };
+        if !frame_current(d, token) || !self.supports_latest_delivery(&crate::session_token(&token.device_id, d)) {
+            return false;
+        }
+        let Some(slot) = self.video_slots.get(&token.device_id) else { return false; };
+        let Ok(slot) = slot.lock() else { return false; };
+        if slot.session.incarnation != token.incarnation || slot.session.session_epoch != token.session_epoch
+            || slot.generation != 0
+            || !slot.latest.borrow().as_ref().is_some_and(|f| f.delivery == crate::lcd_stream::DeliveryKind::Ordinary)
+            || !slot.ordinary_started.contains(&token.frame_id)
+        { return false; }
+        let d = self.runtime.world.devices.get_mut(&token.device_id).expect("checked");
+        let previous = if rendered { d.last_rendered_frame } else { d.last_received_frame };
+        if previous.is_some_and(|id| id >= token.frame_id) { return false; }
+        d.last_received_frame = Some(d.last_received_frame.map_or(token.frame_id, |id| id.max(token.frame_id)));
+        if rendered { d.last_rendered_frame = Some(token.frame_id); }
+        self.transient_changed |= self.transient_only;
         true
     }
 
@@ -1744,7 +1835,7 @@ impl App {
         }
         let today = self.clock.today_jst();
         self.observe_plugin_date(&token, &today)?;
-        if self.supports_lcd_push(&token){self.subscribe_lcd_video(&token);}
+        if self.supports_latest_delivery(&token){self.subscribe_lcd_video(&token);}
         self.queue_selected_cached_frame(&token)?;
         eprintln!(
             "picomado device_hello id={} incarnation={} session_epoch={}",
@@ -3194,6 +3285,25 @@ mod clock_tests {
         let app = App::open(&path).unwrap();
         assert_eq!(app.view().order_revision, rev);
         assert!(!app.runtime.world.devices["old"].enabled.contains("clock"));
+    }
+    #[test]
+    fn current_eink_clock_latest_preserves_refresh_metadata_on_wire() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now = Arc::new(Clock(AtomicI64::new(1_792_336_799)));
+        let mut app = App::open_with_clock(&tmp.path().join("db"), now).unwrap();
+        let token = app.hello("paper", ["eink", crate::protocol::FRAME_BYTES_CAPABILITY,
+            crate::protocol::EINK_CLOCK_CAPABILITY].into_iter().map(str::to_owned).collect(), 1).unwrap();
+        select_clock(&mut app, &token);
+        let rx = app.subscribe_lcd_video(&token).unwrap();
+        let frame = rx.borrow().as_ref().unwrap().clone();
+        assert_eq!(frame.delivery, crate::lcd_stream::DeliveryKind::Ordinary);
+        assert_eq!(frame.pixels.len(), crate::eink::FRAME_BYTES);
+        assert_eq!(frame.eink_refresh.as_ref().unwrap().full_refresh_minutes, 10);
+        let mut transfer = crate::lcd_stream::VideoTransfer::new(frame);
+        let start = transfer.next_packet().unwrap().unwrap();
+        let decoded = crate::protocol::Decoder::default().push(&start).unwrap();
+        assert!(matches!(&decoded[0], crate::protocol::WireMessage::FrameStart{
+            width:250,height:122,format,eink_refresh:Some(_),stream:None,..} if format == "mono1"));
     }
     #[test]
     fn clock_refresh_metadata_is_negotiated_and_isolated_from_lcd_and_other_plugins() {

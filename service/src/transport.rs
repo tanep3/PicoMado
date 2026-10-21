@@ -315,7 +315,7 @@ fn process_inner(
             if !guard.frame_ack_within_known_generations(&frame) {
                 return Err("invalid_ack_token");
             }
-            if !guard
+            if !guard.lcd_latest_ack(&frame, false) && !guard
                 .terminal_event(Event::ReceiptAck {
                     token: frame.clone(),
                 })
@@ -371,7 +371,7 @@ fn process_inner(
             if !guard.frame_ack_within_known_generations(&frame) {
                 return Err("invalid_ack_token");
             }
-            if !guard
+            if !guard.lcd_latest_ack(&frame, true) && !guard
                 .terminal_event(Event::RenderedAck {
                     token: frame.clone(),
                 })
@@ -897,11 +897,15 @@ async fn writer_loop_with_progress<S>(
                 let latest=video_rx.as_mut().and_then(|r|r.borrow_and_update().clone());
                 if let Some(frame)=latest {
                     if crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).is_ok_and(|a|a.lcd_video_is_current(&frame)) {
+                        if frame.delivery == crate::lcd_stream::DeliveryKind::Ordinary
+                            && !crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer)
+                                .is_ok_and(|a| a.start_lcd_latest_send(&frame))
+                        { continue; }
                         // A new video supersedes the initial static placeholder;
                         // no application ACK may hold streaming or its connection.
                         awaiting_render=None;
                         let diagnostic_log=crate::diagnostics::mark();
-                        eprintln!("picomado stream_frame_start id={} frame_id={} sequence={} fps={}",frame.token.device_id,frame.token.frame_id,frame.sequence,frame.fps);
+                        eprintln!("picomado latest_frame_start id={} frame_id={} kind={:?} sequence={} fps={}",frame.token.device_id,frame.token.frame_id,frame.delivery,frame.sequence,frame.fps);
                         crate::diagnostics::duration(crate::diagnostics::Kind::LogIo,diagnostic_log,0,0,0);
                         crate::diagnostics::event(crate::diagnostics::Kind::FrameStart,frame.token.session_epoch,frame.token.frame_id,frame.sequence,frame.generation,0);
                         #[cfg(feature="boundary-observation")]
@@ -1356,6 +1360,104 @@ mod tests {
         ws.close(None).await.unwrap();
         server.abort();
         let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn real_websocket_ordinary_lcd_sends_next_frame_without_render_ack() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(&temp.path().join("state.db"))));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn({let app=app.clone();async move {axum::serve(listener,web::router(app)).await.unwrap()}});
+        let (mut ws,_) = tokio_tungstenite::connect_async(format!("ws://{addr}/device")).await.unwrap();
+        ws.send(ClientMessage::Binary(encode(&WireMessage::Hello{
+            device_id:"push-static".into(),screen_owner_epoch:1,
+            capabilities:vec!["lcd".into(),crate::protocol::FRAME_BYTES_CAPABILITY.into(),crate::protocol::LCD_PUSH_CAPABILITY.into()],
+        }).unwrap().into())).await.unwrap();
+        let session=match read_wire(&mut ws).await {
+            WireMessage::Welcome{incarnation,session_epoch}=>SessionToken{device_id:"push-static".into(),incarnation,session_epoch},
+            other=>panic!("{other:?}"),
+        };
+        assert!(matches!(read_wire(&mut ws).await,WireMessage::Settings{..}));
+        let mut seen=Vec::new();
+        for value in [1u8,2u8] {
+            let token=crate::diagnostics::lock(&app,crate::diagnostics::Domain::Writer).unwrap()
+                .queue_lcd_frame(&session,"youtube",vec![value;25600]).unwrap();
+            let mut assembler=FrameAssembler::default();
+            let (received,pixels)=tokio::time::timeout(Duration::from_secs(3),async {
+                loop {
+                    let message=read_wire(&mut ws).await;
+                    if let WireMessage::FrameStart{stream,..}=&message {assert!(stream.is_none());}
+                    if matches!(message,WireMessage::FrameStart{..}|WireMessage::FrameChunk{..}) {
+                        if let Some(frame)=assembler.accept(message).unwrap(){break frame;}
+                    }
+                }
+            }).await.unwrap();
+            assert_eq!(received,token);
+            assert_eq!(pixels.len(),25600);
+            seen.push(token);
+        }
+        assert!(seen[1].frame_id>seen[0].frame_id);
+        let view=crate::diagnostics::lock(&app,crate::diagnostics::Domain::Writer).unwrap().view();
+        assert_eq!(view.devices[0].last_rendered_frame,None,"next send did not use ACK credit");
+        assert!(!crate::diagnostics::lock(&app,crate::diagnostics::Domain::Writer).unwrap().frame_waiting_for_render(&session,seen[1].frame_id));
+        ws.send(ClientMessage::Binary(encode(&WireMessage::RenderedAck{token:seen[1].clone()}).unwrap().into())).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2),async {
+            loop {
+                if crate::diagnostics::lock(&app,crate::diagnostics::Domain::Writer).unwrap().view().devices[0].last_rendered_frame==Some(seen[1].frame_id){break;}
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
+        ws.send(ClientMessage::Binary(encode(&WireMessage::RenderedAck{token:seen[0].clone()}).unwrap().into())).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(crate::diagnostics::lock(&app,crate::diagnostics::Domain::Writer).unwrap().view().devices[0].last_rendered_frame,Some(seen[1].frame_id));
+        ws.close(None).await.unwrap();server.abort();let _=server.await;
+    }
+
+    #[tokio::test]
+    async fn real_websocket_eink_sends_next_mono_frame_without_render_ack() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(&temp.path().join("state.db"))));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn({let app=app.clone();async move {axum::serve(listener,web::router(app)).await.unwrap()}});
+        let (mut ws,_) = tokio_tungstenite::connect_async(format!("ws://{addr}/device")).await.unwrap();
+        ws.send(ClientMessage::Binary(encode(&WireMessage::Hello{
+            device_id:"paper-latest".into(),screen_owner_epoch:1,
+            capabilities:vec!["eink".into(),crate::protocol::FRAME_BYTES_CAPABILITY.into(),crate::protocol::EINK_CLOCK_CAPABILITY.into()],
+        }).unwrap().into())).await.unwrap();
+        let session=match read_wire(&mut ws).await {
+            WireMessage::Welcome{incarnation,session_epoch}=>SessionToken{device_id:"paper-latest".into(),incarnation,session_epoch},
+            other=>panic!("{other:?}"),
+        };
+        assert!(matches!(read_wire(&mut ws).await,WireMessage::Settings{..}));
+        let mut ids=Vec::new();
+        for value in [1u8,2u8] {
+            let token=crate::diagnostics::lock(&app,crate::diagnostics::Domain::Writer).unwrap()
+                .queue_lcd_frame(&session,"youtube",vec![value;25600]).unwrap();
+            let mut assembler=FrameAssembler::default();
+            let (received,pixels)=tokio::time::timeout(Duration::from_secs(3),async {
+                loop {
+                    let message=read_wire(&mut ws).await;
+                    if let WireMessage::FrameStart{stream,width,height,format,..}=&message {
+                        assert!(stream.is_none());
+                        assert_eq!((*width,*height,format.as_str()),(250,122,"mono1"));
+                    }
+                    if matches!(message,WireMessage::FrameStart{..}|WireMessage::FrameChunk{..}) {
+                        if let Some(frame)=assembler.accept(message).unwrap(){break frame;}
+                    }
+                }
+            }).await.unwrap();
+            assert_eq!(received,token);
+            assert_eq!(pixels.len(),crate::eink::FRAME_BYTES);
+            ids.push(token);
+        }
+        assert!(ids[1].frame_id>ids[0].frame_id);
+        let guard=crate::diagnostics::lock(&app,crate::diagnostics::Domain::Writer).unwrap();
+        assert_eq!(guard.view().devices[0].last_rendered_frame,None);
+        assert!(!guard.frame_waiting_for_render(&session,ids[1].frame_id));
+        drop(guard);
+        ws.close(None).await.unwrap();server.abort();let _=server.await;
     }
 
     #[test]

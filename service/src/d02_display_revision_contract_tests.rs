@@ -197,10 +197,10 @@ async fn d02_review_unrelated_enable_revision_preserves_latest_delivery() {
                     .as_deref(),
                 Some("weather")
             );
-            assert!(app
+            assert_eq!(app
                 .read()
                 .unwrap()
-                .frame_waiting_for_render(&token, new_frame.frame_id));
+                .frame_waiting_for_render(&token, new_frame.frame_id), screen == "lcd");
             assert!(!app
                 .read()
                 .unwrap()
@@ -215,6 +215,7 @@ async fn d02_review_unrelated_enable_revision_preserves_latest_delivery() {
                     .dataset_id,
                 first.dataset_id
             );
+            let newest_id = new_frame.frame_id;
             persist_ack(&app, &mut current, new_frame);
             let mut notices = app.read().unwrap().dispatch_notifications();
             notices.borrow_and_update();
@@ -226,7 +227,8 @@ async fn d02_review_unrelated_enable_revision_preserves_latest_delivery() {
             )
             .unwrap();
             assert!(!notices.has_changed().unwrap());
-            assert_eq!(recorded.lock().unwrap().len(), new_end);
+            if screen == "lcd" { assert_eq!(recorded.lock().unwrap().len(), new_end); }
+            else { assert_eq!(app.read().unwrap().view().devices[0].last_rendered_frame, Some(newest_id)); }
             tx.send(WriterCommand::Stop).await.unwrap();
             assert_eq!(writer.await.unwrap(), "requested_stop");
         }

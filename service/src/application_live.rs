@@ -114,7 +114,7 @@ impl App {
         &self,
         token: &SessionToken,
     ) -> Option<tokio::sync::watch::Receiver<Option<Arc<crate::lcd_stream::VideoFrame>>>> {
-        if !self.supports_lcd_push(token) {
+        if !self.supports_latest_delivery(token) {
             return None;
         }
         let slot = self.video_slots.get(&token.device_id)?.lock().ok()?;
@@ -302,16 +302,15 @@ impl App {
                 if self.maintenance_blocks(d.selected.as_deref()) {
                     return None;
                 }
-                d.pending_frame_id
-                    .is_none()
-                    .then(|| crate::session_token(id, d))
+                let token = crate::session_token(id, d);
+                (d.pending_frame_id.is_none() || self.supports_latest_delivery(&token))
+                    .then_some(token)
             })
             .collect();
         for token in ready {
             self.queue_selected_cached_frame(&token)?;
-            if self.runtime.world.devices[&token.device_id]
-                .pending_frame_id
-                .is_some()
+            if self.supports_latest_delivery(&token)
+                || self.runtime.world.devices[&token.device_id].pending_frame_id.is_some()
             {
                 self.content_refresh_debt.remove(&token.device_id);
             }

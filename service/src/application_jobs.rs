@@ -404,7 +404,7 @@ impl App {
                 continue;
             };
             let push = self.supports_lcd_push(&ctx.token) && spec.fps <= crate::lcd_stream::MAX_FPS;
-            if !push && !self.streaming_ready(device) {
+            if !push && !self.supports_latest_delivery(&ctx.token) && !self.streaming_ready(device) {
                 continue;
             }
             let target = PlaybackTarget {
@@ -539,6 +539,8 @@ impl App {
                     offer.spec.generation,
                     pixels.clone(),
                 )?;
+            } else if self.supports_latest_delivery(&ctx.token) {
+                self.queue_lcd_frame(&ctx.token, &offer.plugin, pixels.clone())?;
             } else {
                 if !self.streaming_ready(device) {
                     continue;
@@ -633,7 +635,7 @@ mod tests {
         }
     }
     #[test]
-    fn negotiated_video_skips_ack_and_persistence_but_old_lcd_and_eink_keep_credit() {
+    fn negotiated_video_and_eink_latest_skip_ack_but_old_lcd_keeps_credit() {
         for (cap, push) in [("lcd", true), ("lcd", false), ("eink", false)] {
             let temp = tempfile::tempdir().unwrap();
             let path = temp.path().join("state.db");
@@ -664,7 +666,7 @@ mod tests {
                     .unwrap(),
                 1
             );
-            if !push {
+            if !push && cap != "eink" {
                 assert!(app.playback_offers().is_empty());
                 continue;
             }
@@ -680,12 +682,18 @@ mod tests {
             assert_eq!(app.pending_effects().len(), effects);
             let mut rx = app.subscribe_lcd_video(&session).unwrap();
             let frame = rx.borrow_and_update().clone().unwrap();
-            assert_eq!(frame.sequence, 100);
+            if cap == "eink" {
+                assert_eq!(frame.delivery, crate::lcd_stream::DeliveryKind::Ordinary);
+                assert_eq!(frame.pixels.len(), crate::eink::FRAME_BYTES);
+                assert!(!app.lcd_stream_status(&frame.token, 0));
+            } else {
+                assert_eq!(frame.sequence, 100);
+            }
             assert!(!app.lcd_stream_status(&frame.token, 2));
             let mut future = frame.token.clone();
             future.frame_id += 1;
             assert!(!app.lcd_stream_status(&future, 1));
-            assert!(app.lcd_stream_status(&frame.token, 1));
+            if cap == "lcd" { assert!(app.lcd_stream_status(&frame.token, 1)); }
             assert_eq!(body(), before, "status is observational");
             app.terminal_event(Event::Next {
                 token: session.clone(),

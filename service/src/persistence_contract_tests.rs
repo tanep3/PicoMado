@@ -170,9 +170,10 @@ async fn sqlite_wait_preserves_published_state_while_other_video_and_http_progre
                     }
                 }));
             let worker_app = app.clone();
+            let worker_token = a.clone();
             let (finished, result) = std::sync::mpsc::sync_channel(1);
             let worker = std::thread::spawn(move || {
-                let outcome = { worker_app.lock().unwrap().button(&a, ButtonAction::Down) };
+                let outcome = { worker_app.lock().unwrap().button(&worker_token, ButtonAction::Down) };
                 finished.send(outcome).unwrap();
             });
             tokio::task::spawn_blocking(move || {
@@ -290,22 +291,29 @@ async fn sqlite_wait_preserves_published_state_while_other_video_and_http_progre
                     .await
                     .unwrap()
                     .unwrap();
-                let (token, handle) = view
-                    .pending_effects()
-                    .into_iter()
-                    .find_map(|(_, effect)| match effect {
-                        Effect::SendFrame {
-                            token,
-                            asset_handle,
-                        } if token.device_id == "a" => Some((token, asset_handle)),
-                        _ => None,
-                    })
-                    .unwrap();
-                assert!(view.frame_is_current(&token));
-                assert!(
-                    view.frame_asset(&handle).is_some(),
-                    "publication includes prepared pixels"
-                );
+                if profile != "legacy" {
+                    drop(view);
+                    let mut guard = app.lock().unwrap();
+                    let rx = guard.subscribe_lcd_video(&a).unwrap();
+                    let frame = rx.borrow().as_ref().unwrap().clone();
+                    assert_eq!(frame.delivery, crate::lcd_stream::DeliveryKind::Ordinary);
+                    assert_eq!(frame.pixels.len(), if profile == "eink" { 3813 } else { 25600 });
+                    assert!(guard.lcd_video_is_current(&frame));
+                } else {
+                    let (token, handle) = view
+                        .pending_effects()
+                        .into_iter()
+                        .find_map(|(_, effect)| match effect {
+                            Effect::SendFrame {
+                                token,
+                                asset_handle,
+                            } if token.device_id == "a" => Some((token, asset_handle)),
+                            _ => None,
+                        })
+                        .unwrap();
+                    assert!(view.frame_is_current(&token));
+                    assert!(view.frame_asset(&handle).is_some(), "publication includes prepared pixels");
+                }
             } else {
                 assert!(!notifications.has_changed().unwrap());
                 assert_eq!(

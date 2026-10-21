@@ -77,7 +77,7 @@ fn composition() -> crate::plugins::PluginSet {
     set
 }
 #[test]
-fn new_static_and_video_plugins_use_unchanged_application_and_transport_contracts() {
+fn new_static_and_video_plugins_use_bounded_latest_delivery() {
     let temp = tempfile::tempdir().unwrap();
     let db = temp.path().join("state.db");
     let mut app = App::open_with_plugin_set(
@@ -101,11 +101,30 @@ fn new_static_and_video_plugins_use_unchanged_application_and_transport_contract
         Some("fixture-static")
     );
     app.queue_selected_cached_frame(&token).unwrap();
-    assert!(app
+    assert!(!app
         .pending_effects()
         .iter()
         .any(|(_, e)| matches!(e, Effect::SendFrame { .. })));
+    let mut rx = app.subscribe_lcd_video(&token).unwrap();
+    let static_frame = rx.borrow_and_update().as_ref().unwrap().clone();
+    assert_eq!(static_frame.delivery, crate::lcd_stream::DeliveryKind::Ordinary);
+    assert!(!app.lcd_latest_ack(&static_frame.token, true), "publication is not a send");
+    assert!(app.start_lcd_latest_send(&static_frame));
+    assert!(app.lcd_latest_ack(&static_frame.token, true));
+    assert_eq!(app.view().devices[0].last_rendered_frame, Some(static_frame.token.frame_id));
+    let skipped = app.queue_lcd_frame(&token, "fixture-static", vec![4; 25600]).unwrap();
+    let latest = app.queue_lcd_frame(&token, "fixture-static", vec![5; 25600]).unwrap();
+    let next = rx.borrow_and_update().as_ref().unwrap().clone();
+    assert_eq!(next.token, latest);
+    assert!(!app.lcd_latest_ack(&skipped, true), "unsent replacement cannot claim a draw");
+    let mut transfer = crate::lcd_stream::VideoTransfer::new(next.clone());
+    let start = crate::protocol::Decoder::default().push(&transfer.next_packet().unwrap().unwrap()).unwrap();
+    assert!(matches!(start[0], crate::protocol::WireMessage::FrameStart { stream: None, .. }));
+    assert!(app.start_lcd_latest_send(&next));
+    assert!(app.lcd_latest_ack(&latest, true));
+    assert!(!app.lcd_latest_ack(&static_frame.token, true), "late ACK cannot roll status back");
     app.button(&token, ButtonAction::Down).unwrap();
+    assert!(!app.lcd_latest_ack(&latest, true), "old epoch cannot update display");
     assert_eq!(app.playback_offers()[0].plugin, "fixture-video");
     let rx = app.subscribe_lcd_video(&token).unwrap();
     app.queue_lcd_video(&token, 6, 0, 1, vec![3; 25600])
@@ -201,10 +220,12 @@ fn causes_stay_with_exact_frame_and_view_across_overlapping_inputs() {
     let mut transfer = crate::lcd_stream::VideoTransfer::new_observed(
         Arc::new(crate::lcd_stream::VideoFrame {
             token: frame_a.clone(),
+            delivery: crate::lcd_stream::DeliveryKind::Video,
             fps: 6,
             sequence: 1,
             generation: 1,
             mode: "normal",
+            eink_refresh: None,
             pixels: Arc::new(vec![3; 25600]),
         }),
         Some(a),
