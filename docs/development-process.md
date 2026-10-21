@@ -22,3 +22,13 @@ A change ID records cause, introduction and escape causes, responsibility, deliv
 Direct `cmake`, `cargo`, `picotool load`, shell file copy, edits to the gate or arbitrary casts/reflection can bypass software conventions. Gate validation is fail-closed on the supported path, not an OS security boundary. C struct types and Rust private fields prohibit ordinary substitution; Python needs static adapter restrictions plus runtime validation of untrusted data. The specification can still be wrong. Physical timing, RF and actual device behavior remain runtime evidence.
 
 Future work starts at the recorded active work root and uses this entry for both parent/worker. Existing accepted artifacts are retained; new enforcement does not retrospectively label them faulty. Independent acceptance and parent closure remain pending until their real evidence is added.
+
+## PDCA: YouTubeのACK非依存化という当初仮説 <a id="pdca-youtube-ack"></a>
+
+これは既存の問題記録に調査の比較軸を戻す是正であり、新しい管理システムや開始条件ではない。ユーザーは「最初に提示した仮説を未検証のまま無視し、約2日間調査した」と指摘した。期間全体の会話経緯を推測せず、以下を保存コード・記録と対応付ける。
+
+- **元仮説と根拠:** 既にYouTubeで導入済みのACK非依存配信を通常LCDにも適用すれば、ACK待ちが後続画像の送出許可を止める経路を除けるのではないか。既存実装 `8e41fd6` の動画pushと、通常画像の `RequestFrame` / `pending_frame_id` / `RenderedAck` 待ちが比較軸である。仮説を無条件に正解とはせず、その効果を検証する。
+- **前提の脱落と見逃し:** [既存調査結果](changes/OBS-20261021-02-local-result.md)の「Repair direction, conditional on location」では欠落場所の特定を優先し、ACK非依存化を未検証の大きな緩和策として後順位に置いた。パケット欠落の原因調査と、既存動画との差分による表示進行の改善を別々に検証せず、後者を未完了の仮説として調査・委任へ引き継がなかった。観測の進展だけでは、この仮説を検証したことにならない。
+- **今回確認された差分:** 動画pushはRenderedAckによる画像ごとの送信許可を待たず、送信中1枚と未送信最新1枚に制限する。通常LCDは旧契約でpending frameのRenderedAckを待つ。採取済み2frameは入力から描画完了が161.183 / 143.538 msでも報告到着が遅れていたため、描画完了とサーバの送信許可を分ける根拠がある。一方、後続ボタン通知自体が欠落TCP範囲の後ろにあれば順序待ちは残る。ACK非依存化はパケット欠落そのものの修復とは区別する。
+- **是正:** [比較から定めたサーバ契約](changes/LCD-ACKLESS-20261021.md)は仕様コミット `19c6681` で固定済み。対応能力を持つ通常LCDにも既存の有界latest配信を適用し、ACKを送信許可から観測情報へ分ける実装は別担当が進行中である。本記録を調査と委任の共通参照とし、方向変更時にも元仮説の支持・反証・未検証、その根拠と残る比較を残す。誤判断は原因とこの引継ぎ方法の是正に結び付け、次の実作業で確認する。
+- **確認済み／未完了:** 動画と通常LCDの契約差分、仕様固定、共通参照への記録は確認済み。**是正の実機効果は未確認。** 次のサーバ検証では、同じファーム・設定・操作条件でACK非依存化の前後を比較し、ACK未達・遅延時の後続画像送出、入力から実描画、描画から報告到着を分けて確認する。結果を当初仮説の支持・反証・未検証へ戻す。ローカル試験や本記録の更新だけで効果確認済みとはしない。
