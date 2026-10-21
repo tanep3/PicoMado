@@ -1,0 +1,40 @@
+{
+  "trials": 6,
+  "slow": 1,
+  "fast": 5,
+  "EV1_OFF": true,
+  "source_preserved": true,
+  "headers_only_kernel_BPF": true,
+  "payload_copied_or_persisted": false,
+  "server_probe_idle": true,
+  "normal_server_PID_unchanged": true,
+  "firmware_changes": 0,
+  "server_restarts": 0,
+  "private_roots": [
+    "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/TCP-header-trials-20261021T022124Z",
+    "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/TCP-header-trials-20261021T022422Z"
+  ],
+  "slow_case": {
+    "slow_trial": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/TCP-header-trials-20261021T022422Z/trial-01",
+    "packet_to_ack_us": 70.056,
+    "first_Pi_payload_ms": [
+      1436.271217,
+      1436.275458
+    ],
+    "release_response_ms": 198.493451,
+    "input_data_seq_range": [
+      41774,
+      41847
+    ],
+    "input_payload_length": 73,
+    "clock_offset_envelope_ns": [
+      1791970815701554414,
+      1791970815701558655
+    ],
+    "clock_mapping_assumption": "RT-minus-monotonic within observed envelope; unseen clock steps not excluded",
+    "no_early_payload_observed": true
+  },
+  "validation_count": 53,
+  "capacity_design_accepted": false,
+  "capacity_RAM_shortfall": 808
+}
