@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 import os
 import pty
@@ -50,11 +51,12 @@ def fixture():
     extra = dict(trigger=dict(b='1', r='a', mode='1', o='7', g='7', m='8', flags='0'),
                  EV1=dict(b='1',on='0',sat='0',seq='0'),tx_status=dict(b='1', r='a', gen='1', active='0', n='1', ok='1',
                                 over='0', bad='0', changed='0', h='0'), tx_rows=[tx], SDK_inner=inner)
-    worker = dict(event='worker_finished', packet_stats=dict(kernel_drops=0),
+    worker = dict(event='worker_finished', packets=1, packet_stats=dict(kernel_drops=0),
                   sockets_closed=True, payload_copied=False, payload_persisted=False)
     headers = dict(complete_interval=True, payload_copied_or_persisted=False, scope_valid=True,
                    target_binding={k:ready[k] for k in ['pico_boot','host_boot','run','device','host_connection','session']},
-                   metadata_events=[worker])
+                   metadata_events=[worker],SHA256={n:hashlib.sha256(raw).hexdigest() for n,raw in
+                       [('headers.jsonl',b'{"scope_valid":true}\n'),('recvq.jsonl',b'')]})
     return [pico, host, extra, ready, headers]
 
 
@@ -271,6 +273,7 @@ class Retention(unittest.TestCase):
 
     def collect(self,f,root,calls):
         seal(f);usb,host=self.backend(f,calls)
+        (root/'headers.jsonl').write_bytes(b'{"scope_valid":true}\n');(root/'recvq.jsonl').write_bytes(b'')
         with patch.object(hc.ap,'read_pico',return_value=f[0]),patch.object(hc.ap,'read_host',return_value=f[1]),patch.object(hc.cy,'collect',return_value=f[2]['SDK_inner']):
             result=hc.collect(usb,host,f[3],root,f[4])
         return result,usb,host
@@ -289,6 +292,14 @@ class Retention(unittest.TestCase):
             saved=json.loads((root/'saved.json').read_text());(root/'pico.json').write_text('{}')
             before=len(calls)
             with self.assertRaisesRegex(ValueError,'evidence changed'):hc.release(usb,host,f[3],saved,root)
+            self.assertEqual(len(calls),before)
+
+    def test_raw_headers_are_preserved_and_checked_before_release(self):
+        with tempfile.TemporaryDirectory()as d:
+            root=Path(d);f=fixture();calls=[];_,usb,host=self.collect(f,root,calls)
+            saved=json.loads((root/'saved.json').read_text());self.assertIn('headers.jsonl',saved['hashes'])
+            (root/'headers.jsonl').unlink();before=len(calls)
+            with self.assertRaises(FileNotFoundError):hc.release(usb,host,f[3],saved,root)
             self.assertEqual(len(calls),before)
 
     def test_quality_failure_saved_without_discard_or_retry(self):

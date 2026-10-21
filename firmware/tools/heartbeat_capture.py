@@ -79,7 +79,9 @@ def header_evidence(result, packets, target, ready):
             and binding['connection'] == ready['host_connection']
             and binding['session'] == ready['session'] and binding['target'] == ready['device'],
             'header target binding mismatch')
-    return result | dict(scope_valid=all(p['scope_valid'] for p in packets),
+    workers = [x for x in result.get('metadata_events', []) if x.get('event') == 'worker_finished']
+    return result | dict(scope_valid=len(workers) == 1 and workers[0]['packets'] == len(packets)
+                         and all(p['scope_valid'] for p in packets),
                          target_binding={k: ready[k] for k in
                              ['pico_boot', 'host_boot', 'run', 'device', 'host_connection', 'session']})
 
@@ -135,8 +137,14 @@ def collect(usb, host, ready, out, headers):
         ap.persist(root / (name + '.json'), value)
     result = validate(pico, server, extra, ready, headers)
     ap.persist(root / 'quality.json', result)
-    hashes = {name: hashlib.sha256((root / (name + '.json')).read_bytes()).hexdigest()
-              for name in ['pico', 'host', 'extra', 'headers', 'quality']}
+    raw_hashes = headers.get('SHA256', {})
+    require(set(raw_hashes) == {'headers.jsonl', 'recvq.jsonl'}, 'header raw evidence manifest')
+    for name, expected_hash in raw_hashes.items():
+        path = root / name
+        require(path.stat().st_size <= 524288 and hashlib.sha256(path.read_bytes()).hexdigest() == expected_hash,
+                'header raw evidence missing/changed; retain capture')
+    names = [n + '.json' for n in ['pico', 'host', 'extra', 'headers', 'quality']] + list(raw_hashes)
+    hashes = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in names}
     ap.persist(root / 'saved.json', dict(ready=ready, hashes=hashes, pico_digest=int(pico['status']['digest'], 16),
                host_digest=server['status']['digest'], quality=result, released=False))
     return result
@@ -147,7 +155,7 @@ def release(usb, host, ready, saved, out):
     require(saved['ready'] == ready, 'saved identity mismatch')
     root = Path(out)
     require(json.loads((root / 'saved.json').read_text()) == saved, 'saved manifest changed')
-    require(all(hashlib.sha256((root / (n + '.json')).read_bytes()).hexdigest() == h
+    require(all(hashlib.sha256((root / n).read_bytes()).hexdigest() == h
                 for n, h in saved['hashes'].items()), 'saved evidence changed; retain capture')
     pb, hb, run = ready['pico_boot'], ready['host_boot'], ready['run']
     ps = one(usb, f'AP2 RELEASE {pb} {run} {saved["pico_digest"]:x}', 'ap2 status ')
