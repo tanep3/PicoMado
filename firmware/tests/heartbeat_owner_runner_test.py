@@ -283,16 +283,19 @@ class Tests(unittest.TestCase):
         self.assertEqual(sum(c.startswith('SIM STOP')for c in commands),1)
         self.assertTrue(stopped['pico_idle']and stopped['host_idle'])
     def test_same_session_monotonic_plan_is_bounded_and_saved_before_step(self):
-        plan=dict(key=1,hold_ms=150,anchor_ns=1000000000,anchor_session=9,
+        plan=dict(key=1,hold_ms=150,anchor_ns=1000000000,receipt_interval_ns=15000000000,anchor_session=9,
                   anchor_boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip().replace('-',''),
-                  step_to_gate_ms=68,input_offset_ms=548,margin_ms=200)
-        self.assertEqual(run.next_heartbeat_sim_delay(plan,1600000000)['chosen_delay_ms'],13984)
+                  gate_guard_ms=500,aim_gap_ms=200)
+        self.assertEqual(run.next_heartbeat_sim_delay(plan,1800000000)['chosen_delay_ms'],13900)
+        observed=plan|{'receipt_interval_ns':14993355000}
+        self.assertEqual(run.next_heartbeat_sim_delay(observed,1800000000)['predicted_next_HB_ns'],15993355000)
+        self.assertEqual(run.next_heartbeat_sim_delay(observed,1800000000)['chosen_delay_ms'],13893)
         with self.assertRaisesRegex(ValueError,'outside one finite job'):
             run.next_heartbeat_sim_delay(plan,900000000)
-        good,commands,_,lo,hi=self.scenario('mixed_after',sim=plan,initial_clock=1.6)
+        good,commands,_,lo,hi=self.scenario('mixed_after',sim=plan,initial_clock=1.8)
         self.assertTrue(good['complete'],good)
         step=next(c for c in commands if c.startswith('SIM STEP'))
-        self.assertEqual(int(step.split()[6],16),13984)
+        self.assertEqual(int(step.split()[6],16),13900)
         self.assertEqual((lo,hi),(1,1))
         bad,commands,_,lo,hi=self.scenario('mixed_after',sim=plan,initial_clock=.9)
         self.assertFalse(bad['complete']);self.assertEqual((lo,hi),(0,0))

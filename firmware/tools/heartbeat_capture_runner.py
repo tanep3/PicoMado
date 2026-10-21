@@ -28,17 +28,18 @@ class DTRFailure(RuntimeError):
 
 
 def next_heartbeat_sim_delay(sim, now_ns):
-    """One bounded reservation from a same-session journal monotonic anchor."""
-    target_ns=sim['anchor_ns']+15000000000
+    """One bounded reservation from two same-session host receipt timestamps."""
+    target_ns=sim['anchor_ns']+sim['receipt_interval_ns']
     hc.require(target_ns-now_ns>250000000,'predicted next heartbeat already too near/past')
-    offset_ns=(sim['step_to_gate_ms']+sim['input_offset_ms'])*1000000
-    delay_ms=round((target_ns+sim['margin_ms']*1000000-now_ns-offset_ns)/1000000)
+    delay_ms=round((target_ns+sim['aim_gap_ms']*1000000-now_ns-sim['gate_guard_ms']*1000000)/1000000)
     hc.require(0<=delay_ms<=14000 and delay_ms+sim['hold_ms']+70<15000,
                'predicted SIM delay outside one finite job')
     return dict(mode='same_session_journal',anchor_ns=sim['anchor_ns'],
+                receipt_interval_ns=sim['receipt_interval_ns'],
                 measured_at_ns=now_ns,predicted_next_HB_ns=target_ns,
-                step_to_gate_ms=sim['step_to_gate_ms'],input_offset_ms=sim['input_offset_ms'],
-                margin_ms=sim['margin_ms'],chosen_delay_ms=delay_ms,
+                gate_guard_ms=sim['gate_guard_ms'],aim_gap_ms=sim['aim_gap_ms'],
+                chosen_delay_ms=delay_ms,
+                unmodeled='STEP-to-DTR and device dispatch latency, host receipt versus Pico send',
                 prediction_guaranteed=False)
 
 
@@ -192,8 +193,8 @@ class Runner:
         self.interval=None;self.pico=None;self.server=None;self.saved=False
         self.observer_finished=True
         fixed={'key','delay_ms','hold_ms'}
-        anchored={'key','hold_ms','anchor_ns','anchor_session','anchor_boot',
-                  'step_to_gate_ms','input_offset_ms','margin_ms'}
+        anchored={'key','hold_ms','anchor_ns','receipt_interval_ns','anchor_session','anchor_boot',
+                  'gate_guard_ms','aim_gap_ms'}
         hc.require(sim is None or(type(sim)is dict and set(sim)in(fixed,anchored)
             and sim['key']==1 and type(sim['hold_ms'])is int and 80<=sim['hold_ms']<=300
             and ((set(sim)==fixed and type(sim['delay_ms'])is int
@@ -201,8 +202,9 @@ class Runner:
                  or (set(sim)==anchored and all(type(sim[k])is int for k in anchored-{'key','anchor_boot'})
                      and type(sim['anchor_boot'])is str and len(sim['anchor_boot'])==32
                      and sim['anchor_ns']>0 and sim['anchor_session']>0
-                     and 0<sim['step_to_gate_ms']<=250 and 500<=sim['input_offset_ms']<=750
-                     and 100<=sim['margin_ms']<=500))), 'bounded one-step SIM plan')
+                     and 14000000000<=sim['receipt_interval_ns']<=16000000000
+                     and sim['gate_guard_ms']==500 and 100<=sim['aim_gap_ms']<=500))),
+                 'bounded one-step SIM plan')
         self.sim=sim;self.sim_job=None;self.sim_cid=None;self.sim_sent=False;self.sim_timing=None
         if sim is not None:self.owner.sim_enabled=True
 
