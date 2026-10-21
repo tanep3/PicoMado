@@ -7,6 +7,9 @@
 #include <string.h>
 #include <inttypes.h>
 #include "cyw43_inner_probe.h"
+#ifndef PM_SPI_LENGTH_EXPECT_REAL
+#define PM_SPI_LENGTH_EXPECT_REAL -1
+#endif
 #if PM_CYW43_INNER_PROBE
 #include "../src/cyw43_inner_probe.c"
 #endif
@@ -54,6 +57,7 @@ static unsigned fixture_rx_count,fixture_rx_next,fixture_reads,fixture_writes,fi
 static int fixture_write_error;static uint32_t fixture_ticks,fixture_trace;
 static uint64_t fixture_probe_us;
 static uint8_t fixture_packet[512],fixture_written[4096];static unsigned fixture_written_n;
+static struct {unsigned real,command,transfer;uint32_t data_hash;} fixture_spi[4];static unsigned fixture_spi_n;
 static cyw43_int_t *fixture_self;
 static int cyw43_ll_sdpcm_poll_device(cyw43_int_t *,size_t *,uint8_t **);
 static int cyw43_ll_send_ethernet(cyw43_ll_t *,int,size_t,const void *,bool);
@@ -69,7 +73,7 @@ static uint32_t cyw43_read_reg_u32(cyw43_int_t*s,int fn,int at){assert(s==fixtur
 static void cyw43_write_reg_u16(cyw43_int_t*s,int fn,int at,uint16_t v){assert(s==fixture_self&&fn==BUS_FUNCTION&&at==SPI_INTERRUPT_REGISTER);fixture_hash(14);fixture_hash(v);}
 static void cyw43_write_reg_u8(cyw43_int_t*s,int fn,int at,uint8_t v){assert(s==fixture_self&&fn==BACKPLANE_FUNCTION&&at==SPI_FRAME_CONTROL);fixture_hash(15);fixture_hash(v);}
 static int cyw43_read_bytes(cyw43_int_t*s,int fn,int at,size_t n,uint8_t*out){assert(s==fixture_self&&fn==WLAN_FUNCTION&&at==0&&out==s->spid_buf&&fixture_rx_next<fixture_rx_count);unsigned slot=fixture_rx_next++;assert(n==fixture_rx[slot].n);unsigned copy=fixture_rx[slot].partial?fixture_rx[slot].partial:(unsigned)n;memcpy(out,fixture_rx[slot].data,copy);fixture_reads++;fixture_hash(16);fixture_hash((uint32_t)n);fixture_hash((uint32_t)fixture_rx[slot].error);return fixture_rx[slot].error;}
-static int cyw43_write_bytes(cyw43_int_t*s,int fn,int at,size_t n,uint8_t*p){assert(s==fixture_self&&fn==WLAN_FUNCTION&&at==0&&p==s->spid_buf);assert(fixture_written_n+n<sizeof fixture_written);memcpy(fixture_written+fixture_written_n,p,n);fixture_written_n+=(unsigned)n;fixture_writes++;fixture_hash(17);fixture_hash((uint32_t)n);fixture_hash(fixture_hash_bytes(p,(unsigned)n));fixture_hash((uint32_t)fixture_write_error);return fixture_write_error;}
+static int cyw43_write_bytes(cyw43_int_t*s,int fn,int at,size_t n,uint8_t*p){assert(s==fixture_self&&fn==WLAN_FUNCTION&&at==0&&p==s->spid_buf);assert(fixture_written_n+n<sizeof fixture_written);if(PM_SPI_LENGTH_EXPECT_REAL>=0){unsigned real=(unsigned)p[0]|((unsigned)p[1]<<8),transfer=((unsigned)n+3u)&~3u;assert(n==(PM_SPI_LENGTH_EXPECT_REAL?real:((real+3u)&~3u)));assert(transfer==((real+3u)&~3u));assert(fixture_spi_n<4);fixture_spi[fixture_spi_n++]=(typeof(fixture_spi[0])){real,(unsigned)n,transfer,fixture_hash_bytes(p,real)};}memcpy(fixture_written+fixture_written_n,p,n);fixture_written_n+=(unsigned)n;fixture_writes++;fixture_hash(17);fixture_hash((uint32_t)n);fixture_hash(fixture_hash_bytes(p,(unsigned)n));fixture_hash((uint32_t)fixture_write_error);return fixture_write_error;}
 static unsigned pbuf_copy_partial(const struct pbuf*p,void*out,unsigned n,unsigned off){unsigned copied=0;assert(n+off<=p->tot_len);while(p&&copied<n){if(off>=p->len){off-=p->len;p=p->next;continue;}unsigned take=p->len-off;if(take>n-copied)take=n-copied;memcpy((uint8_t*)out+copied,p->payload+off,take);copied+=take;off=0;p=p->next;}fixture_hash(18);fixture_hash(n);return copied;}
 static void *cyw43_ll_parse_async_event(size_t n,uint8_t*p){assert(n==40);return p;}
 static void cyw43_cb_process_async_event(cyw43_int_t*s,void*event){(void)event;assert(s==fixture_self);fixture_callbacks++;fixture_hash(19);if(fixture_nested){unsigned nesting=fixture_nested;fixture_nested=0;if(nesting==1){memset(s->spid_buf+12,0x55,16);assert(cyw43_sdpcm_send_common(s,CONTROL_HEADER,16,s->spid_buf)==0);}else{uint8_t packet[64];memcpy(packet,fixture_packet,64);packet[41]=77;struct pbuf p={packet,64,64,1,NULL};assert(cyw43_ll_send_ethernet(s,0,64,&p,true)==0);}}}
@@ -84,7 +88,7 @@ static void fixture_rx_frame(unsigned slot,unsigned kind,unsigned credit){
 }
 int main(void){
  for(unsigned scenario=0;scenario<18;scenario++){
-  cyw43_int_t state={0};fixture_self=&state;state.cb_data=&state;memset(state.spid_buf,0xcc,sizeof state.spid_buf);fixture_probe_us=100;fixture_ticks=fixture_trace=fixture_reads=fixture_writes=fixture_callbacks=fixture_nested=fixture_rx_count=fixture_rx_next=fixture_written_n=0;fixture_write_error=0;memset(fixture_rx,0,sizeof fixture_rx);fixture_frame(scenario==11?400:64);
+  cyw43_int_t state={0};fixture_self=&state;state.cb_data=&state;memset(state.spid_buf,0xcc,sizeof state.spid_buf);fixture_probe_us=100;fixture_ticks=fixture_trace=fixture_reads=fixture_writes=fixture_callbacks=fixture_nested=fixture_rx_count=fixture_rx_next=fixture_written_n=fixture_spi_n=0;fixture_write_error=0;memset(fixture_rx,0,sizeof fixture_rx);fixture_frame(scenario==11?400:64);
   bool stall=(scenario>=1&&scenario<=7)||scenario==9||scenario==10||scenario==15||scenario==16;state.wwd_sdpcm_last_bus_data_credit=stall?0:200;
   if(scenario==16){fixture_rx_frame(0,DATA_HEADER,1);fixture_rx[0].data[16]=1;fixture_rx_count=1;}
   if(scenario==15){state.wwd_sdpcm_last_bus_data_credit=255;state.wwd_sdpcm_packet_transmit_sequence_number=255;fixture_rx_frame(0,3,0);fixture_rx_count=1;}
@@ -103,6 +107,7 @@ int main(void){
   if(scenario==7)assert(result==-110&&!fixture_writes);else if(scenario==12)assert(result==-22&&!fixture_writes);else if(scenario==8)assert(result==-5&&fixture_writes==1);else assert(result==0&&fixture_writes==(scenario==9||scenario==10?2u:1u));
   if(scenario==13){fixture_packet[19]++;assert(cyw43_ll_send_ethernet(&state,0,length,&head,true)==0);assert(fixture_writes==2);}
   printf("wire scenario=%u result=%d reads=%u writes=%u callback=%u trace=%08x bytes=%u data=%08x credit=%u sequence=%u\n",scenario,result,fixture_reads,fixture_writes,fixture_callbacks,fixture_trace,fixture_written_n,fixture_hash_bytes(fixture_written,fixture_written_n),state.wwd_sdpcm_last_bus_data_credit,state.wwd_sdpcm_packet_transmit_sequence_number);
+  if(PM_SPI_LENGTH_EXPECT_REAL>=0)for(unsigned i=0;i<fixture_spi_n;i++)printf("spi scenario=%u write=%u real=%u command=%u transfer=%u data=%08x\n",scenario,i,fixture_spi[i].real,fixture_spi[i].command,fixture_spi[i].transfer,fixture_spi[i].data_hash);
 #if PM_CYW43_INNER_PROBE
   assert(!probe.depth);
   if(scenario==12||scenario==17){assert(probe.rejected==1&&!probe.count);if(scenario==17)assert(probe.incomplete&&!probe.crc_calls);continue;}
@@ -128,5 +133,18 @@ int main(void){
   printf("diagnostic scenario=%u rows=%u flags=%x polls=%u rx=%u/%u/%u bad=%u io=%u/%u crc_calls=%u\n",scenario,probe.count,r->flags,r->polls,r->rx_data,r->rx_control,r->rx_event,r->rx_bad,r->io_calls,r->io_errors,probe.crc_calls);
 #endif
  }
+#if PM_SPI_LENGTH_EXPECT_REAL >= 0
+ for(unsigned special=0;special<2;special++){
+  cyw43_int_t state={0};fixture_self=&state;state.cb_data=&state;state.wwd_sdpcm_last_bus_data_credit=200;fixture_spi_n=fixture_written_n=fixture_writes=fixture_callbacks=fixture_rx_count=fixture_rx_next=0;fixture_write_error=0;memset(state.spid_buf,0xcc,sizeof state.spid_buf);
+#if PM_CYW43_INNER_PROBE
+  memset(&probe,0,sizeof probe);pm_tx_tuple target={.local={192,0,0,1},.peer={192,0,0,2},.local_port=50000,.peer_port=16153};pm_cyw_probe_sync(1,100+special,2,true,false,1000000000,0,&target);
+#endif
+  int result;
+  if(special==0){fixture_frame(153);struct pbuf packet={fixture_packet,153,153,1,NULL};result=cyw43_ll_send_ethernet(&state,0,153,&packet,true);}
+  else result=cyw43_sdpcm_send_common(&state,CONTROL_HEADER,15,state.spid_buf);
+  assert(result==0&&fixture_spi_n==1&&fixture_writes==1);
+  printf("spi case=%s real=%u command=%u transfer=%u data=%08x\n",special==0?"data153":"control15",fixture_spi[0].real,fixture_spi[0].command,fixture_spi[0].transfer,fixture_spi[0].data_hash);
+ }
+#endif
  puts("PASS exact SDK TX/SPI poll/RX parser: ON/OFF bus trace,normal/flow/DATA/CONTROL/ASYNC/invalid/partial-error/timeout/bus-error/nested/prefix/length/retransmission/interface; unchanged pbuf");
 }

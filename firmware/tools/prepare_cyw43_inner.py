@@ -3,7 +3,7 @@
 from pathlib import Path
 import argparse,hashlib,json,difflib
 EXPECTED='7f4c93755b2ab911d18606652497b2f3cd08085ce63b3b1836171d375f806b10'
-def generate(source):
+def generate(source, spi_real_size=False):
  if hashlib.sha256(source.encode()).hexdigest()!=EXPECTED:raise ValueError('installed cyw43_ll.c differs from reviewed source; refusing instrumentation')
  text=source
  def one(before,after):
@@ -47,11 +47,14 @@ def generate(source):
  one('    // copy in payload\n    if (is_pbuf) {', '    // copy in payload\n    size_t pm_copied = len;\n    if (is_pbuf) {')
  one('        pbuf_copy_partial((const struct pbuf *)buf, self->spid_buf + SDPCM_HEADER_LEN + 6, len, 0);', '        pm_copied = pbuf_copy_partial((const struct pbuf *)buf, self->spid_buf + SDPCM_HEADER_LEN + 6, len, 0);')
  one('    return cyw43_sdpcm_send_common(self, DATA_HEADER, 6 + len, self->spid_buf);', '    pm_cyw_probe_copied(len, pm_copied);\n    return cyw43_sdpcm_send_common(self, DATA_HEADER, 6 + len, self->spid_buf);')
+ if spi_real_size:
+  one('int pm_result = cyw43_write_bytes(self, WLAN_FUNCTION, 0, CYW43_WRITE_BYTES_PAD(size), buf);',
+      'int pm_result = cyw43_write_bytes(self, WLAN_FUNCTION, 0, size, buf);')
  return text
 
 def main():
- p=argparse.ArgumentParser();p.add_argument('--source',type=Path,required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args();s=a.source.read_text();v=generate(s);a.output.parent.mkdir(parents=True,exist_ok=True)
+ p=argparse.ArgumentParser();p.add_argument('--source',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--spi-real-size',action='store_true');a=p.parse_args();s=a.source.read_text();v=generate(s,a.spi_real_size);a.output.parent.mkdir(parents=True,exist_ok=True)
  if not a.output.exists()or a.output.read_text()!=v:a.output.write_text(v)
  (a.output.parent/'cyw43_inner.diff').write_text(''.join(difflib.unified_diff(s.splitlines(True),v.splitlines(True),fromfile='SDK/cyw43_ll.c',tofile='private/cyw43_ll.c')))
- (a.output.parent/'source.json').write_text(json.dumps({'original':str(a.source),'original_SHA256':EXPECTED,'patched':str(a.output),'patched_SHA256':hashlib.sha256(v.encode()).hexdigest(),'shared_SDK_modified':False},indent=2)+'\n')
+ (a.output.parent/'source.json').write_text(json.dumps({'original':str(a.source),'original_SHA256':EXPECTED,'patched':str(a.output),'patched_SHA256':hashlib.sha256(v.encode()).hexdigest(),'spi_real_size':a.spi_real_size,'shared_SDK_modified':False},indent=2)+'\n')
 if __name__=='__main__':main()
