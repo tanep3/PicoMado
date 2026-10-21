@@ -34,7 +34,7 @@
 
 ## 通常USB wire（診断SIMとは別名前空間）
 
-`INPUT CAPS` と `INPUT DO <boot> <request-id> <SUB|UP|POWER|DOWN>`。整数は既存制御と同じ符号/0xなし16進64 bit。CAPSはboot、操作能力mask、GPIO数を返す。DOの返信はboot/ID/操作/結果を持つ。bootと要求IDの両方を照合してから実行する。直近1件の結果を有界に保持し、過去要求を再実行しない。既存SIMの高度なjob/hold/切断後実行は変更しない。
+`INPUT CAPS` と `INPUT DO <boot> <request-id> <SUB|UP|POWER|DOWN>`。整数は既存制御と同じ符号/0xなし16進64 bit。CAPSはboot、操作能力mask、GPIO数、最後に処理した要求IDを返し、再接続したclientが次のIDを決められるようにする。DOの返信はboot/ID/操作/結果を持つ。bootと要求IDの両方を照合してから実行する。直近1件の結果を有界に保持し、過去要求を再実行しない。既存SIMの高度なjob/hold/切断後実行は変更しない。
 
 USB parserは語彙を型へ変換し、mainが登録した正式な操作handlerへ委譲する。main thread内の同じhandlerをGPIO/SIMも通り、network callbackやUSB IRQで描画/送信処理を実行しない。通常USBのために診断全体をONにしない。
 
