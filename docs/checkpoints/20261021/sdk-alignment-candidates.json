@@ -1,0 +1,363 @@
+{
+  "ready": {
+    "source_commit": "f2bdc7b2e17cc620e5d568c16842ee6ea871e7b0",
+    "SDK_commit": "079c6f39023649b154152db30f1d781e884879bc",
+    "SDK_aligned": true,
+    "device": "PicoMado-lcd1",
+    "expected_Flash_ID": "E661640843239D21",
+    "candidate": {
+      "uf2": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z/artifacts/aligned-observed/PicoMado-lcd1.uf2",
+      "sha256": "11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485",
+      "elf_sha256": "bbecbcbb84f4a394cacce1726e66063313310de98f73ae9b5966e3255b1d7293",
+      "heap_possible": 11096,
+      "stack_reservation": 4096,
+      "all_existing_flags_preserved": true
+    },
+    "official_LL_reference": {
+      "uf2": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z/artifacts/aligned-official-LL/PicoMado-lcd1.uf2",
+      "sha256": "c5e2f3e6a42b76c0dc83dea5707f231f3adaa241604f7188f22ead70a9ae425d",
+      "only_flag_difference": {
+        "PM_CYW43_INNER_PROBE": "OFF"
+      },
+      "not_all_app_instrumentation_disabled": true
+    },
+    "firmware_rollback": {
+      "uf2": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/gap-p2-build/artifacts/PicoMado-lcd1/PicoMado-lcd1.uf2",
+      "sha256": "fd19ace94a80c0baf9ad97ed9e97255aca563045ee428efd1ac7aad52a2d8e3a"
+    },
+    "SDK_backup": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z/SDK-before.tar",
+    "SDK_backup_sha256": "4e3e39f8bc98f7a646258a39d1b33611fafd2bf6936b43eefcf33748b4ed3f35",
+    "validation_passed": 238,
+    "diagnostic_port_files": 5,
+    "application_C_H_unchanged": true,
+    "capacity_WIP_excluded": true,
+    "firmware_write_authorized": false,
+    "firmware_write_performed": false,
+    "USB_open_performed": false,
+    "service_operation_performed": false,
+    "physical_effect_unverified": true
+  },
+  "alignment": {
+    "SDK_HEAD": "079c6f39023649b154152db30f1d781e884879bc",
+    "gitlinks": [
+      {
+        "path": "lib/btstack",
+        "old": "501e6d2b86e6c92bfb9c390bcf55709938e25ac1",
+        "new": "eb0bb8b5ea6d234ccb940313b47f7a5c3b4e20ec",
+        "changed": true
+      },
+      {
+        "path": "lib/cyw43-driver",
+        "old": "c1075d4bc440422cf2b2fd12c64a1f53f77660ee",
+        "new": "055d64274b014dd7b1c2fc94d26e8a18face7124",
+        "changed": true
+      },
+      {
+        "path": "lib/lwip",
+        "old": "0a0452b2c39bdd91e252aef045c115f88f6ca773",
+        "new": "77dcd25a72509eb83f72b033d219b1d40cd8eb95",
+        "changed": true
+      },
+      {
+        "path": "lib/mbedtls",
+        "old": "5a764e5555c64337ed17444410269ff21cb617b1",
+        "new": "0bebf8b8c7f07abe3571ded48a11aa907a1ffb20",
+        "changed": true
+      },
+      {
+        "path": "lib/tinyusb",
+        "old": "86ad6e56c1700e85f1c5678607a762cfe3aa2f47",
+        "new": "86ad6e56c1700e85f1c5678607a762cfe3aa2f47",
+        "changed": false
+      }
+    ],
+    "recursive_status": " eb0bb8b5ea6d234ccb940313b47f7a5c3b4e20ec lib/btstack (v1.7-rc1-1219-geb0bb8b5e)\n 055d64274b014dd7b1c2fc94d26e8a18face7124 lib/cyw43-driver (v1.1.1)\n 77dcd25a72509eb83f72b033d219b1d40cd8eb95 lib/lwip (STABLE-2_2_1_RELEASE)\n 0bebf8b8c7f07abe3571ded48a11aa907a1ffb20 lib/mbedtls (v3.6.6)\n dff9da04438d712f7647fd995bc90fadd0c0e2ce lib/mbedtls/framework (mbedtls-4.1.0_tf-psa-crypto-1.1.0)\n 86ad6e56c1700e85f1c5678607a762cfe3aa2f47 lib/tinyusb (0.18.0)\n",
+    "SDK_source_clean": true,
+    "SSH_used": false
+  },
+  "resources": {
+    "deployed": {
+      "static_main_RAM": 251064,
+      "heap_possible": 11080,
+      "stack_reservation": 4096,
+      "scratch_stack_limit_span": 8192
+    },
+    "candidates": {
+      "aligned-observed": {
+        "memory": {
+          "static_main_RAM": 251048,
+          "heap_possible": 11096,
+          "stack_reservation": 4096,
+          "scratch_stack_limit_span": 8192
+        },
+        "vs_deployed": {
+          "static_main_RAM": -16,
+          "heap_possible": 16,
+          "stack_reservation": 0
+        },
+        "largest_app_self_frames": [
+          {
+            "function": "command.constprop",
+            "self_bytes": 608,
+            "old_self_bytes": 608
+          },
+          {
+            "function": "main",
+            "self_bytes": 592,
+            "old_self_bytes": 592
+          },
+          {
+            "function": "pm_eex_begin",
+            "self_bytes": 368,
+            "old_self_bytes": 368
+          },
+          {
+            "function": "pm_eex_parse",
+            "self_bytes": 288,
+            "old_self_bytes": 288
+          },
+          {
+            "function": "pm_net_take",
+            "self_bytes": 280,
+            "old_self_bytes": 280
+          },
+          {
+            "function": "pm_eex_encode",
+            "self_bytes": 240,
+            "old_self_bytes": 240
+          },
+          {
+            "function": "pm_ack_probe_command",
+            "self_bytes": 240,
+            "old_self_bytes": 240
+          },
+          {
+            "function": "api_frame",
+            "self_bytes": 232,
+            "old_self_bytes": 232
+          },
+          {
+            "function": "pm_endpoint_client_poll",
+            "self_bytes": 216,
+            "old_self_bytes": 216
+          },
+          {
+            "function": "pm_ws_accept",
+            "self_bytes": 200,
+            "old_self_bytes": 200
+          },
+          {
+            "function": "api_settings",
+            "self_bytes": 200,
+            "old_self_bytes": 200
+          },
+          {
+            "function": "send_raw",
+            "self_bytes": 176,
+            "old_self_bytes": 176
+          },
+          {
+            "function": "recv_body.isra",
+            "self_bytes": 176,
+            "old_self_bytes": 176
+          },
+          {
+            "function": "pm_net_rx_frame_start",
+            "self_bytes": 176,
+            "old_self_bytes": 176
+          },
+          {
+            "function": "pm_logf",
+            "self_bytes": 168,
+            "old_self_bytes": 168
+          }
+        ],
+        "heap_stack_runtime_highwater_measured": false
+      },
+      "aligned-official-LL": {
+        "memory": {
+          "static_main_RAM": 249760,
+          "heap_possible": 12384,
+          "stack_reservation": 4096,
+          "scratch_stack_limit_span": 8192
+        },
+        "vs_deployed": {
+          "static_main_RAM": -1304,
+          "heap_possible": 1304,
+          "stack_reservation": 0
+        },
+        "largest_app_self_frames": [
+          {
+            "function": "main",
+            "self_bytes": 592,
+            "old_self_bytes": 592
+          },
+          {
+            "function": "command.constprop",
+            "self_bytes": 528,
+            "old_self_bytes": 608
+          },
+          {
+            "function": "pm_eex_begin",
+            "self_bytes": 368,
+            "old_self_bytes": 368
+          },
+          {
+            "function": "pm_eex_parse",
+            "self_bytes": 288,
+            "old_self_bytes": 288
+          },
+          {
+            "function": "pm_net_take",
+            "self_bytes": 280,
+            "old_self_bytes": 280
+          },
+          {
+            "function": "pm_eex_encode",
+            "self_bytes": 240,
+            "old_self_bytes": 240
+          },
+          {
+            "function": "pm_ack_probe_command",
+            "self_bytes": 240,
+            "old_self_bytes": 240
+          },
+          {
+            "function": "api_frame",
+            "self_bytes": 232,
+            "old_self_bytes": 232
+          },
+          {
+            "function": "pm_endpoint_client_poll",
+            "self_bytes": 216,
+            "old_self_bytes": 216
+          },
+          {
+            "function": "pm_ws_accept",
+            "self_bytes": 200,
+            "old_self_bytes": 200
+          },
+          {
+            "function": "api_settings",
+            "self_bytes": 200,
+            "old_self_bytes": 200
+          },
+          {
+            "function": "send_raw",
+            "self_bytes": 176,
+            "old_self_bytes": 176
+          },
+          {
+            "function": "recv_body.isra",
+            "self_bytes": 176,
+            "old_self_bytes": 176
+          },
+          {
+            "function": "pm_net_rx_frame_start",
+            "self_bytes": 176,
+            "old_self_bytes": 176
+          },
+          {
+            "function": "pm_logf",
+            "self_bytes": 168,
+            "old_self_bytes": 168
+          }
+        ],
+        "heap_stack_runtime_highwater_measured": false
+      }
+    },
+    "physical_highwater_not_measured": true
+  },
+  "tests": {
+    "host": [
+      {
+        "command": [
+          "bash",
+          "tests/run_host_tests.sh"
+        ],
+        "exit": 0,
+        "seconds": 18.56,
+        "PASS_lines": 278,
+        "tail": [
+          "PASS actual-main hard-error/overflow/protocol/expiry/Wi-Fi loss 64 scenarios",
+          "PASS net-eof-recovery 51",
+          "PASS actual-main already-started SPI completion/display failure 20 scenarios",
+          "PASS net-eof-recovery 52"
+        ]
+      },
+      {
+        "command": [
+          "bash",
+          "tests/run_usb_tx_tests.sh"
+        ],
+        "exit": 0,
+        "seconds": 6.44,
+        "PASS_lines": 11,
+        "tail": [
+          "----------------------------------------------------------------------",
+          "Ran 28 tests in 0.423s",
+          "",
+          "OK"
+        ]
+      },
+      {
+        "command": [
+          "bash",
+          "tests/run_inner_tests.sh"
+        ],
+        "exit": 0,
+        "seconds": 2.2,
+        "PASS_lines": 3,
+        "tail": [
+          "Ran 13 tests in 0.114s",
+          "",
+          "OK",
+          "PASS production TX adapter: chained pbuf/ref/content/return preserved, original once, SDK-lock threaded snapshots/reset, full/drop, freeze/release/run/generation, attach/detach without recursion; no AP2 callback writes"
+        ]
+      }
+    ],
+    "collector_and_boundary": [
+      {
+        "test": "event_collector_test.py",
+        "exit": 0,
+        "seconds": 9.26,
+        "tail": [
+          "...........................",
+          "----------------------------------------------------------------------",
+          "Ran 27 tests in 8.859s",
+          "",
+          "OK"
+        ]
+      },
+      {
+        "test": "capture_boundary_state_test.py",
+        "exit": 0,
+        "seconds": 13.94,
+        "tail": [
+          "Ran 5 tests in 13.449s",
+          "",
+          "FAILED (errors=1)",
+          "PASS transition-table fresh PTY 40 cases",
+          "PASS transition-table fact/ACK/byte matrix 192 cases"
+        ],
+        "environment_fixture_error_resolved": true,
+        "previous_exit": 1,
+        "missing_doc_method_rerun": "PASS StateTests.test_every_documented_transition_has_a_case after copying exact f2bdc7b doc"
+      },
+      {
+        "test": "usb_button_trial_test.py",
+        "exit": 0,
+        "tests": 16
+      }
+    ],
+    "SDK_driver": 18,
+    "validation_passed": 238
+  },
+  "evidence_root": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z",
+  "limits": [
+    "RF/real IRQ/runtime heap/stack not measured",
+    "SDK combo change alone does not update flashed devices",
+    "capacity WIP remains incomplete and preserved outside comparison",
+    "initial CMake path checks and sandbox IPC restrictions were classified, corrected without app changes"
+  ]
+}
