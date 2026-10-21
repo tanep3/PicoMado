@@ -35,8 +35,8 @@
       "evidence": []
     }
   },
-  "implementation_commit": "2a5693e2aa3cde29c652717602f0e624c077bc50",
+  "implementation_commit": "38bd24d09e923f05feb359079bcd8c114a355b08",
   "review_findings": [
-    "P2-01: canceled hint request state; correction in progress"
+    "P2-01: corrected in 38bd24d; independent re-review pending"
   ]
 }

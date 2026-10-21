@@ -1,5 +1,7 @@
 # ローカル切替案内: 開発検証結果
 
+最新の修正固定点は `38bd24d09e923f05feb359079bcd8c114a355b08`（下記P2-01節）。初回候補はP2で受入れ保留となった。親承認・実機適用は未実施。
+
 ## 固定点と変更
 
 - 仕様先行: `eb6bc60ee8243ba78215c0a1a384ead9395d26ea`。候補画素の寿命を補足した文書先行コミット: `99aea78f3e2d3d3c77845a9ddd1656621ec4be2b`。
@@ -17,10 +19,10 @@
 - 新規範囲のASan/UBSan: 10 binaries成功（モデル1、実main LCD/E-ink両個体×trace有無6、E-ink実adapter2、LCD実adapter1）。sandboxのptrace下でLeakSanitizerが動かないため `ASAN_OPTIONS=detect_leaks=0`。新しい動的確保はない。
 - 199999/200000/200001 µs、32bit超の時刻、期限直前CRC完了、header/部分/不正CRC、遅着、連打、frame先行/古い応答、SUB no-op、旧動画継続、送信/描画失敗、owner置換/再接続を確認。E-inkは準備中取消し、物理BUSY後合流、本画像優先、no-op復元、remote結果非生成を確認。
 - 3個体の通常ARM build成功。private設定/board bindingは元リポジトリとSHA一致。LCD診断7 flagsとPR155 private LLは既存候補と一致し、共有SDKはcleanのまま。SDK `079c6f39023649b154152db30f1d781e884879bc`、CYW43 `055d6427…`、lwIP `77dcd25a…`。
-- フル画像buffer追加なし。LCD静的RAMは既存候補比160 B増（model 120 Bを含むmetadata）。案内scanline 320 B、compilerの該当関数stack 368 B。stack予約は8192 Bを維持。LCDは各本画像を既存local bufferへ25,600 B memcpyするため、その実機時間/動画CPU影響は未測定。
+- フル画像buffer追加なし。LCD静的RAMは既存候補比160 B増（model 120 Bを含むmetadata）。案内scanline 320 B、compilerの該当関数stack 368 B。main stackは4096 B、linkで予約されたstack領域合計は8192 Bを維持。LCDは各本画像を既存local bufferへ25,600 B memcpyするため、その実機時間/動画CPU影響は未測定。
 - bitmapをLCD 160×80（白字/黒背景）、E-ink 250×122（黒字/白背景）へ配置したPNGを目視確認。2行の文言・中央配置・余白を確認。
 
-## 開発候補
+## 初回開発候補（P2で受入れ保留）
 
 | 端末 | binding | UF2 SHA256 | flash終端（排他） | link時heap余地 |
 | --- | --- | --- | --- | --- |
@@ -48,3 +50,23 @@
 4. 速い切替で案内なし、200 msを超える未到着で案内、到着後の本画像優先、SUB no-opとサブ端復元、連打、旧動画、通信失敗時の既存表示を確認する。E-inkは案内前に本画像が届くケースとrefresh開始後のケースを分ける。異常時は対象の直前UF2へ戻し、設定/データは巻き戻さない。
 
 今回、実機・USB・書込み・サービス操作・SSH・外部pushは行っていない。パケット欠落の根治調査とその実機担当を止める変更はない。
+
+## P2-01 修正・再確認依頼
+
+- 原レビュー: `/tmp/picomado-feedback-review-kcjcccs2/REVIEW.md` / `review-outcome.json`（受入れ保留）。manifest対象42ファイルをSHA照合して、workの親の `review-fix-20261022/original-review/` へ保存した。`retained-files.json` は保存先との対応を示し、原文書の絶対パスを改変していない。以前のUF2/ELF/CMakeCache/compile_commandsは同結果領域の `previous-candidates/` に保持する。元の再現Cは当時の/tmpをincludeするが、恒久回帰はrepo内の相対includeで再現できる。
+- 原因・不変条件・試験表を先行コミット: `9624c17cedc6442c4c23f98bb23bc5d0afa47efd`。モデルの要求済み状態と物理表示済みを混同し、取消しの反映を欠いた。旧描画中の要求→取消し→候補喪失/再入力という合成遷移が旧回帰に欠けていた。
+- 限定実装修正: `38bd24d09e923f05feb359079bcd8c114a355b08`。`pm_switch_cancel_hint_for_image()` と `pm_switch_request_hint()` が要求の取消し/発行を所有する。実mainの受信完了・返信・pollは `prioritize_received_image()` という同じ呼出経路でモデルの取消し→adapter REPLACEを実行する。表示済みの同文再描画抑止は既存adapterが所有する。新state/wire/timer、描画方式、入力送信挙動、RAM bufferを追加/変更しない。
+- 恒久回帰 `switch_feedback_cancel_test.c`: 両E-ink×trace ON/OFF×候補置換/次切替/次SUBの12ケース。修正前は全件exit 2、修正後は全件exit 0。元の8ケースに加え、次SUB、再入力の199 msでは非表示・200 msで再要求、再要求一回のみ、対応画像の最終描画完了まで確認。`before/` / `after/` の各ログとresults.jsonを保存した。
+- 実adapterの回帰にも、旧remote物理描画中の取消し→再要求、RAM準備中の取消し→再要求、表示済み案内のREPLACE→再SHOWで更新増加なしを追加した。最初の追加試験では既存helperが「remote resultをアプリが消費する前にlocal hintまで完了する」と仮定して失敗した。driverの既存契約に合わせremote resultを消費してから進行を確認するfixtureへ修正した。製品adapterの挙動は変更せず、初回ログも `host-fixture-initial.log` に保持する。
+- 通常host runner成功。旧188 PASS行に、新12ケースのrunner報告12行と同ケース内部報告12行が加わり212 PASS行（同じ12ケースを二重の試験数とは数えない）。新旧のモデル/adapter/main/復旧/動画回帰を含む。ASan/UBSanは14 binaries / 22 invocations成功。LeakSanitizerのptrace制限は初回と同じ。
+- 3個体のARM build成功、LCD flags/private PR155 LL・個体設定・board bindingは保持。SDK clean、UF2全blockの設定sector非包含を再確認。静的RAM/heap余地は初回と同じ、main stack 4096 B（link予約領域合計8192 B）。
+
+| 端末 | 修正候補 UF2 SHA256 | flash終端（排他） | link時heap余地 |
+| --- | --- | --- | --- |
+| PicoMado-lcd1 | `92fc0ee9dc0c50161b7fa158252407f507b29292ffd2a6f8ccb1ac3eeaf4fc79` | 0x1006ad00 | 12496 B |
+| E-ink_0 | `4160d025ed2584b6eb4bd332bb5262dc90c3b74c12d81cff2ea2a331e7e83cfc` | 0x1005a500 | 98076 B |
+| E-ink_1 | `4405a4d03d2773de1f392bacf9e0aaa5d062bfc623811b544d2a22e2367fee34` | 0x1005af00 | 97980 B |
+
+新候補の実体は同じ `firmware/build/<端末>/<端末>.uf2`。最新の `candidate-artifacts.json` はwork親と `review-fix-20261022/` に保存。修正固定点の出自、before/after、全テスト/ビルドログ、原レビュー、再確認用handoffは同結果領域で参照できる。既存root CLI checkの実行結果とsource bindingは、その結果領域の `root-check/check.json` を正とする。
+
+今回も隔離CMake開発ビルドでありcontrolled-build receipt、candidate preflight、親承認の代作はしない。通常flash入口に関する前節の未完了範囲、実機の視認性/ちらつき/CPU負荷、0x20以後のE-ink中断不能性は変わらない。実機・USB・SSH・サービス操作は実施していない。
