@@ -80,21 +80,33 @@ def release_prior(host,usb,device,saved_dir,out):
     got=host({'op':'release','boot':hs['boot'],'run':hs['run'],'digest':hs['digest']})
     require(got['phase']=='idle','prior host release unconfirmed');return got
 
+def neighbor_identity(args,neighbors):
+    require(isinstance(neighbors,list),'invalid neighbor reply')
+    matches=[{k:x[k]for k in ('dst','dev','lladdr','state')if k in x}for x in neighbors
+             if isinstance(x,dict)and str(x.get('lladdr','')).lower()==args.known_mac.lower()]
+    if len(matches)!=1:return matches,'known MAC match count is not one'
+    if matches[0].get('dev')not in (None,args.interface)or not matches[0].get('dst'):
+        return matches,'known MAC interface/IP mismatch'
+    return matches,None
+
+def neighbor_reachability(candidate):
+    state=candidate.get('state')
+    return isinstance(state,list)and 'REACHABLE'in state
+
 def known_neighbor(args,evidence=None):
-    """Resolve identity and reachability separately; read only, one snapshot."""
+    """Record the identity result before applying the independent NUD gate."""
     row=dict(interface=args.interface,known_mac=args.known_mac.lower(),clock=time.monotonic_ns())
     try:
         neighbors=json.loads(subprocess.check_output(['ip','-j','neigh','show','dev',args.interface],text=True,timeout=2))
-        require(isinstance(neighbors,list),'invalid neighbor reply')
-        matches=[{k:x[k]for k in ('dst','dev','lladdr','state')if k in x}for x in neighbors
-                 if isinstance(x,dict)and str(x.get('lladdr','')).lower()==args.known_mac.lower()]
-        row.update(matches=matches,match_count=len(matches))
-        if len(matches)!=1:row['refusal']='known MAC match count is not one'
-        elif matches[0].get('dev')not in (None,args.interface)or not matches[0].get('dst'):
-            row['refusal']='known MAC interface/IP mismatch'
-        elif not isinstance(matches[0].get('state'),list)or 'REACHABLE'not in matches[0]['state']:
-            row['refusal']='known MAC is not REACHABLE'
-        else:row['decision']='reachable_identity_candidate'
+        matches,identity_error=neighbor_identity(args,neighbors)
+        row.update(matches=matches,match_count=len(matches),
+                   identity_decision='refused'if identity_error else'matched')
+        if identity_error:row['refusal']=identity_error
+        else:
+            reachable=neighbor_reachability(matches[0])
+            row['reachability_decision']='REACHABLE'if reachable else'not_REACHABLE'
+            if not reachable:row['refusal']='known MAC is not REACHABLE'
+            else:row['decision']='reachable_identity_candidate'
     except BaseException as error:
         row['refusal']=f'neighbor read failed: {type(error).__name__}: {error}'[:240]
         if evidence is not None:ap.persist(evidence,row)

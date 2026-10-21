@@ -17,6 +17,8 @@ class Tests(unittest.TestCase):
    saved=json.loads(path.read_text())
    self.assertEqual(saved['match_count'],1)
    self.assertEqual(saved['matches'],[row])
+   self.assertEqual(saved['identity_decision'],'matched')
+   self.assertEqual(saved['reachability_decision'],'not_REACHABLE')
    self.assertEqual(saved['refusal'],'known MAC is not REACHABLE')
    row['state']=['REACHABLE']
    with patch.object(m.subprocess,'check_output',return_value=json.dumps([row])):
