@@ -1,5 +1,7 @@
 # 自然heartbeat capture：隔離実装・検証結果
 
+この文書は660583b時点の履歴。追加P2の修正、単一owner統合、releaseサーバ候補の最新結果は[追加修正・統合結果](heartbeat-owner-and-review-fix-results-20261021.md)を参照する。firmware成果物は同一SHAを継承している。
+
 P2の対象混同対策を[契約](periodic-heartbeat-capture-contract.md)へ先行固定した後、独立worktreeで実装した。文書先行 `07f5c062523e3d3396d380082bf158dc8c6bb241`、初期実装 `042044c0a68a3e8d49a5ea02b2b79fe04d203695`、最終実装 **`660583b52f6d42d86289e663fade3472e347d10a`**。branchは `diag/heartbeat-capture`、workは `/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/work`。
 
 実機USB/書込み/サービス操作/SSH/pushは0。テストはホスト内のfixtureと新規PTYだけで、実USBの代用として偽入力を送っていない。容量WIP6ファイルは元workに元hashで保持し、overlay/serializer等を候補へ含めていない。

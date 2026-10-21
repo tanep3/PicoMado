@@ -1,0 +1,143 @@
+{
+  "core_commit": "4b7987e0ab0912cad5b1e5132020fa9729e73a38",
+  "runner_commit": "0b8bbe41217b8ca91667dcceb8e85869777f1d9b",
+  "design_first_commits": [
+    "8e3f93908a9ac9482693c4e634b00f89baa918b2",
+    "b1318fc465d653699aa3f812bdf76a31a8ad30c6"
+  ],
+  "review_fixed": "/tmp/picomado-heartbeat-impl-review-6_n04u_d/review-outcome.json",
+  "review_SHA256": "2002411e6554c9b707dac7aca8a94e0ca5d90f4a4e4de6f8b358a2e74e2182a4",
+  "worktree": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/work",
+  "branch": "diag/heartbeat-capture",
+  "report": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/work/docs/heartbeat-owner-and-review-fix-results-20261021.md",
+  "validation": {
+    "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/runner-validation.json",
+    "passed": 46,
+    "failed": 0
+  },
+  "tests": {
+    "Rust_all_features": 304,
+    "Python_existing": 28,
+    "Python_heartbeat": 22,
+    "Python_evidence_methods": 4,
+    "Python_runner_methods": 12,
+    "runner_scenarios": 26,
+    "native_USB_TX_PASS_lines": 20
+  },
+  "test_mode": "Fresh PTY only; DTR and monotonic clock modeled; no real USB. Earlier firmware and SDK tests inherited because firmware source is unchanged.",
+  "firmware": {
+    "source_equivalent_to": "660583b52f6d42d86289e663fade3472e347d10a",
+    "artifacts": {
+      "PicoMado-lcd1.uf2": {
+        "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/PicoMado-lcd1.uf2",
+        "SHA256": "9d4f66d1b71e07ef5c6e85b802201d0b6712b6290cd1c9133b40bdbf36479687"
+      },
+      "picomado_lcd.elf": {
+        "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/picomado_lcd.elf",
+        "SHA256": "bce25a981c62c6be149b82b4a55cc8f309bd9f774a9916fb01627e60fa21bd1b"
+      },
+      "picomado_lcd.elf.map": {
+        "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/picomado_lcd.elf.map",
+        "SHA256": "e1b3884b93cfd65d870413a9995586d7be1a4fa0b72be911e0a8802b9b64397d"
+      }
+    },
+    "settings_sector_unwritten": true,
+    "expected_Flash_ID": "E661640843239D21",
+    "RAM": {
+      "static_main_RAM": 252072,
+      "heap_possible": 10072,
+      "stack_reserved": 4096
+    },
+    "rollback": {
+      "uf2": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z/artifacts/aligned-observed/PicoMado-lcd1.uf2",
+      "SHA256": "11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485"
+    }
+  },
+  "server": {
+    "binary": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/picomado-server.heartbeat",
+    "SHA256": "cf452882458329c152f977906420eb52dcb2f44770ecc2432cd88e769588a761",
+    "bytes": 17196488,
+    "source_commit": "4b7987e0ab0912cad5b1e5132020fa9729e73a38",
+    "features": [
+      "ack-path-probe",
+      "boundary-observation",
+      "caricature-retention-delete",
+      "default",
+      "stream-diagnostics"
+    ],
+    "fingerprints": [
+      {
+        "file": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/work/service/target/release/.fingerprint/picomado-core-b375c00ab620d92b/bin-picomado-server.json",
+        "features": [
+          "ack-path-probe",
+          "boundary-observation",
+          "caricature-retention-delete",
+          "default",
+          "stream-diagnostics"
+        ],
+        "SHA256": "4b2a61082f60e8194086fb57bb3c331e40a9cf376191f33a9a3f38194e8cf3f2"
+      }
+    ],
+    "architecture": "aarch64",
+    "dependencies_resolved": true,
+    "invalid_usage_exit": 1,
+    "usage_before_config_or_listener": true,
+    "installed_binary_SHA256": "e7b52c29d776bf9b9fbfea9125216c7b5c05613f47fadc9660618dedb76c727c",
+    "config_SHA256": "57dfa948687444c9ef06f958e7518c6232af739fd1c504d1f72a38f272163188",
+    "install_performed": false,
+    "service_operations": false,
+    "firmware_rollback_SHA256": "11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485"
+  },
+  "server_rollback": {
+    "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/rollback/picomado-server.normal",
+    "SHA256": "e7b52c29d776bf9b9fbfea9125216c7b5c05613f47fadc9660618dedb76c727c"
+  },
+  "runner": {
+    "config_template": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/runner-config.template.json",
+    "observer_snapshot": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/runner-observer",
+    "template_PID": null,
+    "plan_default": true,
+    "automatic_rearm": false,
+    "SIM": false,
+    "finite_window_seconds": 36.1,
+    "header_only": true
+  },
+  "evidence_SHA256": {
+    "host-all-features-P2.log": "e352a29f64c59107fafe00f167dc1878dcfab1676e3d9b0df271017714785035",
+    "runner-integrated-suite.log": "3881a322276fe2ab4c9ea5fd093c72a22fdbf95faf006cf095096a0ab7739052",
+    "runner-PTY-final.log": "d15449041b6769b8866db7e8f545e37f21c271d87b6897befc8d048d07e3d6ca",
+    "heartbeat-P2-python-final.log": "472199bfb2dd573f43e9f8b931fb656e137f8c434794d0c8651740c700c5554c",
+    "evidence-contract-final.log": "74790336f4e6a70e1c803cf685d8ef7dc5f5ee1ca0834731fb5a75797c885e7c",
+    "runner-plan-smoke.log": "b8d22b58bea02039bb2527cc2aff7a05e00404402caf2801a19cd0fbdd6bd09b",
+    "server-release-P2.log": "ae311fb93c3692aa1ec88e37fdba73d749399e35a7a53f8fb1de19a503686328",
+    "server-ldd.log": "ab6dcd402a586620fa8225d035bae3150c8c3ba388061f349e668116a47aaa6f",
+    "server-file.log": "c789d2831c73a3ecf0ad20a58569f8f62c65324ae162f38d0833a56cff83b8f6",
+    "server-usage-smoke.log": "804c1e6e960b5027c4eb61e7339c4b59b3e9c370294e0e15d6da74636e3bfb3e",
+    "runner-validation.json": "4fe628e4870974a3c3c3fd27223c888dd9a633db40f93893b6f874543fb3aa9e",
+    "verify-runner-candidate.py": "d40cc72f2c37c23048dfece7b131919e3acca3c97a7d65f24e663b34f8f29a0f"
+  },
+  "capacity_WIP_six_preserved": true,
+  "actions": {
+    "real_USB_open": 0,
+    "firmware_write": 0,
+    "service_operation": 0,
+    "SSH": 0,
+    "push": 0,
+    "installed_server_update": 0
+  },
+  "remaining": [
+    "Independent review of fixed core and integrated runner",
+    "Approved coordinated LCD-only candidate deployment, host candidate rollout, refreshed PID and owned tuple before capture",
+    "CY15 arbitrary full 20-second capacity remains unproven; overflow must stop quality",
+    "Live observer effect and dynamic heap/stack are unmeasured",
+    "No delay-resolution claim; no new physical or SIM measurements in this stage"
+  ],
+  "supersedes_preparation_status_in": [
+    "ready.json",
+    "handoff.json",
+    "docs/periodic-heartbeat-capture-results-20261021.md"
+  ],
+  "historical_files_retained": true,
+  "candidate_manifest": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/runner-ready.json",
+  "candidate_manifest_SHA256": "575a878e51c06c279a9fabba722a585a2faf7d2bd9af8b0e160cea87f4b758c6"
+}
