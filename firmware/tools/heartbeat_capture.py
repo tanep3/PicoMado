@@ -54,8 +54,52 @@ def prepare(usb, host, device, run, out):
             and origin['m'] == origin['flags'] == '0', 'Pico heartbeat arm provenance')
     baseline = int(origin['o'], 16)
     require(baseline < 0xffffffff, 'ordinal overflow')
-    got = host(dict(op='arm', boot=hs['boot'], run=run, trigger='heartbeat',
-                    baseline=baseline, expected_message=baseline + 1))
+    # Save endpoint-scoped readings before the one-shot arm. The ARM snapshot
+    # alone cannot show a send during PREPARED, and cleanup status is too late
+    # to identify the refusal-time host watermark.
+    pre_host_start = time.monotonic_ns()
+    pre_host = host({'op': 'status'})
+    pre_host_end = time.monotonic_ns()
+    pre_pico_start = time.monotonic_ns()
+    pre_pico = one(usb, 'AP2 LIVE', 'ap2 live ')
+    pre_pico_end = time.monotonic_ns()
+    bracket = dict(clock='CLOCK_MONOTONIC', origin=origin,
+                   host_before=dict(value=pre_host, request_before_ns=pre_host_start,
+                                    response_after_ns=pre_host_end),
+                   pico_before=dict(value=pre_pico, request_before_ns=pre_pico_start,
+                                    response_after_ns=pre_pico_end))
+    ap.persist(Path(out) / 'baseline-before-arm.json', bracket)
+    require(pre_host['boot'] == hs['boot'] and pre_host['connection'] == hs['connection']
+            and pre_host['session'] == hs['session'] and pre_host['phase'] == 'idle',
+            'host binding changed before arm')
+    require(pre_pico['boot'] == ps['boot'] and pre_pico['gen'] == ps['gen']
+            and pre_pico['state'] == '4', 'Pico binding changed before host arm')
+    arm_start = time.monotonic_ns()
+    try:
+        got = host(dict(op='arm', boot=hs['boot'], run=run, trigger='heartbeat',
+                        baseline=baseline, expected_message=baseline + 1))
+    except BaseException as problem:
+        arm_end = time.monotonic_ns()
+        result = dict(clock='CLOCK_MONOTONIC', arm_request_before_ns=arm_start,
+                      arm_response_after_ns=arm_end, error=type(problem).__name__,
+                      message=str(problem)[:240], host_after=None, pico_after=None)
+        try:
+            started = time.monotonic_ns()
+            value = host({'op': 'status'})
+            result['host_after'] = dict(value=value, request_before_ns=started,
+                                        response_after_ns=time.monotonic_ns())
+        except BaseException as read_error:
+            result['host_after_error'] = str(read_error)[:240]
+        if getattr(usb, 'trustworthy', True):
+            try:
+                started = time.monotonic_ns()
+                value = one(usb, 'AP2 LIVE', 'ap2 live ')
+                result['pico_after'] = dict(value=value, request_before_ns=started,
+                                            response_after_ns=time.monotonic_ns())
+            except BaseException as read_error:
+                result['pico_after_error'] = str(read_error)[:240]
+        ap.persist(Path(out) / 'baseline-arm-refusal.json', result)
+        raise
     require(got['phase'] == 'armed' and got['run'] == run
             and got['connection'] == hs['connection'] and got['session'] == hs['session']
             and got['baseline_message'] == got['last_message'] == baseline

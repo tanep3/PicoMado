@@ -139,6 +139,8 @@ The preserved `baseline-proof-20261021T063055Z/ON-HOLD-HANDOFF.json` exercises r
 
 The hardware host40 value is a cleanup observation, not a recorded rejection-time watermark. Pre-DTR origin/gate are ARM snapshots, not proof that PREPARED had no send. Six independent COPY failures are not established: the first ERR_MEM marks FAILED and subsequent sends do not encode until reconnect. These limits must survive migration. The first post-adoption investigation is registered as a separate change using this handoff; no offset-six correction, automatic retry, new flash or weakened quality gate is authorized.
 
+The bounded diagnostic for that investigation is [OBS-20261021-02](changes/OBS-20261021-02-baseline-diagnostic-contract.md): additive read-only `AP2 LIVE.message` exposes the current Pico encoded-attempt ordinal; controller-bracketed host status before and after a refused single arm bounds the processed ordinal at refusal. ARM/gate snapshots, endpoint clock separation, same-prefix admission, and capture quality remain unchanged.
+
 ### Exhaustive identity projection
 
 The model explicitly classifies every Rust WireMessage variant by token-session, direct-session or sessionless meaning. The generated match has no wildcard: adding/removing an unclassified variant is a compiler error. The public identity adapter delegates exactly to this projection. In particular StreamStatus cannot silently become session0 through a fallback. Outputs are project configuration; the shared generator contains no Pico path or plugin names.

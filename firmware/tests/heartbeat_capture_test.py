@@ -164,16 +164,16 @@ class Validation(unittest.TestCase):
 class Prepare(unittest.TestCase):
     class USB:
         fd=7
-        def __init__(self):self.calls=[];self.old_caps=False;self.state='0'
+        def __init__(self):self.calls=[];self.old_caps=False;self.old_live=False;self.state='0'
         def request(self,command,prefix):
             self.calls.append(command)
             if command=='AP2 CAPS':return ['ap2 caps v=3 hb=1 event=19' if not self.old_caps else 'ap2 caps v=2']
             if command=='CY1 CAPS':return ['cy1 caps '+ ' '.join(k+'='+v for k,v in hc.cy.SCHEMA.items())]
             if command=='EV1 STATUS':return ['ev1 status b=1 on=0 sat=0 seq=0']
             if command.startswith('AP2 ARM_HB'):self.state='4'
-            if prefix=='ap2 status ':return [f'ap2 status boot=1 run={"0" if self.state=="0" else "a"} state={self.state}']
+            if prefix=='ap2 status ':return [f'ap2 status boot=1 run={"0" if self.state=="0" else "a"} state={self.state} gen=1']
             if command=='AP2 TRIGGER':return ['ap2 trigger b=1 r=a mode=1 o=7 g=7 m=0 flags=0']
-            if command=='AP2 LIVE':return ['ap2 live boot=1 session=9 active=1 gen=1 buttons=0 begin=0 state=4 trigger=0']
+            if command=='AP2 LIVE':return ['ap2 live boot=1 session=9 active=1 gen=1 buttons=0 begin=0 state=4 trigger=0'+('' if self.old_live else ' message=7')]
             raise AssertionError(command)
     def host(self,log,bad=False):
         state=dict(phase='idle',boot='host',run='0',target='lcd',heartbeat_trigger=1,connection=431,session=9,last_message=7)
@@ -201,7 +201,43 @@ class Prepare(unittest.TestCase):
         with tempfile.TemporaryDirectory()as d:
             with self.assertRaises(ValueError):hc.prepare(usb,self.host(log,True),'lcd','a',Path(d))
             self.assertTrue((Path(d)/'identity.json').exists());self.assertFalse((Path(d)/'ready.json').exists())
+            before=json.loads((Path(d)/'baseline-before-arm.json').read_text())
+            refused=json.loads((Path(d)/'baseline-arm-refusal.json').read_text())
+            self.assertEqual(before['host_before']['value']['last_message'],7)
+            self.assertEqual(refused['host_after']['value']['last_message'],7)
+            self.assertEqual(before['pico_before']['value']['message'],'7')
+            self.assertEqual(refused['pico_after']['value']['message'],'7')
+            self.assertLess(before['host_before']['response_after_ns'],refused['arm_request_before_ns'])
+            self.assertLess(refused['arm_response_after_ns'],refused['host_after']['request_before_ns'])
         self.assertEqual(sum(c.startswith('AP2 ARM_HB')for c in usb.calls),1)
+        self.assertEqual(sum(q['op']=='arm'for q in log),1)
+    def test_refusal_bracket_keeps_moving_host_watermark_bounded(self):
+        usb=self.USB();status=self.host([],True);reads=0
+        def moving_host(query):
+            nonlocal reads
+            if query['op']=='status':
+                reads+=1
+                value=status(query)
+                if reads==3:value['last_message']=8
+                return value
+            return status(query)
+        with tempfile.TemporaryDirectory()as d:
+            with self.assertRaisesRegex(ValueError,'baseline'):
+                hc.prepare(usb,moving_host,'lcd','a',Path(d))
+            before=json.loads((Path(d)/'baseline-before-arm.json').read_text())
+            after=json.loads((Path(d)/'baseline-arm-refusal.json').read_text())
+            self.assertEqual(before['host_before']['value']['last_message'],7)
+            self.assertEqual(after['host_after']['value']['last_message'],8)
+            self.assertEqual(sum(c.startswith('AP2 ARM_HB')for c in usb.calls),1)
+    def test_old_firmware_still_records_host_refusal_bracket(self):
+        usb=self.USB();usb.old_live=True
+        with tempfile.TemporaryDirectory()as d:
+            with self.assertRaisesRegex(ValueError,'baseline'):
+                hc.prepare(usb,self.host([],True),'lcd','a',Path(d))
+            before=json.loads((Path(d)/'baseline-before-arm.json').read_text())
+            after=json.loads((Path(d)/'baseline-arm-refusal.json').read_text())
+            self.assertNotIn('message',before['pico_before']['value'])
+            self.assertIsNotNone(after['host_after'])
     def test_observation_finite_and_finally_restores_DTR(self):
         for fail in [False,True]:
             log=[]
