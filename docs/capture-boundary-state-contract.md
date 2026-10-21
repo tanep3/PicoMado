@@ -18,7 +18,7 @@ ON応答前は既存32件の有界preludeへ元host sequence付きで保存し�
 | --- | --- | --- | --- | --- |
 | T01 | UNANCHORED | fact | 同じ | 有界preludeへ保存。準備不可 |
 | T02 | UNANCHORED | 正常ON応答 | WAIT_BEGIN | anchorを1回確定しpreludeを同じacceptへ再生 |
-| T03 | WAIT_BEGIN | 同bootの区間前fact（seq<start、またはseq=startの非begin） | 同じ | 除外。区間内のbegin数に含めない |
+| T03 | WAIT_BEGIN | 同bootの区間前fact（seq<start） | 同じ | 除外。区間内のbegin数に含めない。同seqの非beginは区間前と証明できずsource重複検査で拒否 |
 | T04 | WAIT_BEGIN | anchor一致のbegin、先行する区間内factなし | OPEN | 最初のbegin/host sequenceを保存 |
 | T05 | WAIT_BEGIN | anchor不一致のbegin、または先行区間内factの後のbegin | 同じ／OPEN | unexpected_begin／begin_reordered。品質不成立。後から正常beginが来ても品質は戻らない |
 | T06 | OPEN | begin（同seq、異seq、低seq、異catalogを含む） | 同じ | duplicate_beginまたはunexpected_begin。最初の開始を上書きしない |
