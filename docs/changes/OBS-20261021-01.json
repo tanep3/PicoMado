@@ -1,59 +1,5 @@
 {
-  "id": "OBS-20261021-01",
-  "title": "Observation domain ownership and enforced development route",
-  "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
-  "implementer": "independent prevention worker",
-  "status": "in_progress",
   "cause": "Meaning-distinct facts and lifecycle/completion judgments were represented as raw counters/dicts across adapters.",
-  "introduction_cause": "StreamStatus fell through identity extraction; controller/observer interval and durable evidence were not an aggregate boundary.",
-  "escape_cause": "Fixture expectations followed implementation structure and passing counts; no shared mandatory root/ship gate or structural ownership enforcement.",
-  "domain_authority": "docs/contracts-observation-design.md#obs-20261021-01-observation-domain",
-  "standard": "development/standard/v1/standard.md",
-  "stages": {
-    "design": {
-      "state": "verified",
-      "evidence": [
-        {
-          "kind": "commit",
-          "commit": "82156eb79085fe9a55ffca506773e8da4676ca90"
-        }
-      ]
-    },
-    "implementation": {
-      "state": "in_progress",
-      "evidence": []
-    },
-    "independent_verification": {
-      "state": "not_started",
-      "evidence": []
-    },
-    "operational_application": {
-      "state": "not_started",
-      "evidence": []
-    },
-    "effectiveness_confirmation": {
-      "state": "not_started",
-      "evidence": []
-    }
-  },
-  "dependencies": [
-    "Preserve capacity WIP six hashes and accepted firmware/server artifacts",
-    "Parent independently owns final acceptance",
-    "External protection/permission changes separately authorized"
-  ],
-  "deliverables": [
-    "semantic values and aggregate-owned completion",
-    "minimal reusable standard + project-specific boundary configuration",
-    "root CLI/CI/build/pre-write route",
-    "structural and historical-fault refusal evidence",
-    "active-route adoption record"
-  ],
-  "unapplied": [
-    "independent review",
-    "canonical work-route integration",
-    "external CI branch protection",
-    "OS write restriction"
-  ],
   "completion_evidence_required": [
     "fixed design and implementation commits",
     "static/compiler refusal logs S01-S05",
@@ -62,8 +8,18 @@
     "active AGENTS/root route invocation proof",
     "parent closure record after effectiveness confirmation"
   ],
-  "zero_bug_guarantee": false,
-  "design_commit": "82156eb79085fe9a55ffca506773e8da4676ca90",
+  "deliverables": [
+    "semantic values and aggregate-owned completion",
+    "minimal reusable standard + project-specific boundary configuration",
+    "root CLI/CI/build/pre-write route",
+    "structural and historical-fault refusal evidence",
+    "active-route adoption record"
+  ],
+  "dependencies": [
+    "Preserve capacity WIP six hashes and accepted firmware/server artifacts",
+    "Parent independently owns final acceptance",
+    "External protection/permission changes separately authorized"
+  ],
   "design_artifacts": [
     "docs/contracts-observation-design.md",
     "docs/development-process.md",
@@ -71,11 +27,61 @@
     "docs/changes/OBS-20261021-01-review-fix-contract.md",
     "docs/changes/OBS-20261021-01-application-evidence-contract.md"
   ],
+  "design_commit": "82156eb79085fe9a55ffca506773e8da4676ca90",
+  "domain_authority": "docs/contracts-observation-design.md#obs-20261021-01-observation-domain",
+  "escape_cause": "Fixture expectations followed implementation structure and passing counts; no shared mandatory root/ship gate or structural ownership enforcement.",
+  "id": "OBS-20261021-01",
+  "implementer": "independent prevention worker",
+  "introduction_cause": "StreamStatus fell through identity extraction; controller/observer interval and durable evidence were not an aggregate boundary.",
+  "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
   "review_corrections": [
     "P2-01 workflow and evidence binding",
     "P2-02 immutable verified completion",
     "P2-03 actual build lineage"
   ],
   "revision": 2,
-  "supersedes_local_implementation": "fe47acd424ae74018374d63ec874d42b3ed0b3ea"
+  "stages": {
+    "design": {
+      "evidence": [
+        {
+          "commit": "82156eb79085fe9a55ffca506773e8da4676ca90",
+          "kind": "commit"
+        }
+      ],
+      "state": "verified"
+    },
+    "effectiveness_confirmation": {
+      "evidence": [],
+      "state": "not_started"
+    },
+    "implementation": {
+      "evidence": [
+        {
+          "SHA256": "71ec473d079e0de38414425d64f47cbac9274f8b935ca7d70d1f346d68e13da1",
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-19/task-2/observation-prevention-20261021/p2-04-gate-evidence/check.json"
+        }
+      ],
+      "state": "verified"
+    },
+    "independent_verification": {
+      "evidence": [],
+      "state": "not_started"
+    },
+    "operational_application": {
+      "evidence": [],
+      "state": "not_started"
+    }
+  },
+  "standard": "development/standard/v1/standard.md",
+  "status": "in_progress",
+  "supersedes_local_implementation": "fe47acd424ae74018374d63ec874d42b3ed0b3ea",
+  "title": "Observation domain ownership and enforced development route",
+  "unapplied": [
+    "independent review",
+    "canonical work-route integration",
+    "external CI branch protection",
+    "OS write restriction"
+  ],
+  "zero_bug_guarantee": false
 }
