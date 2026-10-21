@@ -1,0 +1,15 @@
+{
+  "design_only": true,
+  "old_trace": 5120,
+  "old_AP2_records": 5376,
+  "old_total": 10496,
+  "new_union": 5712,
+  "new_control": 2368,
+  "new_text": 640,
+  "new_management_max": 256,
+  "new_total": 8976,
+  "saved": 1520,
+  "possible_heap": 12600,
+  "mutual_exclusion_tradeoff": true,
+  "design_accepted": false
+}
