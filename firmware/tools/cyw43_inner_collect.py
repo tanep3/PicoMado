@@ -2,7 +2,10 @@
 import struct
 from pathlib import Path
 import ack_probe_v2 as ap
-SCHEMA={'v':'1','rows':'f','crc':'100','off':'e','depth':'4','row':'90','src':'cyw43-inner-v1:7f4c9375'}
+SCHEMA={'v':'2','rows':'f','crc':'100','off':'e','depth':'4','row':'98','src':'cyw43-inner-v2:7f4c9375'}
+LEGACY_SCHEMA={'v':'1','rows':'f','crc':'100','off':'e','depth':'4','row':'90','src':'cyw43-inner-v1:7f4c9375'}
+def valid_schema(caps,rows):
+ return (caps==SCHEMA and all(len(r)==7 for r in rows)) or (caps==LEGACY_SCHEMA and all(len(r)==6 for r in rows))
 def require(ok,why):
  if not ok:raise ValueError(why)
 def one(usb,command,prefix):
@@ -20,7 +23,7 @@ def digest(rows):
   nonlocal h
   for b in(int(v)&((1<<(8*n))-1)).to_bytes(n,'little'):h=((h^b)*16777619)&0xffffffff
  for parts in rows:
-  a,b,c,d,e,f=parts
+  a,b,c,d,e,f=parts[:6]
   for k in ['t','bus','end']:word(a[k],8)
   for key in [b,c]:
    for k,n in [('s',4),('e',4),('a',4),('ip',2),('len',2),('et',2),('f',1),('v',1)]:word(key[k],n)
@@ -32,10 +35,13 @@ def digest(rows):
   word(e['rxrc'],2);word(e['n'],2)
   for k in ['f0','f1','c0','c1','s0','s1']:word(f[k],1)
   word(a['dep'],1);word(a['nest'],1)
+  if len(parts)==7:
+   g=parts[6];word(g['valid'],2)
+   for byte in int(g['mac']).to_bytes(6,'big'):word(byte,1)
  return h
 
 def classify(parts,loss=False):
- a,b,c,d,e,f=parts;flags=a['flags']
+ a,b,c,d,e,f=parts[:6];flags=a['flags']
  if loss or not flags&16 or flags&(256|1024|8192):return'incomplete'
  if flags&512:return'credit_timeout'
  if f['brc'] or not flags&8:return'bus_error_or_no_bus_write'
@@ -51,13 +57,13 @@ def collect(usb,boot,run,out=None):
   root=Path(out)/'cyw43-parts';root.mkdir(exist_ok=False);ap.persist(root/'identity.json',{'caps':caps,'status':status,'quality':quality})
  for i in range(n):
   parts=[]
-  for p in range(6):
+  for p in range(7):
    row=one(usb,f'CY1 READ {boot} {run} {i:x} {p:x}','cy1 row ')
    value={k:int(v,10 if k in ['rxrc','brc']else 16)for k,v in row.items()}
    require(value['i']==i and value['p']==p,'CY1 part identity/order mismatch')
    if out is not None:ap.persist(root/f'{i:x}-{p:x}.json',value)
    parts.append(value)
-  require(parts[0]['flags']&16,'CY1 incomplete record');require(parts[3]['off']==14 and 0<parts[3]['cov']<=256 and parts[3]['cov']<=parts[3]['domain'],'CY1 CRC domain bound');rows.append(parts)
+  require(parts[0]['flags']&16,'CY1 incomplete record');require(parts[3]['off']==14 and 0<parts[3]['cov']<=256 and parts[3]['cov']<=parts[3]['domain'],'CY1 CRC domain bound');require(0<=parts[6]['valid']<128 and 0<=parts[6]['mac']<(1<<48),'CY1 validity/MAC bounds');rows.append(parts)
  require(digest(rows)==int(status['h'],16),'CY1 digest mismatch')
  require(one(usb,'CY1 STATUS','cy1 status ')==status and one(usb,'CY1 QUALITY','cy1 quality ')==quality,'CY1 frozen capture changed while collecting')
  loss=any(int(status[k],16)for k in ['over','inc','changed'])or any(int(quality[k],16)for k in ['sat','depth','reject'])

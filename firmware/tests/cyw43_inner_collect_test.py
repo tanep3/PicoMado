@@ -8,7 +8,7 @@ class Export:
  def __init__(self):self.lines=Path(os.environ['PM_CYW_EXPORT_FIXTURE']).read_text().splitlines();self.requests=[];self.status_calls=0;self.missing=None;self.corrupt=False;self.overflow=False;self.stale=False;self.schema=False;self.change=False
  def request(self,cmd,end):
   self.requests.append(cmd)
-  if cmd=='CY1 CAPS':line=next(x for x in self.lines if x.startswith('cy1 caps '));return[line.replace('v=1','v=2')if self.schema else line]
+  if cmd=='CY1 CAPS':line=next(x for x in self.lines if x.startswith('cy1 caps '));return[line.replace('v=2','v=3')if self.schema else line]
   if cmd=='CY1 STATUS':
    self.status_calls+=1;line=next(x for x in self.lines if x.startswith('cy1 status '))
    if self.overflow:line=line.replace('over=0','over=1')
@@ -32,7 +32,7 @@ class Tests(unittest.TestCase):
   transport=wire.Serial('/dev/fake');transport.fd=123
   with patch.object(wire.os,'write',side_effect=write),patch.object(wire.os,'read',side_effect=lambda *_:pending.pop(0)),patch.object(wire.select,'select',side_effect=select):
    result=c.collect(transport,'1','a')
-  transport.fd=None;self.assertEqual(len(result['rows']),2);self.assertTrue(result['no_diagnostic_loss']);self.assertEqual(commands[0],'CY1 CAPS');self.assertIn('CY1 READ 1 a 1 5',commands)
+  transport.fd=None;self.assertEqual(len(result['rows']),2);self.assertTrue(result['no_diagnostic_loss']);self.assertEqual(commands[0],'CY1 CAPS');self.assertIn('CY1 READ 1 a 1 6',commands)
  def test_actual_serial_parser_reports_CY1_error(self):
   transport=wire.Serial('/dev/fake');transport.fd=123
   with patch.object(wire.os,'write',side_effect=lambda fd,data:len(data)),patch.object(wire.os,'read',return_value=b'cy1 error=identity_or_state\n'),patch.object(wire.select,'select',return_value=([123],[123],[])):
@@ -42,7 +42,7 @@ class Tests(unittest.TestCase):
   v=c.collect(Export(),'1','a');self.assertEqual(len(v['rows']),2);self.assertEqual(v['classifications'],['no_credit_stall','bus_error_or_no_bus_write']);self.assertFalse(v['RF_departure_proven'])
  def test_parts_persist_before_complete(self):
   with tempfile.TemporaryDirectory()as d:
-   v=c.collect(Export(),'1','a',Path(d));self.assertEqual(len(list((Path(d)/'cyw43-parts').glob('*.json'))),13);self.assertEqual(json.loads((Path(d)/'cyw43.json').read_text())['status'],v['status'])
+   v=c.collect(Export(),'1','a',Path(d));self.assertEqual(len(list((Path(d)/'cyw43-parts').glob('*.json'))),15);self.assertEqual(json.loads((Path(d)/'cyw43.json').read_text())['status'],v['status'])
  def test_interruption_retains_prior_parts(self):
   usb=Export();usb.missing=('1','2')
   with tempfile.TemporaryDirectory()as d:

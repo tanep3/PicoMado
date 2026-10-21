@@ -1,5 +1,6 @@
 #include "cyw43_inner_probe.h"
 #if PM_CYW43_INNER_PROBE
+#include "cyw43_frame_validity.h"
 #include "pico/stdlib.h"
 #include <string.h>
 #include <limits.h>
@@ -15,8 +16,8 @@ static struct {
 } probe;
 _Static_assert(PM_CYW_INNER_CAP<=15,"ticket slot is four bits, zero reserved");
 _Static_assert(sizeof(pm_cyw_key)==20,"explicit key layout");
-_Static_assert(sizeof(pm_cyw_row)<=144,"fixed row budget");
-_Static_assert(sizeof probe<=2544,"inner probe BSS budget");
+_Static_assert(sizeof(pm_cyw_row)<=152,"fixed row budget");
+_Static_assert(sizeof probe<=2664,"inner probe BSS budget");
 static void inc(uint32_t *v){if(*v==UINT32_MAX)probe.saturated=1;else ++*v;}
 static void add(uint32_t *v,uint32_t n){if(n>UINT32_MAX-*v){*v=UINT32_MAX;probe.saturated=1;}else *v+=n;}
 static void inc16(uint16_t *v,pm_cyw_row *r){if(*v==UINT16_MAX){r->flags|=PM_CY_SAT;probe.saturated=1;}else ++*v;}
@@ -104,6 +105,10 @@ void pm_cyw_probe_bus(uint32_t ticket,const uint8_t*p,size_t capacity,uint8_t fl
  if(r->flags&PM_CY_WAIT)r->wait_us=(uint32_t)time_us_64()-r->wait_us;
  if(view(r,p,capacity)){
   r->crc_bus=crc(p+14,r->covered);bool matches;key(p+18,r->domain-4,&r->bus,&matches);r->bdc_bus=be32(p+14);
+  if(r->covered==r->domain){
+   pm_frame_validity v=pm_cyw_validate_frame(p,capacity,r->domain-4,r->sequence_before);
+   r->validity=v.checks;memcpy(r->dest_mac,v.dest_mac,sizeof r->dest_mac);
+  }
   if(r->crc_bus!=r->crc_before)r->flags|=PM_CY_CHANGED;
   if(different(&r->original,&r->bus))r->flags|=PM_CY_KEY_CHANGED;
   if(!r->bus.valid)r->flags|=PM_CY_BAD_BUS_KEY;
@@ -130,7 +135,7 @@ static uint32_t key_digest(uint32_t h,const pm_cyw_key*k){h=word(h,k->seq,4);h=w
 static uint32_t digest(void){
  uint32_t h=2166136261u;for(unsigned i=0;i<probe.count;i++){pm_cyw_row*r=&probe.rows[i];h=word(h,r->enter_us,8);h=word(h,r->bus_us,8);h=word(h,r->end_us,8);h=key_digest(h,&r->original);h=key_digest(h,&r->bus);
  #define W(k,n) h=word(h,r->k,n)
- W(crc_before,4);W(crc_rx,4);W(crc_bus,4);W(bdc_before,4);W(bdc_bus,4);W(wait_us,4);W(polls,4);W(io_calls,4);W(io_requested,4);W(io_errors,4);W(ticket,4);W(result,4);W(flags,2);W(covered,2);W(domain,2);W(rx_data,2);W(rx_control,2);W(rx_event,2);W(rx_bad,2);W(rx_result,2);W(rx_length,2);W(flow_before,1);W(flow_bus,1);W(credit_before,1);W(credit_bus,1);W(sequence_before,1);W(sequence_bus,1);W(depth,1);W(nested,1);
+ W(crc_before,4);W(crc_rx,4);W(crc_bus,4);W(bdc_before,4);W(bdc_bus,4);W(wait_us,4);W(polls,4);W(io_calls,4);W(io_requested,4);W(io_errors,4);W(ticket,4);W(result,4);W(flags,2);W(covered,2);W(domain,2);W(rx_data,2);W(rx_control,2);W(rx_event,2);W(rx_bad,2);W(rx_result,2);W(rx_length,2);W(flow_before,1);W(flow_bus,1);W(credit_before,1);W(credit_bus,1);W(sequence_before,1);W(sequence_bus,1);W(depth,1);W(nested,1);W(validity,2);for(unsigned m=0;m<6;m++)h=word(h,r->dest_mac[m],1);
  #undef W
  }return h;
 }

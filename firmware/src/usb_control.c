@@ -190,17 +190,18 @@ static void command(const char *line){
 #endif
 #if PM_CYW43_INNER_PROBE
     if(n>=2 && !strcmp(w[0],"CY1")){
-        if(n==2 && !strcmp(w[1],"CAPS")){response("cy1 caps v=1 rows=%x crc=%x off=%x depth=%x row=%x src=%s\n",PM_CYW_INNER_CAP,PM_CYW_INNER_CRC_CAP,PM_CYW_INNER_OFFSET,PM_CYW_INNER_DEPTH,(unsigned)sizeof(pm_cyw_row),pm_cyw43_inner_translation_unit);return;}
+        if(n==2 && !strcmp(w[1],"CAPS")){response("cy1 caps v=2 rows=%x crc=%x off=%x depth=%x row=%x src=%s\n",PM_CYW_INNER_CAP,PM_CYW_INNER_CRC_CAP,PM_CYW_INNER_OFFSET,PM_CYW_INNER_DEPTH,(unsigned)sizeof(pm_cyw_row),pm_cyw43_inner_translation_unit);return;}
         pm_cyw_status s;pm_net_cyw_status(&s);
         if(n==2 && !strcmp(w[1],"STATUS")){response("cy1 status b=%llx r=%llx n=%x over=%x inc=%x gen=%x active=%u changed=%u h=%x\n",(unsigned long long)s.boot,(unsigned long long)s.run,s.count,s.dropped,s.incomplete,s.generation,s.active,s.changed,s.digest);return;}
         if(n==2 && !strcmp(w[1],"QUALITY")){response("cy1 quality sat=%x depth=%x reject=%x skip=%x crc_calls=%x bytes=%x us=%x max=%x\n",s.saturated,s.depth_lost,s.rejected,s.skipped,s.crc_calls,s.crc_bytes,s.crc_us,s.crc_max_us);return;}
         uint64_t boot,run,index,part;pm_cyw_row r;
-        if(n==6 && !strcmp(w[1],"READ") && hex(w[2],&boot) && hex(w[3],&run) && hex(w[4],&index) && hex(w[5],&part) && index<PM_CYW_INNER_CAP && part<6 && pm_net_cyw_read(boot,run,(unsigned)index,&r)){
+        if(n==6 && !strcmp(w[1],"READ") && hex(w[2],&boot) && hex(w[3],&run) && hex(w[4],&index) && hex(w[5],&part) && index<PM_CYW_INNER_CAP && part<7 && pm_net_cyw_read(boot,run,(unsigned)index,&r)){
             if(part==0)response("cy1 row i=%x p=0 t=%llx bus=%llx end=%llx id=%x flags=%x dep=%x nest=%x\n",(unsigned)index,(unsigned long long)r.enter_us,(unsigned long long)r.bus_us,(unsigned long long)r.end_us,r.ticket,r.flags,r.depth,r.nested);
             if(part==1 || part==2){pm_cyw_key *k=part==1?&r.original:&r.bus;response("cy1 row i=%x p=%x s=%x e=%x a=%x ip=%x len=%x et=%x f=%x v=%x\n",(unsigned)index,(unsigned)part,k->seq,k->end,k->ack,k->ipid,k->length,k->type,k->flags,k->valid);}
             if(part==3)response("cy1 row i=%x p=3 c0=%x cr=%x cb=%x b0=%x bb=%x off=%x cov=%x domain=%x\n",(unsigned)index,r.crc_before,r.crc_rx,r.crc_bus,r.bdc_before,r.bdc_bus,PM_CYW_INNER_OFFSET,r.covered,r.domain);
             if(part==4)response("cy1 row i=%x p=4 wait=%x polls=%x d=%x c=%x a=%x bad=%x rxrc=%d n=%x\n",(unsigned)index,r.wait_us,r.polls,r.rx_data,r.rx_control,r.rx_event,r.rx_bad,r.rx_result,r.rx_length);
             if(part==5)response("cy1 row i=%x p=5 calls=%x req=%x errs=%x f0=%x f1=%x c0=%x c1=%x s0=%x s1=%x brc=%ld\n",(unsigned)index,r.io_calls,r.io_requested,r.io_errors,r.flow_before,r.flow_bus,r.credit_before,r.credit_bus,r.sequence_before,r.sequence_bus,(long)r.result);
+            if(part==6)response("cy1 row i=%x p=6 valid=%x mac=%02x%02x%02x%02x%02x%02x\n",(unsigned)index,r.validity,r.dest_mac[0],r.dest_mac[1],r.dest_mac[2],r.dest_mac[3],r.dest_mac[4],r.dest_mac[5]);
             return;
         }
         response("cy1 error=identity_or_state\n");return;

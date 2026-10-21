@@ -19,6 +19,8 @@ typedef struct {
  int16_t rx_result;
  uint16_t rx_length;
  uint8_t flow_before,flow_bus,credit_before,credit_bus,sequence_before,sequence_bus,depth,nested;
+ uint8_t dest_mac[6];
+ uint16_t validity;
 } pm_cyw_row;
 typedef struct {
  uint64_t boot,run;

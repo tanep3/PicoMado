@@ -246,7 +246,7 @@ def validate(pico, host, extra, ready, headers):
     generation=ap.PicoConnectionGeneration(ready['generation'])
     checks=IntegrityFacts(ap.fnv(pico['records'])==int(pico['status']['digest'],16),
         host_crc==host['status']['digest'],txlib.tx_digest(extra['tx_rows'])==int(extra['tx_status']['h'],16),
-        inner['caps']==cy.SCHEMA,cy.digest(inner['rows'])==int(inner['status']['h'],16),
+        cy.valid_schema(inner['caps'],inner['rows']),cy.digest(inner['rows'])==int(inner['status']['h'],16),
         ap.pico_status_view(pico['status']).generation==generation,
         ap.pico_hex_generation_view(extra['tx_status'])==generation,
         ap.pico_hex_generation_view(inner['status'])==generation)

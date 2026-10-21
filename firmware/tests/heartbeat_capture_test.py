@@ -44,7 +44,8 @@ def fixture():
              key, key | dict(p=2),
              dict(i=0, p=3, c0=45, cr=0, cb=45, b0=0, bb=0, off=14, cov=157, domain=157),
              dict(i=0, p=4, wait=0, polls=0, d=0, c=0, a=0, bad=0, rxrc=0, n=0),
-             dict(i=0, p=5, calls=0, req=0, errs=0, f0=0, f1=0, c0=1, c1=1, s0=1, s1=2, brc=0)]
+             dict(i=0, p=5, calls=0, req=0, errs=0, f0=0, f1=0, c0=1, c1=1, s0=1, s1=2, brc=0),
+             dict(i=0, p=6, valid=0, mac=0)]
     inner = dict(caps=hc.cy.SCHEMA.copy(), status=dict(b='1', r='a', gen='1', active='0',
                  n='1', over='0', inc='0', changed='0', h='0'),
                  quality=dict(sat='0', depth='0', reject='0'), rows=[parts], no_diagnostic_loss=True)

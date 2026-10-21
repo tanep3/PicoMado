@@ -10,7 +10,7 @@ def generate(source):
   nonlocal text
   if text.count(before)!=1:raise ValueError('ambiguous SDK insertion: '+before[:70])
   text=text.replace(before,after)
- text='#include "cyw43_inner_probe.h"\nconst char pm_cyw43_inner_translation_unit[] = "cyw43-inner-v1:7f4c9375";\n'+text
+ text='#include "cyw43_inner_probe.h"\nconst char pm_cyw43_inner_translation_unit[] = "cyw43-inner-v2:7f4c9375";\n'+text
  one('''        return CYW43_FAIL_FAST_CHECK(-CYW43_EINVAL);
     }
 
