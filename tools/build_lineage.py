@@ -42,6 +42,18 @@ def cache(path):
     return values
 
 
+# Existing firmware diagnostics only. Values become explicit configure options;
+# no arbitrary CMake or shell arguments are accepted through the environment.
+FIRMWARE_FLAGS=('PM_ACK_PATH_PROBE','PM_USB_BUTTON_SIM','PM_TX_LINK_PROBE',
+    'PM_CYW43_INNER_PROBE','PM_CYW43_SPI_REAL_SIZE','PM_EVENT_STREAM','PM_STREAM_DIAGNOSTICS')
+
+
+def firmware_flags():
+    values={name:os.environ.get(name,'OFF')for name in FIRMWARE_FLAGS}
+    require(all(v in ('ON','OFF')for v in values.values()),'firmware flags must be ON or OFF')
+    return values
+
+
 def snapshot(root,kind,build_dir,device=None,mode='normal',features=(),no_default=False):
     root=Path(root).resolve();build_dir=Path(build_dir).resolve()
     require(not os.environ.get('RUSTC_WRAPPER')and not os.environ.get('RUSTC_WORKSPACE_WRAPPER'),'compiler wrappers require separately modelled provenance')
@@ -97,10 +109,12 @@ def run(root,args,gate):
     start=gate.input_snapshot();started=time.monotonic_ns();configure=None
     if args.kind=='firmware':
         require(args.device and args.device.replace('-','').replace('_','').isalnum(),'device required')
+        requested_flags=firmware_flags()
         use_sample='ON'if args.mode=='sample'else'OFF';unbound='ON'if args.mode in ['unbound','unbound_panel']else'OFF'
         configure=[shutil.which('cmake'),'-S',str(root/'firmware'),'-B',str(build_dir),'-DPM_DEVICE='+args.device,
             '-DPM_USE_SAMPLE='+use_sample,'-DPM_PREPARE_UNBOUND='+unbound,'-DPM_PREPARE_UNBOUND_PANEL='+('ON'if args.mode=='unbound_panel'else'OFF'),
             '-DPICO_BOARD=pico_w','-DCMAKE_BUILD_TYPE=Release','-DCMAKE_EXPORT_COMPILE_COMMANDS=ON','-DPICO_SDK_FETCH_FROM_GIT=OFF','-DPICO_SDK_SUBMODULE_AUTO_UPDATE=OFF']
+        configure+=['-D'+name+'='+value for name,value in requested_flags.items()]
         with (build_dir.parent/(build_dir.name+'-configure.log')).open('xb')as log:subprocess.run(configure,stdout=log,stderr=subprocess.STDOUT,check=True)
         command=[shutil.which('cmake'),'--build',str(build_dir),'-j4','--verbose'];image=build_dir/(args.device+'.uf2')
     else:
@@ -110,6 +124,8 @@ def run(root,args,gate):
         if args.no_default_features:command+=['--no-default-features']
         image=build_dir/'release/picomado-server'
     before=snapshot(root,args.kind,build_dir,args.device,args.mode,features,args.no_default_features)
+    if args.kind=='firmware':
+        require(all(before['flags'].get(k)==v for k,v in requested_flags.items()),'configured firmware flags differ from requested values')
     logpath=build_dir.parent/(build_dir.name+'-build.log')
     with logpath.open('xb')as log:subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,check=True)
     after=snapshot(root,args.kind,build_dir,args.device,args.mode,features,args.no_default_features)

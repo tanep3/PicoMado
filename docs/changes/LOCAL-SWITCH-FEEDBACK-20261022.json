@@ -4,7 +4,7 @@
   "status": "in_progress",
   "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
   "implementer": "local-switch-feedback worker",
-  "design_commit": "9624c17cedc6442c4c23f98bb23bc5d0afa47efd",
+  "design_commit": "228236fdefbb0588d2ab5703269c3cdc6f5b3b95",
   "design_artifacts": [
     "docs/changes/LOCAL-SWITCH-FEEDBACK-20261022.md"
   ],
@@ -14,7 +14,7 @@
       "evidence": [
         {
           "kind": "commit",
-          "commit": "9624c17cedc6442c4c23f98bb23bc5d0afa47efd"
+          "commit": "228236fdefbb0588d2ab5703269c3cdc6f5b3b95"
         }
       ]
     },
