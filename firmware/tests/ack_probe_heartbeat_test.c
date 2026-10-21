@@ -41,6 +41,13 @@ int main(void){
  setup("AP2 ARM_HB 1 d");pm_ack_probe_usb_state(false);pm_ack_probe_sim_button(9,1,1,1,false,4,0);
  assert(probe.summary.state==PM_AP_ARMED&&probe.trigger.flags==1&&!probe.sim_count);hb();
  puts("PASS physical/SIM input does not impersonate heartbeat trigger");
+ setup("AP2 ARM_HB 1 11");pm_ack_probe_usb_state(false);hb();
+ started=probe.summary.trigger_us;assert(probe.trigger.message==1&&probe.records[0].event==PM_AP_PERIODIC_TRIGGER);
+ now+=1000;pm_ack_probe_sim_button(9,1,1,1,false,5,0);
+ assert(probe.summary.state==PM_AP_RECORDING&&probe.summary.trigger_us==started&&probe.trigger.message==1);
+ assert(probe.trigger.flags==1&&probe.sim_count==1&&probe.sim_job==5);
+ assert(probe.records[9].event==PM_AP_SIM_BUTTON&&probe.records[9].session==9);
+ puts("PASS SIM after heartbeat retains trigger and records one input");
  setup("AP2 ARM_HB 1 e");pm_ack_probe_usb_state(false);pm_ack_probe_live(9,false);hb();assert(!probe.summary.count);
  pm_ack_probe_live(9,true);pm_ack_probe_before_lock(9,"{}");assert(!probe.summary.count);
  pm_ack_probe_connection();pm_ack_probe_live(10,true);hb();assert(probe.trigger.flags&4);
