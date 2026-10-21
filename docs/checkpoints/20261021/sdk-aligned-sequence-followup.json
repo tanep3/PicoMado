@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "evidence_root": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-live-20261021T040833Z",
+  "analysis_script": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-live-20261021T040833Z/analysis/sequence_followup.py",
+  "analysis_SHA256": "c62cfe4e976c8dc30f98a8849cb2ea40a3e632bb0edd15833572e4ae6f28fbe3",
+  "results_SHA256": "b57f65e14c8ba517f32e4bc2f6b262c57789fbeea1ae1c5c62882c10e744aafe",
+  "validation": {
+    "passed": 35,
+    "failed": 0
+  },
+  "first_hole": {
+    "seq": 8064,
+    "end": 8163,
+    "bytes": 99,
+    "message": 13,
+    "kind": 5,
+    "kind_confidence": "derived from stream order and fixed framing; no pretrigger COPY/payload direct record",
+    "initial_TX_CY": "not captured before trigger",
+    "retransmission_TX_index": 2,
+    "retransmission_IPID": 48,
+    "retransmission_CY_index": 2
+  },
+  "CY_missing_one": {
+    "TX_index": 8,
+    "IPID": 66,
+    "seq": 8799,
+    "end": 8898,
+    "message": 19,
+    "kind": 5,
+    "input_relative_us": 17756104,
+    "same_as_prior_initial_packet": false
+  },
+  "SACK": {
+    "all40_tcp_header_bytes": 20,
+    "observed_options": 0,
+    "SYN_recorded": false,
+    "TCP_options_copied": false
+  },
+  "quality": {
+    "full_CYW43_complete": false,
+    "no_new_capture": true,
+    "stop_conditions_unchanged": true,
+    "capacity_WIP_preserved": true
+  },
+  "minimal_next_observation": "pre-input initial outstanding heartbeat key/CRC/driver boundary plus exact Pi arrival/ACK, bounded retention reviewed first; proposal only"
+}

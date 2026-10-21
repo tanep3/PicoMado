@@ -76,3 +76,5 @@ CYW43は8件を保存、over=1、inc/changed/sat/depth/rejectは0。TX index0～
 R/analyze.pyによりdigest・因果ID・相関・欠測・正規解放等21照合成功。R/analysis/results.json、validation.json、evidence-sha256.jsonに再現可能な数値・原証拠SHAを保存した。ホストsuite/ARM buildの結果は先行候補記録から変更なし。今回の文書追加に合わせた再buildは不要。
 
 [機械可読checkpoint](checkpoints/20261021/sdk-aligned-live.json)。
+
+後続の[SEQ・メッセージ種別・再送・SACK限界の追解析](sdk-aligned-sequence-followup-20261021.md)では、先行99Bをheartbeat13に対応する推定とし、CY欠測1件が描画後の別heartbeat19再送であることを照合した。新規採取や品質条件変更はしていない。
