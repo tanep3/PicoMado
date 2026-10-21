@@ -40,6 +40,22 @@ runnerの26 scenarioには正常、PREPARED中の番号変化、DTR直前変化�
 
 旧coreで実施したfirmware host 175 PASS行、CY15 native/ASan/UBSan 8variant、CY collector13件、SDK実4関数18scenario、USB互換16件はfirmware不変のため継承する。件数を新規実行と合算しない。詳細は[旧実装結果](periodic-heartbeat-capture-results-20261021.md)。新規追加試験のred log、最初のfixture調整時の失敗logもHへ保持し、最終成功logと区別した。
 
+## 発見ケースの追跡表
+
+以下は確認できる契約・試験・判定経路の対応であり、過去の実装順序を推定したものではない。HB経路では本体が出すidentity/記録を `heartbeat_capture.validate` で照合し、collect・runner・offline CLI・releaseは `heartbeat_evidence.validate_directory` の保存・品質判定を共有する。EV1境界経路はcollectorと保存後canonical解析が同じ `event_stream.Window` を使う。別の採取モードを同一試験と扱わない。
+
+| ケース → 契約 | 不具合再現の根拠 | 修正版の実型／実経路試験 → 判定 |
+| --- | --- | --- |
+| 正常StreamStatus → [証拠契約§1](heartbeat-evidence-review-fix-contract.md) | `H/stream-status-red.log`：実token `(9,77)` がidentity `(0,0)` となり試験失敗 | `service/src/ack_probe.rs::heartbeat_real_stream_status_decoder_identity_and_session`：実encode→Decoder→Stateで同session継続、別session停止。Rust304件成功。正しいidentityを下流の共通検証へ渡す |
+| observer区間不足 → [証拠契約§2](heartbeat-evidence-review-fix-contract.md) | `H/evidence-contract-red.log`：1秒summary等を完了とする期待違反 | `heartbeat_evidence_contract_test.py::test_short_or_unconfirmed_observer_never_complete` とrunnerの `test_START_confirmation_precedes_DTR`：短縮・未確認を拒否。`coverage_ok` をHB共通品質検証へ適用 |
+| raw未保存／改変 → [証拠契約§3](heartbeat-evidence-review-fix-contract.md) | 同red log：5JSONのみの実CLIがexit0。改変matrixの旧版redはこの主張に含めない | 同testの `test_cli_rejects_five_JSON_without_manifest_and_raw`、`test_shared_manifest_valid_then_each_required_file_missing`、`test_tamper_hash_set_identity_and_size`：実CLI非0、共通directory判定で欠落／改変拒否。`heartbeat_capture_test.py::test_tampered_saved_file_prevents_release` で解放も拒否 |
+| 開始重複 → [単一開始の状態表T06等](capture-boundary-state-contract.md) | [既存検証記録](capture-boundary-state-verification.md)：旧版でbegin1→begin2→end3を完全としたreview再現 | `event_collector_test.py::test_duplicate_begin_fresh_pty_never_announces_or_completes` と `capture_boundary_state_test.py::test_table_fact_ack_and_byte_matrix` / `test_fresh_pty_from_transition_table`：同seq／異seq、ON応答前後、byte分割を拒否。collectorとcanonicalのWindow判定一致 |
+| IRQ境界 → [ON/OFF原子性契約](observation-runtime-gap-contract.md) | [既存P2記録](observation-runtime-gap-p2-verification.md)：beginと返信watermarkの競合。旧版へ現在のC試験を再適用したredは未照合 | `observation_boundary_irq_test.c::main`：実trace/control/serializerへ同core IRQを注入しbegin1／Network2／ON返信1、OFF後producer抑制をassert。生成byte列を `observation_boundary_irq_test.py` で読み、Windowとcanonical両方の準備・完了成立を確認 |
+| 再接続 → [HB対応契約](periodic-heartbeat-capture-contract.md)・[owner契約](heartbeat-owner-integration-contract.md) | 旧版redは未確認。誤対応を拒否する回帰として記録 | Rust `heartbeat_late_no_arrival_and_reconnect_are_not_forged`、実PTY runner `test_reconnect_does_not_mutate_new_boot`：旧bindingを停止し、新bootへfreeze/releaseを送らない。保存検証もboot/run不一致を拒否 |
+| 古いHB対応 → [origin／ordinal契約](periodic-heartbeat-capture-contract.md) | 旧版redは未確認。後続の同CRC HBへの付替えを拒否する回帰 | Rust `heartbeat_old_wrong_future_and_duplicate_stop_with_evidence`、`heartbeat_capture_test.py::test_old_prepared_late_identical_crc_cannot_alias`、runner `test_origin_race_and_pre_gate_change_are_quality_stops` のpending_hb等：本体の厳密ordinalとHB共通検証で不合格を保持 |
+
+Python試験名は `firmware/tests/` 配下。今回のHB修正版成功logは前表、EV1境界試験の成功証拠はリンク先の既存検証記録を参照する。この追記ではコード変更・再試験・成果物再作成を行わず、固定core/runnerと独立レビュー対象を維持する。
+
 ## release候補と復旧先
 
 | 成果物 | SHA256 |
