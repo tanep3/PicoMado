@@ -72,3 +72,9 @@ CY/TX/AP2/hostのdrop・malformed・generation変化・digest不一致、全TX/C
 基準は受入れ済みf2bdc7bのappとSDK整合候補の診断適合5ファイル。次の実装用隔離sourceを作る際にこの出自を固定し、容量WIP6ファイルは現在のworkに元hashで保持する。主な対象はfirmware ack_probe.c/h、host ack_probe.rs、専用collector/validatorとそのtests。net.cのtx_sync/共有hookや既存LL patchはそのまま使える見込みだが、順序試験で確認する。
 
 今回は設計・検証条件の先行固定まで。新トリガのruntime実装・候補build・新規採取・実機再flash・サービス/設定/SSH操作は行わない。現行だけで必要事実が得られないこととCY容量gate未成立を親へ返し、レビュー可能な隔離実装案とする。
+
+## 現行版の特性確認結果
+
+設計先行コミット44323f5の後、書込み済み候補と同じ未改変ack_probe.c / cyw43_inner_probe.cをnative ccでcompileした。時刻・USB出力・transportをstubにし、PREPARED heartbeat、ARMEDで45秒/3 heartbeat、未対応START、FREEZE、host内物理入力fixture、host内SIM fixtureの6ケースが成功した。ARMED中のheartbeatはtrigger0/count0/capture=false/CY inactive、入力fixtureだけが記録を開始した。
+
+証拠はR/analysis/trigger-feasibility/current_trigger_test.c、build.log、run.log、validation.json。Rは先行実機証拠rootと同じ。source/harness SHAを保存した。これは現行開始条件の確認であり、新トリガ実装・ARM build・実機試験の成功ではない。fixtureの物理/SIM呼出しはホスト内だけで、USB open/実機入力は0。新モードの受入条件と容量/資源gateは未検証のまま。

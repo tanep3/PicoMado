@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "design_first_commit": "44323f5cb9c809a7a6dad89afd14ff864e9ea60e",
+  "current_firmware_SHA256": "11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485",
+  "current_capability": "input-only AP2 recording; TX/CY follow AP2; heartbeat while ARMED cannot record initial COPY/TX/CY",
+  "native_characterization_PASS": 6,
+  "evidence_root": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-live-20261021T040833Z/analysis/trigger-feasibility",
+  "hardware_actions": 0,
+  "runtime_changes": 0,
+  "proposed_mode": "AP2 ARM_HB; next natural kind5 before_lock; separate event25; no false input",
+  "legacy_mode_unchanged_required": true,
+  "window_us": 20000000,
+  "capacities": {
+    "AP2": 96,
+    "TX": 32,
+    "CY": 8,
+    "host": 512
+  },
+  "capacity_gate": "not yet proven for all legal retransmission and unsolicited frame update orderings; no live start",
+  "resource_gate": "ARM map/stack and <=32B fixed state not built yet",
+  "quality_stop_conditions": "retain all existing conditions; add heartbeat provenance and unexpected input checks; never waive CY loss",
+  "capacity_WIP_6_files_hashes_preserved": true,
+  "next_scope": "review isolated implementation proposal; no reflashing now"
+}
