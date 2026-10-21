@@ -1,0 +1,275 @@
+{
+  "recorded_at_utc": "2026-10-21T00:17:41.068489+00:00",
+  "design_commit": "d70dd84d8b2f99f14fb14a73da483381f24cef6a",
+  "runtime_commit": "58b6d14a021985fd88b190b0d70a4133a70c29ea",
+  "tests": {
+    "server_all_feature_library": 297,
+    "server_default_library": 273,
+    "server_configuration_bin": 1,
+    "firmware_host_PASS_lines": 175,
+    "collector": 24,
+    "causal_parser": 10,
+    "usb_tx_python": 28,
+    "inner_python": 13,
+    "contract_asan_ubsan": "passed; LSan disabled due ptrace",
+    "api_result_profiles": 3,
+    "final_failures": 0
+  },
+  "log_evidence": {
+    "gap-server-all-final.log": {
+      "sha256": "cee66a3628a055e03e12fe16ada25497ab9f4f2ee40bce3f6ea58d9ee380a88e",
+      "bytes": 27866
+    },
+    "gap-server-default-final.log": {
+      "sha256": "bc90ae6fc0dbd0fd8fe539da735172259346a92fa7804263ef795a47555d1eb8",
+      "bytes": 26502
+    },
+    "gap-final-host.log": {
+      "sha256": "1e78d78818125a0c375447d281ce3ae372adfa53ed7707a564a0feb1a088a704",
+      "bytes": 31718
+    },
+    "gap-contract-sanitized.log": {
+      "sha256": "7b6b8a78f83ecd239114b7715d5064de990b3b202e99c11c5795621fc79536f6",
+      "bytes": 1769
+    },
+    "gap-api-results.log": {
+      "sha256": "596c43f46bb0e0838de114c3b319f1a449085a894e8d76166ca195fd8f86dca7",
+      "bytes": 1177
+    },
+    "gap-usb-tx.log": {
+      "sha256": "84ba9b26d8caaf102c44daa374662ec2f8231b9cf4a39b2b4c986518ba3a0681",
+      "bytes": 1677
+    },
+    "gap-inner.log": {
+      "sha256": "421517190f0116397ecf0cfa7b0b5a56e5286436d598a390314c69f8fb1639c6",
+      "bytes": 573
+    },
+    "gap-collector-final.log": {
+      "sha256": "0207e7565531d3207d312f377cdf5a8d1945c246b04f3d1076f5501cac76b0ba",
+      "bytes": 123
+    },
+    "gap-causality.log": {
+      "sha256": "6c23f90a99af775870430c2775ac7811f3055d35b2d34c8e1a1a49bf2c62fc42",
+      "bytes": 109
+    },
+    "gap-server-release.log": {
+      "sha256": "42af97d55ba5c1ea6e05608df5f63c0a27c4e8ee88b81547b1e9db7b0414924b",
+      "bytes": 186
+    }
+  },
+  "source_hashes": {
+    "firmware/src/main.c": "407b9d34e05acf96f61a8e95d0cd79a0df9a15ca4013ec287d89b597ff57f8a7",
+    "firmware/src/net.c": "8766f9885967e2de7f2a3cc561f6c881ecd52a574dfe9b48bce14724684a483a",
+    "firmware/src/net.h": "97749bd8703082d10909c9cc0cc010c5db1e5fc4bc82f1478c0e040eb04d0c61",
+    "firmware/src/observation.h": "4eb3fe7976dff902bef6b597ada1cb02c4c2acf6d7e6f96c61445af4b4c7e03d",
+    "firmware/src/observation_transport.h": "72619f9d7731f5715ac9eed3898cb399e052d63eabdba3c660abca9bc9bab8a4",
+    "firmware/src/trace.c": "0ffe4eb535a07155c39e060743d803b84f3b375c2390c5aa23a38d00b1c91876",
+    "firmware/src/tx_link_probe.c": "056bf0b6017daf65b52fda5b86cca0886ba932d53dfe4a9cc119796bee46c558",
+    "firmware/src/tx_link_probe.h": "5313e07b7789d611c9392daa3abeea57c0300c6d6f02c077af2c23573d81c951",
+    "firmware/src/usb_control.c": "0d602fc981ecacf52100876b4d943d90bc57b05a87491367446435f3333909bd",
+    "firmware/tests/app_timing_test.c": "f15c63374bf44704bb97c017274438693218a0da4d3c2b6d4f0eb91706241f7c",
+    "firmware/tests/eink_app_test.c": "6c1bb477b814c1a210c7b6b900cba18d85c8dcec65463c047f6053aeb79b0dcb",
+    "firmware/tests/event_causality_test.py": "f45013f34c0aa9390ae884c7b1073b757f5e1b5c5d3a69e5c33b57a75d10de38",
+    "firmware/tests/event_collector_test.py": "416a9bcb626de6709285b8107c80c9ba98d9e373ddf3c6b3f727d7a723304c04",
+    "firmware/tests/net_socks_test.c": "1f8384e38289f582d7a45eb4d6f2d5824111d33c9447fb556b9ddf00ad771e4c",
+    "firmware/tests/net_stubs/lwip/tcp.h": "5e7ab0948c725ff487bb9988d3a4f87025e350f1378084af306d4f4689e15ed5",
+    "firmware/tests/observation_drain_test.c": "dd1190aaeda635e30eb27afe18471392bcafc7098fd6afdaf582cf94707ec28f",
+    "firmware/tests/observation_net_test.c": "4b4d4fc08e8978c967acebbc6a0738b703171679d18cdedfaf7950e532d81162",
+    "firmware/tests/observation_transport_test.c": "2d689179c974f341a490f4bd686a10fc7efde28aee8e16910ab6e38a550d3fb9",
+    "firmware/tests/run_contract_tests.sh": "1147daad1ab8478f928db64b43f1560a58a3e5348ee7d3dca4e88a428f2be616",
+    "firmware/tests/tx_adapter_test.c": "82a7785d8ef489cbde681e58493815c7f76b4b1f1fb735aeffbef31998311656",
+    "firmware/tools/event_causality.py": "324b74cb7bc216eea91d43f8020a615ece13692d3b0f1147af6e8bef7b0338ce",
+    "firmware/tools/event_stream.py": "23e6fe697e44ab72203017c8a6498da3b9108f20e20137efa37e28966b00a938",
+    "service/src/network_observation_tests.rs": "b2bcbaf5d69082fe9fcf214bc09537f1705007030da979103b4d69e6eaf5d0e0",
+    "service/src/observation.rs": "d9987c03ed04661ec3980c5b39415f82687ffbdd56a96a694bb8e78db9f6680a",
+    "service/src/protocol.rs": "6f1c22ed70babbd32079b4311125f7500a54e30b08963a3be9bbfccfce27a07e",
+    "service/src/socket_progress.rs": "db3e6a0366aa13ed6d2624de495381fb9d9eff5bb97f2850a1f78e42616bf2b1",
+    "service/src/transport.rs": "4876f1ce8195d2434ea30e959620b623c734b64576285ed53809283ef2b72d0a"
+  },
+  "builds": {
+    "PicoMado-lcd1": {
+      "uf2_sha256": "a68eec0bce2f62560e2e9bc9442c9d4e8254e764580bdd7229c0806820e43a2a",
+      "elf_sha256": "bae9df04bd5fd10f7918d7365dd9e4ec498f344ed6b21356bb023a785ce06b86",
+      "memory": {
+        "symbols": {
+          "__end__": 537121976,
+          "__HeapLimit": 537133056,
+          "__StackBottom": 537137152,
+          "__StackTop": 537141248
+        },
+        "static_main_ram": 251064,
+        "linker_heap_possible": 11080,
+        "stack_reservation": 4096
+      },
+      "private_config_preserved": true,
+      "event_stream": true,
+      "flags": {
+        "PM_EVENT_STREAM": "ON",
+        "PM_STREAM_DIAGNOSTICS": "ON",
+        "PM_ACK_PATH_PROBE": "ON",
+        "PM_USB_BUTTON_SIM": "ON",
+        "PM_TX_LINK_PROBE": "ON",
+        "PM_CYW43_INNER_PROBE": "ON",
+        "PM_AWAY_EEX1": "ON",
+        "PM_EEX1_PORT": "48116",
+        "PM_DEVICE": "PicoMado-lcd1",
+        "PM_USE_SAMPLE": "OFF",
+        "PM_PREPARE_UNBOUND": "OFF",
+        "PM_PREPARE_UNBOUND_PANEL": "OFF",
+        "PICO_BOARD": "pico_w",
+        "CMAKE_BUILD_TYPE": "Release",
+        "PICO_SDK_SUBMODULE_AUTO_UPDATE": "OFF",
+        "PICO_SDK_FETCH_FROM_GIT": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    "E-ink_0": {
+      "uf2_sha256": "9e03eeef8933edba291bf2ab214c59b7e81e13072203ce0a2724f4e55f553e21",
+      "elf_sha256": "b0303ae78520793eb316ec11ab5c3dad2fd8e0593c33f7f443abb03b41260a12",
+      "memory": {
+        "symbols": {
+          "__end__": 537052112,
+          "__HeapLimit": 537133056,
+          "__StackBottom": 537137152,
+          "__StackTop": 537141248
+        },
+        "static_main_ram": 181200,
+        "linker_heap_possible": 80944,
+        "stack_reservation": 4096
+      },
+      "private_config_preserved": true,
+      "event_stream": true,
+      "flags": {
+        "PM_EVENT_STREAM": "ON",
+        "PM_STREAM_DIAGNOSTICS": "ON",
+        "PM_ACK_PATH_PROBE": "ON",
+        "PM_USB_BUTTON_SIM": "ON",
+        "PM_TX_LINK_PROBE": "ON",
+        "PM_CYW43_INNER_PROBE": "ON",
+        "PM_AWAY_EEX1": "ON",
+        "PM_EEX1_PORT": "48116",
+        "PM_DEVICE": "E-ink_0",
+        "PM_USE_SAMPLE": "OFF",
+        "PM_PREPARE_UNBOUND": "OFF",
+        "PM_PREPARE_UNBOUND_PANEL": "OFF",
+        "PICO_BOARD": "pico_w",
+        "CMAKE_BUILD_TYPE": "Release",
+        "PICO_SDK_SUBMODULE_AUTO_UPDATE": "OFF",
+        "PICO_SDK_FETCH_FROM_GIT": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    "E-ink_1": {
+      "uf2_sha256": "dce2aed6f0909a0254ffbb16f3d80368193c8c79abe3653a61e90a2b077c5486",
+      "elf_sha256": "e4faef4ff4a728d2fcd768ef20c687921078a0c35fb31540b0ed081a37b3d834",
+      "memory": {
+        "symbols": {
+          "__end__": 537051524,
+          "__HeapLimit": 537133056,
+          "__StackBottom": 537137152,
+          "__StackTop": 537141248
+        },
+        "static_main_ram": 180612,
+        "linker_heap_possible": 81532,
+        "stack_reservation": 4096
+      },
+      "private_config_preserved": true,
+      "event_stream": false,
+      "flags": {
+        "PM_EVENT_STREAM": "OFF",
+        "PM_STREAM_DIAGNOSTICS": "ON",
+        "PM_ACK_PATH_PROBE": "ON",
+        "PM_USB_BUTTON_SIM": "ON",
+        "PM_TX_LINK_PROBE": "ON",
+        "PM_CYW43_INNER_PROBE": "ON",
+        "PM_AWAY_EEX1": "ON",
+        "PM_EEX1_PORT": "48116",
+        "PM_DEVICE": "E-ink_1",
+        "PM_USE_SAMPLE": "OFF",
+        "PM_PREPARE_UNBOUND": "OFF",
+        "PM_PREPARE_UNBOUND_PANEL": "OFF",
+        "PICO_BOARD": "pico_w",
+        "CMAKE_BUILD_TYPE": "Release",
+        "PICO_SDK_SUBMODULE_AUTO_UPDATE": "OFF",
+        "PICO_SDK_FETCH_FROM_GIT": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    "PicoMado-lcd1-off": {
+      "uf2_sha256": "3da9da4ad4c412fb29162af6f81569bc90f15e95a1bb485037eb06b6f3f413ce",
+      "elf_sha256": "8058e0b25b103f676af5cf191fe7d45357702dd35e9a09e5aed87a10007a1932",
+      "memory": {
+        "symbols": {
+          "__end__": 537121288,
+          "__HeapLimit": 537133056,
+          "__StackBottom": 537137152,
+          "__StackTop": 537141248
+        },
+        "static_main_ram": 250376,
+        "linker_heap_possible": 11768,
+        "stack_reservation": 4096
+      },
+      "private_config_preserved": true,
+      "event_stream": false,
+      "flags": {
+        "PM_EVENT_STREAM": "OFF",
+        "PM_STREAM_DIAGNOSTICS": "ON",
+        "PM_ACK_PATH_PROBE": "ON",
+        "PM_USB_BUTTON_SIM": "ON",
+        "PM_TX_LINK_PROBE": "ON",
+        "PM_CYW43_INNER_PROBE": "ON",
+        "PM_AWAY_EEX1": "ON",
+        "PM_EEX1_PORT": "48116",
+        "PM_DEVICE": "PicoMado-lcd1",
+        "PM_USE_SAMPLE": "OFF",
+        "PM_PREPARE_UNBOUND": "OFF",
+        "PM_PREPARE_UNBOUND_PANEL": "OFF",
+        "PICO_BOARD": "pico_w",
+        "CMAKE_BUILD_TYPE": "Release",
+        "PICO_SDK_SUBMODULE_AUTO_UPDATE": "OFF",
+        "PICO_SDK_FETCH_FROM_GIT": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    }
+  },
+  "server": {
+    "binary": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/gap-build/server/picomado-server.observation",
+    "binary_sha256": "db81e9f7ec6f4c72f79b13d7db44bcf3d6a62626c8a1d4569ad8639d2fa7b2a0",
+    "binary_bytes": 17194336,
+    "features": [
+      "caricature-retention-delete",
+      "stream-diagnostics",
+      "ack-path-probe",
+      "boundary-observation"
+    ],
+    "offline_release": true,
+    "usage_smoke_exit": 1,
+    "ldd_exit": 0,
+    "hardware_or_service_operations": false
+  },
+  "firmware_snapshot_matches": true,
+  "shared_sdk_ll_sha256": "a4e6baa503b9332a0a445c8b22deb4bee62793c441dc74a200b0fe8065c397c7",
+  "original_capture": {
+    "root": "observation-live-20261020T230517Z",
+    "source_missing_facts": 885,
+    "target_notify_to_reply_us": 1478404,
+    "root_cause_identified": false
+  },
+  "constraints": {
+    "hardware_operations": false,
+    "usb_open_or_commands": false,
+    "service_operations": false,
+    "ssh": false,
+    "push": false,
+    "existing_config_and_binding_preserved": true,
+    "dynamic_heap_stack_verified": false,
+    "hardware_latency_effect_verified": false
+  },
+  "limits": [
+    "pre-first-observation is unknown; kernel arrival/unread waits cannot be distinguished",
+    "raw-to-WS packet parent unknown without exact transport consumption provenance",
+    "fixed RAM and static heap/stack do not establish runtime high-water or IRQ/USB/RF behavior",
+    "new device boundaries require separately authorized LCD firmware update; no update performed"
+  ],
+  "remaining_blockers": []
+}

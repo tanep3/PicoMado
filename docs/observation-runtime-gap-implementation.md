@@ -2,6 +2,8 @@
 
 設計先行コミットは `d70dd84`。その後の隔離workで [契約](observation-runtime-gap-contract.md) のR-01〜R-04を実装した。これは遅延の根因修正・実機改善の受入ではない。保存済み実測1,478.404msの内訳と欠測885件は、[既存解析](manual-switch-analysis-20261020.md) のまま扱う。
 
+固定実装は `58b6d14a021985fd88b190b0d70a4133a70c29ea`。[検証checkpoint](checkpoints/20261021/observation-runtime-gap.json) にsource/log/artifact SHA、構成、資源量、完了件数を保存した。最終全feature/default/host/contract/collector/releaseの実行sessionは全てexit 0を確認済み。
+
 ## 実装した境界
 
 EV1の76B body、CRC、通常API、送信bool、ACK、選択・設定・並び順は維持する。新catalogは3。Pico coverageは0x9f、serverはNetwork追加で0xef。parserはcatalog2も読めるが、旧sourceへ新しい境界の網羅性を付与しない。
