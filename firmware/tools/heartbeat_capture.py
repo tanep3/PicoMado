@@ -28,7 +28,7 @@ def one(usb, command, prefix):
     return txlib.one(usb, command, prefix)
 
 
-def prepare(usb, host, device, run, out):
+def prepare(usb, host, device, run, out, *, observation_kind='natural_heartbeat', sim=None):
     """The existing exclusive owner stays open; DTR is high during preparation.
 
     A refusal retains the partial arm for explicit freeze/save/release. Mutating
@@ -118,8 +118,13 @@ def prepare(usb, host, device, run, out):
     final = host({'op': 'status'})
     require(all(final[k] == got[k] for k in ['boot', 'run', 'phase', 'connection',
                 'session', 'last_message', 'expected_message']), 'host preparation changed')
+    require(observation_kind in ('natural_heartbeat', 'natural_heartbeat_then_sim'), 'observation kind')
+    require((observation_kind == 'natural_heartbeat_then_sim') == (sim is not None), 'SIM observation contract')
     ready = ident | dict(baseline=baseline, expected=baseline + 1,
                          generation=live.generation.value, caps=CAPS, ev1_sequence=ev1_raw['seq'])
+    if sim is not None:
+        ready.update(observation_kind=observation_kind, sim_job=int(run, 16),
+                     sim_key=sim['key'], sim_delay_ms=sim['delay_ms'], sim_hold_ms=sim['hold_ms'])
     ap.persist(Path(out) / 'ready.json', ready)
     return ready
 

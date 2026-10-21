@@ -71,6 +71,29 @@ def seal(f):
     e['SDK_inner']['status']['h'] = format(hc.cy.digest(e['SDK_inner']['rows']), 'x')
 
 
+def mixed_fixture(sim_first=False):
+    f=fixture();p,h,e,r,_=f
+    r.update(observation_kind='natural_heartbeat_then_sim',sim_job=10,sim_key=1,
+             sim_delay_ms=14000,sim_hold_ms=150)
+    e['trigger']['flags']='1'
+    e['SIM']=dict(status=dict(b='1',j='a',phase='4',n='1',a='1',d='1',r='1',c='0',why='0'),
+                  bind=dict(b='1',rb='1',r='a',j='a',s='9'),
+                  synth=dict(boot='1',run='a',n='1',job='a',step='0'),
+                  step=dict(j='a',i='0',a='1',d='1',r='1',c='0',key='1',logical='1'))
+    sim=dict(us=120,event=24,kind=0,connection=1,message=0,session=9,frame=0,
+             flags=0,a=10,b=0,c=0,d=1)
+    if sim_first:
+        e['trigger']['m']='9';e['SIM']['synth'].update(n='0',job='0')
+        for row in p['records']:row['message']=9
+        h['records']=[dict(us=200,event='decoded',connection=431,message=8,kind=15,
+                           session=9,frame=0,a=11,b=22)]
+        h['status'].update(trigger_message=0,trigger_us=0)
+    else:p['records'].append(sim)
+    h['records'].append(dict(us=220,event='decoded',connection=431,message=9,kind=15,
+                             session=9,frame=0,a=11,b=22))
+    return f
+
+
 class Validation(unittest.TestCase):
     def result(self, f):
         seal(f)
@@ -78,6 +101,16 @@ class Validation(unittest.TestCase):
 
     def test_exact_target(self):
         self.assertTrue(self.result(fixture())['measurement_complete'])
+
+    def test_explicit_heartbeat_then_one_sim_and_sim_first(self):
+        self.assertTrue(self.result(mixed_fixture())['measurement_complete'])
+        bad=self.result(mixed_fixture(sim_first=True))
+        self.assertFalse(bad['measurement_complete'])
+        self.assertIn('gate/target provenance',bad['errors'])
+        f=mixed_fixture();f[2]['SIM']['status']['d']='0'
+        self.assertIn('SIM accepted/dispatched/released',self.result(f)['errors'])
+        f=mixed_fixture();f[3]['observation_kind']='natural_heartbeat'
+        self.assertFalse(self.result(f)['measurement_complete'])
 
     def test_generation_quality_compares_decoded_values(self):
         f=fixture();f[0]['status']['gen']='01'

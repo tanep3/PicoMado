@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One finite ARM_HB capture through the existing exclusive owner. Plan by default.
 
-No SIM, firmware writes, service operations, SSH, network changes or automatic retry.
+Optional one-step detached SIM; no firmware writes, service operations, SSH, network changes or automatic retry.
 The heartbeat implementation is imported unchanged; runner evidence is separate.
 """
 import argparse
@@ -34,6 +34,7 @@ class Owner:
         self.port=None;self.closed=False;self.observer=None;self.ioctl=ioctl
         self.io_allowed=True;self.dtr_state=True;self.reads=self.writes=self.bytes=0
         self.request_seconds=request_seconds;self.mutations=set();self.last_status=None
+        self.sim_enabled=False
         self.log=Path(logpath).open('x',buffering=1);os.chmod(logpath,0o600)
         self.lines=ev.Lines();self.mux=ev.Commands(audit=self.audit)
         try:
@@ -91,11 +92,16 @@ class Owner:
     def request(self,command,end):
         if not self.trustworthy:raise RuntimeError('serial state uncertain; command not sent')
         words=command.split()
-        if not words or words[0]not in ['AP2','CY1','TX1','EV1']or(words[0]=='EV1'and words[1:]!=['STATUS']):
-            raise ValueError('runner only permits probe controls and EV1 STATUS')
+        if not words or words[0]not in ['AP2','CY1','TX1','EV1','SIM']or(words[0]=='EV1'and words[1:]!=['STATUS'])\
+           or(words[0]=='SIM'and(not self.sim_enabled or words[1]not in ['CAPS','BEGIN','STEP','COMMIT','STATUS','BIND','GET','STOP'])):
+            raise ValueError('runner only permits scoped probe/SIM controls and EV1 STATUS')
         if words[0]=='AP2'and words[1]in ['ARM_HB','FREEZE','RELEASE']:
             key=tuple(words[:4])
             if key in self.mutations:raise RuntimeError('mutator is never automatically retried')
+            self.mutations.add(key)
+        if words[0]=='SIM'and words[1]in ['BEGIN','STEP','COMMIT','STOP']:
+            key=('SIM',words[2],words[3])
+            if key in self.mutations:raise RuntimeError('SIM mutator is never automatically retried')
             self.mutations.add(key)
         self.audit(kind='request',command=command)
         future=self.mux.submit(command,reply_prefix=words[0].lower()+' ',end_prefix=end)
@@ -161,7 +167,7 @@ class HostGuard:
 
 
 class Runner:
-    def __init__(self,owner,host,resolve_target,observer_factory,out,*,clock=time.monotonic,wait=time.sleep,clock_ns=None):
+    def __init__(self,owner,host,resolve_target,observer_factory,out,*,clock=time.monotonic,wait=time.sleep,clock_ns=None,sim=None):
         self.owner=owner;self.host=HostGuard(host);self.resolve_target=resolve_target
         self.observer_factory=observer_factory;self.root=Path(out);self.clock=clock;self.wait=wait
         self.persist=lambda path,data:hc.ap.persist(path,output_value(data));self.errors=[];self.session=None;self.target=None;self.ready=None
@@ -170,6 +176,41 @@ class Runner:
         self.identity=None;self.headers=None;self.safe_deadline=None;self.high_attempted=False
         self.interval=None;self.pico=None;self.server=None;self.saved=False
         self.observer_finished=True
+        hc.require(sim is None or (type(sim) is dict and set(sim)=={'key','delay_ms','hold_ms'}
+            and all(type(v)is int for v in sim.values()) and sim['key']==1
+            and 0<=sim['delay_ms']<=14000 and 80<=sim['hold_ms']<=300
+            and sim['delay_ms']+sim['hold_ms']+70<15000), 'bounded one-step SIM plan')
+        self.sim=sim;self.sim_job=None;self.sim_cid=None;self.sim_sent=False
+        if sim is not None:self.owner.sim_enabled=True
+
+    def sim_ack(self,verb,args,expected):
+        self.sim_cid+=1
+        got=hc.one(self.owner,f'SIM {verb} {self.ready["pico_boot"]} {self.sim_cid:x} {self.sim_job:x}'+
+                   (' '+args if args else ''),'sim ack ')
+        hc.require(got['b']==self.ready['pico_boot'] and int(got['cid'],16)==self.sim_cid
+                   and int(got['job'],16)==self.sim_job and got['result']==expected,
+                   'SIM '+verb+' acknowledgement')
+        self.sim_sent=True
+        return got
+
+    def stage_sim(self):
+        caps=hc.one(self.owner,'SIM CAPS','sim caps ')
+        hc.require(caps['b']==self.ready['pico_boot'] and int(caps['s'],16)==self.ready['session']
+                   and caps['state']=='3' and int(caps['keys'])==4 and int(caps['steps'])>=1
+                   and int(caps['job_ms'],16)==15000 and int(caps['gate_ms'],16)==500,
+                   'SIM capability/session/state')
+        self.sim_job=self.ready['sim_job'];self.sim_cid=self.sim_job
+        self.sim_ack('BEGIN',f'1 {self.ready["session"]:x} {int(caps["state"]):x}','staging')
+        self.sim_ack('STEP',f'0 {self.sim["delay_ms"]:x} {self.sim["key"]:x} {self.sim["hold_ms"]:x}','staged')
+
+    def stop_sim_if_active(self):
+        if self.sim_job is None or not self.owner.trustworthy:return
+        status=hc.one(self.owner,f'SIM STATUS {self.ready["pico_boot"]}','sim status ')
+        if int(status['j'],16)==self.sim_job and status['phase'] in ['1','2','3']:
+            self.sim_cid+=1
+            got=hc.one(self.owner,f'SIM STOP {self.ready["pico_boot"]} {self.sim_cid:x}','sim ack ')
+            hc.require(got['b']==self.ready['pico_boot']and int(got['cid'],16)==self.sim_cid
+                       and got['result']=='ok','SIM STOP acknowledgement')
 
     def error(self,phase,problem):
         self.errors.append(dict(phase=phase,type=type(problem).__name__,message=str(problem)[:240]))
@@ -240,6 +281,14 @@ class Runner:
         txs=hc.one(self.owner,'TX1 STATUS','tx1 status ');cys=hc.one(self.owner,'CY1 STATUS','cy1 status ')
         extra=dict(trigger=trigger,tx_status=txs,tx_rows=[],SDK_inner=None,
                    EV1=hc.one(self.owner,'EV1 STATUS','ev1 status '))
+        if self.sim is not None:
+            sim_status=hc.one(self.owner,f'SIM STATUS {i["pico_boot"]}','sim status ')
+            sim=dict(status=sim_status,
+                     bind=hc.one(self.owner,f'SIM BIND {i["pico_boot"]}','sim bind '),
+                     synth=hc.one(self.owner,'AP2 SYNTH','ap2 synth '))
+            if self.sim_job is not None and int(sim_status['j'],16)==self.sim_job and sim_status['n']=='1':
+                sim['step']=hc.one(self.owner,f'SIM GET {i["pico_boot"]} {self.sim_job:x} 0','sim step ')
+            extra['SIM']=sim
         own_tx=txs['b']==i['pico_boot']and txs['r']==i['run']
         own_cy=cys['b']==i['pico_boot']and cys['r']==i['run']
         if own_tx and own_cy:
@@ -296,7 +345,8 @@ class Runner:
         self.quality=domain.incomplete('not captured');self.observation_io=dict(reads=0,writes=0)
         counts=None
         try:
-            self.ready=hc.prepare(self.owner,self.host,device,run_id,self.root)
+            self.ready=hc.prepare(self.owner,self.host,device,run_id,self.root,
+                observation_kind='natural_heartbeat_then_sim'if self.sim else'natural_heartbeat',sim=self.sim)
             self.identity=json.loads((self.root/'identity.json').read_text())
             self.target=self.resolve_target(self.ready);self.persist(self.root/'target.private.json',self.target)
             self.session=self.observer_factory(self.target);self.owner.observer=self.session;self.observer_finished=False
@@ -310,10 +360,12 @@ class Runner:
                 and self.coverage['start_request_before_ns']<=start_clock['mono_before_ns']
                 <=start_clock['mono_after_ns']<=self.coverage['start_confirm_after_ns'],'observer START unconfirmed')
             self.persist(self.root/'observer-started.json',started)
+            if self.sim is not None:self.stage_sim()
             status=self.host({'op':'status'})
             hc.require(status['phase']=='armed'and status['boot']==self.ready['host_boot']
                 and status['run']==run_id and status['last_message']==self.ready['baseline']
                 and status['connection']==self.ready['host_connection'],'origin changed before DTR gate')
+            if self.sim is not None:self.sim_ack('COMMIT','','accepted')
             self.coverage['DTR_low_before_ns']=self.ns()
             self.safe_deadline=self.coverage['DTR_low_before_ns']+36100000000
             self.coverage['required_end_ns']=self.safe_deadline
@@ -332,6 +384,8 @@ class Runner:
                 except BaseException as problem:self.error('unknown_DTR_wait',problem)
             try:self.stop_observer()
             except BaseException as problem:self.error('observer_save',problem)
+            try:self.stop_sim_if_active()
+            except BaseException as problem:self.error('SIM_stop',problem)
             try:
                 self.saved=self.gather()
                 if self.saved and self.headers is not None:self.release_saved()
@@ -347,7 +401,7 @@ class Runner:
             except BaseException as problem:self.error('owner_close',problem)
             result=domain.run_outcome(self.quality,errors=self.errors,pico_idle=pico_idle,host_idle=host_idle,owner_closed=self.owner.closed,
                 Pico_status=ps,host_status=hs,observation_USB_io=self.observation_io,
-                automatic_rearm=False,SIM_sent=False,raw_evidence_saved=self.headers is not None)
+                automatic_rearm=False,SIM_sent=self.sim_sent,raw_evidence_saved=self.headers is not None)
             try:self.persist(self.root/'result.json',result)
             except BaseException as problem:self.error('result_save',problem);result=domain.operation_failed(result,self.errors)
         return result
@@ -358,9 +412,10 @@ def main():
     parser.add_argument('--config',type=Path,required=True);parser.add_argument('--dir',type=Path,required=True)
     parser.add_argument('--execute',action='store_true');args=parser.parse_args()
     cfg=json.loads(args.config.read_text())
+    sim=cfg.get('sim')
     if not args.execute:
         print(json.dumps(dict(plan_only=True,device=cfg['device'],expected_Flash_ID=cfg['expected_flash_id'],
-              single_owner=True,SIM=False,window_seconds=36.1,firmware_write=False,service_operation=False)));return
+              single_owner=True,SIM=sim,window_seconds=36.1,firmware_write=False,service_operation=False)));return
     hc.require(cfg['expected_flash_id']=='E661640843239D21'and cfg['expected_flash_id']in cfg['serial_by_id'],
                'expected bound LCD serial identity')
     hc.require(type(cfg.get('PID'))is int and cfg['PID']>0,'refresh server PID after approved rollout before execution')
@@ -389,7 +444,7 @@ def main():
         hc.txlib.require_same_target(preflight,target)
         return target
     owner=Owner(cfg['serial_by_id'],args.dir/'owner.private.jsonl')
-    runner=Runner(owner,host,resolve,lambda target:client.Session(target,seconds=40,prepare_seconds=20),args.dir)
+    runner=Runner(owner,host,resolve,lambda target:client.Session(target,seconds=40,prepare_seconds=20),args.dir,sim=sim)
     result=runner.run(cfg['device'],format(time.time_ns(),'x'))
     print(json.dumps({k:report_value(result)[k]for k in ['complete','pico_idle','host_idle','owner_closed','errors']},ensure_ascii=False))
 

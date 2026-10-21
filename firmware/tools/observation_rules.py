@@ -38,7 +38,7 @@ def coverage_ok(headers):
 
 
 def assess(pico, host, extra, ready, headers, integrity):
-    """No quality failure is waived for periodic mode; target ambiguity is fatal."""
+    """Assess the explicitly selected periodic observation, never infer its kind from rows."""
     errors = []
     def ck(ok, why):
         if not ok:
@@ -47,14 +47,17 @@ def assess(pico, host, extra, ready, headers, integrity):
     rows, tx, inner = pico['records'], extra['tx_rows'], extra['SDK_inner']
     ts = extra['tx_status']
     baseline, target = ready['baseline'], ready['expected']
+    mixed = ready.get('observation_kind', 'natural_heartbeat') == 'natural_heartbeat_then_sim'
+    ck(ready.get('observation_kind', 'natural_heartbeat') in
+       ('natural_heartbeat', 'natural_heartbeat_then_sim'), 'observation kind')
     ck(0 <= baseline < 0xffffffff and target == baseline + 1, 'ordinal origin')
     ck(ps['boot'] == tr['b'] == ready['pico_boot'] and ps['run'] == tr['r'] == ready['run'], 'Pico identity')
     ck(tr['mode'] == '1' and int(tr['o'], 16) == int(tr['g'], 16) == baseline
-       and int(tr['m'], 16) == target and int(tr['flags'], 16) == 0, 'gate/target provenance')
+       and int(tr['m'], 16) == target and int(tr['flags'], 16) == (1 if mixed else 0), 'gate/target provenance')
     ck(ps['state'] == '3' and int(ps['over']) == 0 and integrity.pico_generation, 'Pico quality/generation')
     ck(integrity.pico_digest, 'Pico digest')
     ck(not any(pico[k] for k in ['prepared_input_detected', 'observation_usb_overlap_detected', 'post_freeze_buttons_detected']), 'USB/input quality')
-    ck(not any(r['event'] in [1, 24] for r in rows), 'unexpected input')
+    ck(not any(r['event'] == 1 or (not mixed and r['event'] == 24) for r in rows), 'unexpected input')
     ev1 = extra.get('EV1', {})
     ck(ev1.get('b') == ready['pico_boot'] and ev1.get('on') == ev1.get('sat') == '0'
        and ev1.get('seq') == ready.get('ev1_sequence') is not None, 'EV1 OFF throughout owned interval')
@@ -79,6 +82,34 @@ def assess(pico, host, extra, ready, headers, integrity):
            and found[0]['a'] == before['a'] and found[0]['b'] == before['b'], 'host target ordinal/kind/CRC')
         ck(bool(decoded) and [r['message'] for r in decoded] == list(range(target, target + len(decoded))), 'host decoded prelude/gap/duplicate')
         ck(any(t['s'] == copy['a'] and t['e'] == copy['b'] for t in tx), 'target first TX unobserved')
+        if mixed:
+            sim_rows = [r for r in rows if r['event'] == 24]
+            ck(len(sim_rows) == 1 and rows.index(sim_rows[0]) > rows.index(output)
+               if sim_rows else False, 'SIM after target heartbeat output')
+    if mixed:
+        try:
+            sim = extra['SIM']; status = sim['status']; bind = sim['bind']
+            step = sim['step']; synth = sim['synth']; job = ready['sim_job']
+            sim_rows = [r for r in rows if r['event'] == 24]
+            ck(len(sim_rows) == 1 and int(synth['n'], 16) == 1
+               and synth['boot'] == ready['pico_boot'] and synth['run'] == ready['run']
+               and int(synth['job'], 16) == job and int(synth['step'], 16) == 0,
+               'SIM captured origin')
+            ck(bind['b'] == bind['rb'] == status['b'] == ready['pico_boot']
+               and bind['r'] == ready['run'] and int(bind['j'], 16) == int(status['j'], 16) == job
+               and int(bind['s'], 16) == ready['session'], 'SIM binding')
+            ck(status['phase'] == '4' and status['n'] == '1' and
+               int(status['a'], 16) == int(status['d'], 16) == int(status['r'], 16) == 1
+               and int(status['c'], 16) == int(status['why']) == 0,
+               'SIM accepted/dispatched/released')
+            ck(int(step['j'], 16) == job and step['i'] == '0' and
+               step['a'] == step['d'] == step['r'] == '1' and step['c'] == '0'
+               and int(step['key']) == ready['sim_key'], 'SIM step')
+            ck(len(sim_rows) == 1 and (sim_rows[0]['a'] | sim_rows[0]['b'] << 32) == job
+               and sim_rows[0]['c'] == 0 and sim_rows[0]['d'] & 255 == int(step['logical'])
+               and sim_rows[0]['session'] == ready['session'], 'SIM event identity')
+        except (KeyError, TypeError, ValueError):
+            ck(False, 'SIM saved evidence')
     ck(hs['boot'] == ready['host_boot'] and hs['run'] == ready['run'] and hs['phase'] == 'frozen', 'host identity')
     ck(hs.get('trigger_mode') == 'heartbeat' and hs.get('baseline_message') == baseline
        and hs.get('expected_message') == hs.get('trigger_message') == target
@@ -113,7 +144,7 @@ def assess(pico, host, extra, ready, headers, integrity):
     ck(len(workers) == 1 and workers[0]['packet_stats']['kernel_drops'] == 0
        and workers[0]['sockets_closed'] and not workers[0]['payload_copied'] and not workers[0]['payload_persisted'], 'header loss/scope lifecycle')
     ck(coverage_ok(headers),'observer does not cover controller window')
-    return MeasurementAssessment(tuple(errors), dict(trigger='natural_heartbeat',
+    return MeasurementAssessment(tuple(errors), dict(trigger=ready.get('observation_kind', 'natural_heartbeat'),
                 input_count=sum(r['event'] in [1, 24] for r in rows),
                 input_before_or_during=bool(int(tr['flags'], 16) & 1),
                 full_CY_scope='all target tuple data, including retransmissions',

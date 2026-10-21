@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
-from heartbeat_capture_test import fixture,seal
+from heartbeat_capture_test import fixture,seal,mixed_fixture
 import heartbeat_capture_runner as run
 
 
@@ -31,6 +31,7 @@ class Model:
         self.scenario=scenario;self.data=fixture();seal(self.data)
         self.pstate='0';self.prun='0';self.pboot='1';self.triggered=False;self.bits=True
         self.hstate='idle';self.hrun='0';self.last=7;self.expected=8;self.htrigger=False
+        self.sim_phase='0';self.sim_job='0'
         self.commands=[];self.host_calls=[];self.stop=threading.Event();self.errors=[]
         self.master,slave=os.openpty();self.path=os.ttyname(slave);os.close(slave)
         assert self.path.startswith('/dev/pts/');os.set_blocking(self.master,False)
@@ -63,6 +64,33 @@ class Model:
         if command=='AP2 CAPS':return ['ap2 caps v=3 hb=1 event=19']
         if command=='EV1 STATUS':return ['ev1 status b=1 on=0 seq=0 sat=0']
         if command=='CY1 CAPS':return [self.line('cy1 caps',run.hc.cy.SCHEMA)]
+        if command=='SIM CAPS':return ['sim caps b=1 keys=4 steps=4 job_ms=3a98 hold_ms=1388 gate_ms=1f4 s=9 state=3']
+        if words[:2]==['SIM','BEGIN']:
+            self.sim_job=words[4];self.sim_phase='1'
+            return [f'sim ack b=1 cid={words[3]} job={self.sim_job} result=staging']
+        if words[:2]==['SIM','STEP']:
+            return [f'sim ack b=1 cid={words[3]} job={self.sim_job} result=staged']
+        if words[:2]==['SIM','COMMIT']:
+            self.sim_phase='2'
+            return [f'sim ack b=1 cid={words[3]} job={self.sim_job} result=accepted']
+        if words[:2]==['SIM','STOP']:
+            self.sim_phase='5'
+            return [f'sim ack b=1 cid={words[3]} job={self.sim_job} result=ok']
+        if words[:2]==['SIM','STATUS']:
+            return [self.line('sim status',dict(b='1',j=self.sim_job,phase=self.sim_phase,n='1',
+                    a='1'if self.sim_phase in ['2','3','4','5']else'0',
+                    d='1'if self.sim_phase=='4'else'0',r='1'if self.sim_phase=='4'else'0',
+                    c='1'if self.sim_phase=='5'else'0',why='1'if self.sim_phase=='5'else'0',drops='0'))]
+        if words[:2]==['SIM','BIND']:
+            return [f'sim bind b=1 rb=1 r=a j={self.sim_job} s=9 state=3']
+        if words[:2]==['SIM','GET']:
+            return [f'sim step j={self.sim_job} i=0 a=1 d={int(self.sim_phase=="4")} '
+                    f'r={int(self.sim_phase=="4")} c={int(self.sim_phase=="5")} key=1 '
+                    f'logical={1 if self.sim_phase=="4" else -1} dt=0 rt=0']
+        if command=='AP2 SYNTH':
+            syn=e.get('SIM',{}).get('synth',dict(boot='1',run='a',n='0',job='0',step='0')).copy()
+            if not self.triggered:syn.update(n='0',job='0')
+            return [self.line('ap2 synth',syn)]
         if command=='AP2 STATUS':
             status=p['status']|dict(boot=self.pboot,run=self.prun,state=self.pstate)
             if not self.triggered:status|=dict(n='0',digest='811c9dc5',over='0',gen='1')
@@ -120,6 +148,7 @@ class Model:
             self.hstate='armed';self.hrun=q['run'];self.expected=q['expected_message']
             if self.scenario=='host_arm_timeout':raise TimeoutError('host arm response uncertain')
         if op=='status'and self.scenario=='host_down_after_arm'and self.hstate=='armed':raise TimeoutError('host control unavailable')
+        if op=='status'and self.scenario=='mixed_interrupt'and self.sim_phase=='1':raise TimeoutError('pre-gate interrupted')
         if op=='freeze':assert q['boot']=='host'and q['run']==self.hrun;self.hstate='frozen'
         if op=='release':assert q['run']==self.hrun and self.hstate=='frozen';self.hstate='idle';self.hrun='0'
         s=h['status']|dict(phase=self.hstate,run=self.hrun,target='lcd',heartbeat_trigger=1,
@@ -131,6 +160,9 @@ class Model:
         return s
     def low(self):
         if self.scenario=='no_hb':return
+        if self.scenario in ['mixed_after','mixed_before']:
+            self.data=mixed_fixture(sim_first=self.scenario=='mixed_before')
+            self.sim_phase='4'
         self.triggered=True;self.pstate='2';self.htrigger=True
         if self.scenario=='gate_race':self.data[2]['trigger'].update(g='8',m='9',flags='2')
         if self.scenario=='pending_hb':self.data[0]['records'][4]['flags']=13
@@ -205,7 +237,7 @@ class Tests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'neighbor not REACHABLE'):run.main()
             self.assertEqual(json.loads((out/'target-preflight-error.json').read_text())['USB_opened'],False)
             self.assertFalse((out/'owner.private.jsonl').exists())
-    def scenario(self,name='normal',disk_failure=False,result_failure=False):
+    def scenario(self,name='normal',disk_failure=False,result_failure=False,sim=None):
         m=Model(name);ports=[]
         def port(path):
             self.assertEqual(path,m.path);p=run.ev.SerialPort(path,dtr=False);ports.append(p);return p
@@ -214,7 +246,7 @@ class Tests(unittest.TestCase):
                 root=Path(directory);owner=run.Owner(m.path,root/'owner.private.jsonl',port_factory=port,ioctl=m.ioctl,quiet_seconds=0,request_seconds=.2)
                 clock=Clock(m);m.clock=clock
                 def target(ready):return dict(binding=dict(boot='host',run='a',connection=431,session=9,target='lcd'))
-                runner=run.Runner(owner,m.host,target,lambda t:Observer(t,m),root,clock=clock.now,wait=clock.sleep,clock_ns=clock.now_ns)
+                runner=run.Runner(owner,m.host,target,lambda t:Observer(t,m),root,clock=clock.now,wait=clock.sleep,clock_ns=clock.now_ns,sim=sim)
                 if disk_failure or result_failure:
                     original=runner.persist
                     def persist(path,value):
@@ -223,7 +255,8 @@ class Tests(unittest.TestCase):
                     runner.persist=persist
                 result=runner.run('lcd','a')
                 self.assertTrue(result['owner_closed']);self.assertIsNone(owner.fd);self.assertEqual(len(ports),1)
-                self.assertFalse(m.errors,m.errors);self.assertFalse(any(c.startswith('SIM')for c in m.commands))
+                self.assertFalse(m.errors,m.errors)
+                if sim is None:self.assertFalse(any(c.startswith('SIM')for c in m.commands))
                 self.assertEqual(result['observation_USB_io'],dict(reads=0,writes=0))
                 return result,m.commands[:],m.host_calls[:],m.low_calls,m.high_calls
         finally:m.close()
@@ -232,6 +265,23 @@ class Tests(unittest.TestCase):
         self.assertTrue(r['pico_idle']and r['host_idle']);self.assertEqual((lo,hi),(1,1))
         self.assertEqual(sum(c.startswith('AP2 ARM_HB')for c in commands),1)
         self.assertEqual(sum(c.startswith('AP2 RELEASE')for c in commands),1)
+    def test_one_sim_after_heartbeat_is_complete_and_sim_first_is_rejected_but_released(self):
+        plan=dict(key=1,delay_ms=14000,hold_ms=150)
+        good,commands,_,lo,hi=self.scenario('mixed_after',sim=plan)
+        self.assertTrue(good['complete'],good)
+        self.assertEqual((lo,hi),(1,1));self.assertEqual(sum(c.startswith('SIM COMMIT')for c in commands),1)
+        bad,commands,_,_,_=self.scenario('mixed_before',sim=plan)
+        self.assertFalse(bad['complete']);self.assertTrue(bad['evidence_confirmed'])
+        self.assertTrue(bad['pico_idle']and bad['host_idle'])
+        self.assertEqual(sum(c.startswith('AP2 RELEASE')for c in commands),1)
+    def test_mixed_save_failure_retains_ram_and_pre_gate_stop_cancels_sim(self):
+        plan=dict(key=1,delay_ms=14000,hold_ms=150)
+        bad,commands,_,_,_=self.scenario('mixed_after',disk_failure=True,sim=plan)
+        self.assertFalse(bad['complete']);self.assertFalse(any(c.startswith('AP2 RELEASE')for c in commands))
+        stopped,commands,_,lo,hi=self.scenario('mixed_interrupt',sim=plan)
+        self.assertFalse(stopped['complete']);self.assertEqual((lo,hi),(0,0))
+        self.assertEqual(sum(c.startswith('SIM STOP')for c in commands),1)
+        self.assertTrue(stopped['pico_idle']and stopped['host_idle'])
     def test_origin_race_and_pre_gate_change_are_quality_stops(self):
         for name in ['prepared_race','gate_race','pending_hb','copy_failure','no_hb']:
             with self.subTest(name=name):
