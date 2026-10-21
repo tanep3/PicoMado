@@ -105,27 +105,39 @@ class Window:
     def begin(self, status):
         self.start = status
         self.last = status['sequence']
-        if self.begin_fact and self.begin_fact['boot']==status['boot'] and self.begin_fact['sequence']==status['sequence']:
-            self.last_us=self.begin_fact['us']
         if not status['on'] or status['saturated'] or not status['boot']:
             self.fail('invalid_start')
-        for fact in self.prelude:
-            if fact['boot'] != status['boot'] or fact['sequence'] > status['sequence']:
-                self.accept(fact)
+        for fact, host_sequence in self.prelude:
+            if (fact['component']==8 and fact['event']==1 and fact['phase']==1 and
+                fact['boot']==status['boot'] and fact['sequence']==status['sequence']):
+                self._accept_begin(fact,host_sequence)
+            elif fact['boot'] != status['boot'] or fact['sequence'] > status['sequence']:
+                self.accept(fact,host_sequence)
         self.prelude.clear()
 
-    def accept(self, fact):
-        if fact['component']==8 and fact['event']==1 and fact['phase']==4:
-            self.end_fact=fact
-        if fact['component']==8 and fact['event']==1 and fact['phase']==1:
-            self.begin_fact = fact
-            if self.start and fact['boot']==self.start['boot'] and fact['sequence']==self.start['sequence'] and self.last==fact['sequence']:
-                self.last_us=fact['us']
-                return
+    def _accept_begin(self, fact, host_sequence):
+        if self.begin_fact is not None:
+            self.fail('duplicate_begin')
+            return
+        if self.last != self.start['sequence'] or fact['us'] < self.last_us:
+            self.fail('begin_reordered')
+        if fact['dropped'] != self.start['dropped']:
+            self.fail('source_drop')
+        self.begin_fact = fact
+        self.begin_host_sequence = host_sequence
+        self.last_us = fact['us']
+
+    def accept(self, fact, host_sequence=0):
         if self.start is None:
             if len(self.prelude) == self.prelude.maxlen:
                 self.fail('prelude_overflow')
-            self.prelude.append(fact)
+            self.prelude.append((fact,host_sequence))
+            return
+        if fact['component']==8 and fact['event']==1 and fact['phase']==4:
+            self.end_fact=fact
+        if (fact['component']==8 and fact['event']==1 and fact['phase']==1 and
+            fact['boot']==self.start['boot'] and fact['sequence']==self.start['sequence']):
+            self._accept_begin(fact,host_sequence)
             return
         if fact['boot'] != self.start['boot']:
             self.fail('boot_changed')
@@ -528,7 +540,7 @@ class Collector:
             return
         if reason:
             self.window.fail(reason)
-        seen = list(self.window.prelude)
+        seen = [fact for fact, _host_sequence in self.window.prelude]
         if self.window.start is not None:
             seen.append(dict(boot=self.window.start['boot'], sequence=self.window.last))
         for fact in seen:
@@ -562,9 +574,7 @@ class Collector:
             self.audit(kind=('prelude_event' if prelude else 'event') if fact else ('prelude_line' if prelude else 'line'), event=fact,
                        line=None if fact else line.decode('ascii', errors='replace').rstrip())
             if fact and not prelude:
-                self.window.accept(fact)
-                if fact is self.window.begin_fact:
-                    self.window.begin_host_sequence = self.journal.attempted
+                self.window.accept(fact,self.journal.attempted)
             self.mux.receive(line)
         except ValueError as error:
             if not prelude:self.window.fail('decode_error')

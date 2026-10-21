@@ -22,6 +22,11 @@ def packet(seq, boot=1, dropped=0):
     return b'ev1 '+body.hex().encode()+b' '+('%08x' % zlib.crc32(body)).encode()+b'\n'
 
 
+def boundary(seq,phase):
+    body=ev.BODY.pack(8,1,phase,1,seq,seq*1000,seq,0,0,0,0,3,0x9f)
+    return b'ev1 '+body.hex().encode()+b' '+('%08x'%zlib.crc32(body)).encode()+b'\n'
+
+
 class Device:
     """Only a freshly allocated PTY. No USB path is accepted by this fixture."""
     def __init__(self, events=None, boot=1, dropped=0, disconnect=False, hook=None, initial_sequence=0):
@@ -124,6 +129,88 @@ def rpc(path, value):
 
 
 class Tests(unittest.TestCase):
+    def test_current_begin_is_once_across_ack_and_fragmentation(self):
+        class Storage:
+            def status(self):return dict(durable_prefix=100,queue_lost=0,write_lost=0,error=None)
+        for copies in (1,2):
+            for before in range(copies+1):
+                for chunk_size in (1,4096):
+                    with self.subTest(copies=copies,before=before,chunk_size=chunk_size):
+                        owner=object.__new__(ev.Collector);owner.window=ev.Window(1);owner.link_epoch=1
+                        owner.stop_requested=False;owner.journal=Storage()
+                        raw=boundary(1,1)*before+b'ev1 s a 1 1 0 0 0 1 0\n'+boundary(1,1)*(copies-before)
+                        framing=ev.Lines();host_sequence=0
+                        for at in range(0,len(raw),chunk_size):
+                            for line in framing.feed(raw[at:at+chunk_size]):
+                                host_sequence+=1;fact=ev.decode(line)
+                                if fact:owner.window.accept(fact,host_sequence)
+                                else:owner.window.begin(ev.parse_status(line))
+                        self.assertEqual(owner.status()['causal_ready'],copies==1)
+                        self.assertEqual(owner.window.reasons.get('duplicate_begin',0),copies-1)
+                        self.assertEqual(owner.window.begin_host_sequence,1 if before else 2)
+                        owner.window.accept(ev.decode(boundary(2,4)),host_sequence+1)
+                        end=ev.parse_status(b'ev1 s b 1 2 0 0 0 0 0\n')
+                        self.assertEqual(owner.window.finish(end)['causal_complete'],copies==1)
+                        sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
+                        import event_causality as causal
+                        facts=[ev.decode(boundary(1,1)) for _ in range(copies)]+[ev.decode(boundary(2,4))]
+                        self.assertEqual(causal.interval_source(facts,owner.window.start,end,[])[1],copies==1)
+
+    def test_begin_after_ready_or_reordered_revokes_quality(self):
+        class Storage:
+            def status(self):return dict(durable_prefix=100,queue_lost=0,write_lost=0,error=None)
+        window=ev.Window(1);start=ev.parse_status(b'ev1 s a 1 1 0 0 0 1 0\n')
+        window.begin(start);window.accept(ev.decode(boundary(1,1)),10)
+        owner=object.__new__(ev.Collector);owner.window=window;owner.link_epoch=1
+        owner.stop_requested=False;owner.journal=Storage()
+        self.assertTrue(owner.status()['causal_ready'])
+        original=window.begin_fact
+        window.accept(ev.decode(boundary(1,1)),11)
+        self.assertFalse(owner.status()['causal_ready'])
+        self.assertIs(window.begin_fact,original);self.assertEqual(window.begin_host_sequence,10)
+        self.assertEqual(window.reasons['duplicate_begin'],1)
+        window.accept(ev.decode(boundary(2,4)))
+        self.assertFalse(window.finish(ev.parse_status(b'ev1 s b 1 2 0 0 0 0 0\n'))['causal_complete'])
+        late=ev.Window(1);late.begin(start);late.accept(ev.decode(packet(2)));late.accept(ev.decode(boundary(1,1)))
+        self.assertEqual(late.reasons['begin_reordered'],1)
+
+    def test_duplicate_begin_fresh_pty_never_announces_or_completes(self):
+        sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
+        import event_causality as causal
+        for before in range(3):
+            for split in (False,True):
+                with self.subTest(before=before,split=split):
+                    class DuplicateDevice(Device):
+                        activated=False
+                        def wire(self,data):
+                            if split:
+                                for byte in data:Device.send(self,bytes([byte]))
+                            else:
+                                while data:
+                                    try:n=os.write(self.master,data);data=data[n:]
+                                    except BlockingIOError:time.sleep(.001)
+                        def send(self,data):
+                            status=ev.parse_status(data) if data.startswith(b'ev1 s ') else None
+                            if status and status['on'] and not self.activated:
+                                self.activated=True
+                                self.wire(boundary(1,1)*before+data+boundary(1,1)*(2-before))
+                            elif status and not status['on'] and self.activated:
+                                self.seq=2;words=data.split();words[4]=b'2'
+                                self.wire(boundary(2,4)+b' '.join(words)+b'\n')
+                            else:self.wire(data)
+                    device=DuplicateDevice(events=[],initial_sequence=1)
+                    try:
+                        with tempfile.TemporaryDirectory() as temp:
+                            root=Path(temp);announced=[]
+                            result=ev.collect('new-PTY-only',root/'events',root/'owner',.12,port_factory=device.open,
+                                journal_factory=lambda p:ev.Journal(p,sync_seconds=.03),causal_ready=announced.append)
+                            self.assertFalse(result['causal_complete'],result)
+                            self.assertFalse(result['transport_complete'],result)
+                            self.assertEqual(result['segments'][0]['reasons']['duplicate_begin'],1)
+                            self.assertEqual(announced,[])
+                            self.assertFalse(causal.device_source(root/'events')[1])
+                    finally:device.close()
+
     def test_causal_readiness_requires_crc_begin_catalog_and_durable_prefix(self):
         class Storage:
             def status(self):return dict(durable_prefix=self.prefix,queue_lost=0,write_lost=0,error=None)
