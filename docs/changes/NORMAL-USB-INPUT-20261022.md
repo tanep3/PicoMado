@@ -34,7 +34,7 @@
 
 ## 通常USB wire（診断SIMとは別名前空間）
 
-`INPUT CAPS` と `INPUT DO <boot> <request-id> <SUB|UP|POWER|DOWN>`。整数は既存制御と同じ符号/0xなし16進64 bit。CAPSはboot、操作能力mask、GPIO数、最後に処理した要求IDを返し、再接続したclientが次のIDを決められるようにする。DOの返信はboot/ID/操作/結果を持つ。bootと要求IDの両方を照合してから実行する。直近1件の結果を有界に保持し、過去要求を再実行しない。既存SIMの高度なjob/hold/切断後実行は変更しない。
+`INPUT CAPS` と `INPUT DO <boot> <request-id> <SUB|UP|POWER|DOWN>`。整数は既存制御と同じ符号/0xなし16進64 bit。CAPSはboot、操作能力mask（bit0=SUB、bit1=UP、bit2=POWER、bit3=DOWN）、GPIO数、`last_request_id`（未使用なら0）を返し、再接続したclientが次のIDを決められるようにする。UINT64_MAX到達後はwrapせず、新規IDは要求できない。DOの返信はboot/ID/操作/結果を持つ。bootと要求IDの両方を照合してから実行する。直近1件の結果を有界に保持し、過去要求を再実行しない。既存SIMの高度なjob/hold/切断後実行は変更しない。
 
 USB parserは語彙を型へ変換し、mainが登録した正式な操作handlerへ委譲する。main thread内の同じhandlerをGPIO/SIMも通り、network callbackやUSB IRQで描画/送信処理を実行しない。通常USBのために診断全体をONにしない。
 
@@ -45,3 +45,5 @@ USB parserは語彙を型へ変換し、mainが登録した正式な操作handle
 型/能力/状態の表から、不正値・未対応操作・無効状態・busy・GPIO/USBの同一操作効果、0/2/4 GPIOとカスタム1/3対応表、press/release/bounce/hold/連打、同ID再送/conflict/stale/boot変更、未知/長過ぎる行、切断/再接続、partial/zero writeを恒久回帰へ追加する。全診断OFFとtrace ON/OFFで通常USBが動き、legacy SIM/AP2/EV1/TXの既存回帰、200 ms表示/取消し/画像優先、動画/世代/EOF/復帰を維持する。
 
 仕様コミット後に限定実装し、host/root回帰と個体別ARM build、設定/SDK/PR155/Nagle/設定sector非包含・RAM/stackを確認する。ここでの結果はソフトウェア検証で、実機の操作・タイミング・表示効果を認定しない。元の200 ms候補と通常書込み資料はそのworktreeで保持し、新候補の承認を流用しない。
+
+独立設計確認 `independent-design-review-20261022/DESIGN-REVIEW.md` のC01–C18を回帰の比較軸にする。ID下限の指摘D4は仕様 `170864a` とCAPSの `last_request_id`、同boot再接続とUINT64_MAXの回帰で扱う。共通入口の不正操作拒否は画像保持/owner/送信等の副作用より前に行う。
