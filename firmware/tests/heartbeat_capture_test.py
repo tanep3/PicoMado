@@ -74,10 +74,10 @@ def seal(f):
 class Validation(unittest.TestCase):
     def result(self, f):
         seal(f)
-        return hc.validate(*f)
+        return hc.validate(*f).record()
 
     def test_exact_target(self):
-        self.assertTrue(self.result(fixture())['complete'])
+        self.assertTrue(self.result(fixture())['measurement_complete'])
 
     def test_origin_and_copy_fault_matrix(self):
         faults = [lambda f:f[2]['trigger'].update(g='8'),
@@ -93,16 +93,16 @@ class Validation(unittest.TestCase):
                   lambda f:f[0]['records'].append(copy.deepcopy(f[0]['records'][0]))]
         for fault in faults:
             with self.subTest(fault=fault):
-                f=fixture();fault(f);self.assertFalse(self.result(f)['complete'])
+                f=fixture();fault(f);self.assertFalse(self.result(f)['measurement_complete'])
 
     def test_old_prepared_late_identical_crc_cannot_alias(self):
         for ordinal in [7,9]:
             f=fixture();f[1]['records'][0]['message']=ordinal
-            self.assertFalse(self.result(f)['complete'])
+            self.assertFalse(self.result(f)['measurement_complete'])
         f=fixture();f[0]['records'][0]['message']=9;f[2]['trigger'].update(g='8',m='9')
-        self.assertFalse(self.result(f)['complete'])
+        self.assertFalse(self.result(f)['measurement_complete'])
         f=fixture();f[1]['records'].append(copy.deepcopy(f[1]['records'][0]))
-        self.assertFalse(self.result(f)['complete'])
+        self.assertFalse(self.result(f)['measurement_complete'])
 
     def test_all_loss_and_binding_conditions_remain_fatal(self):
         faults=[lambda f:f[0]['status'].update(over='1'),
@@ -125,11 +125,11 @@ class Validation(unittest.TestCase):
                 lambda f:next(e for e in f[4]['metadata_events']if e['event']=='worker_finished')['packet_stats'].update(kernel_drops=1)]
         for fault in faults:
             with self.subTest(fault=fault):
-                f=fixture();fault(f);self.assertFalse(self.result(f)['complete'])
+                f=fixture();fault(f);self.assertFalse(self.result(f)['measurement_complete'])
 
     def test_missing_CY_is_not_waived(self):
         f=fixture();f[2]['SDK_inner']['rows']=[];f[2]['SDK_inner']['status']['n']='0'
-        self.assertFalse(self.result(f)['complete'])
+        self.assertFalse(self.result(f)['measurement_complete'])
 
     def test_fifteen_rows_and_sixteenth_drop(self):
         f=fixture();e=f[2]
@@ -141,24 +141,24 @@ class Validation(unittest.TestCase):
             cy[1]['ip']=cy[2]['ip']=46+i
             e['tx_rows'].append(tx);e['SDK_inner']['rows'].append(cy)
         e['tx_status']['n']=e['SDK_inner']['status']['n']='f'
-        self.assertTrue(self.result(f)['complete'])
+        self.assertTrue(self.result(f)['measurement_complete'])
         e['SDK_inner']['status']['over']='1';e['SDK_inner']['no_diagnostic_loss']=False
-        self.assertFalse(self.result(f)['complete'])
+        self.assertFalse(self.result(f)['measurement_complete'])
 
     def test_late_or_missing_trigger_and_short_window(self):
         for who in [0,1]:
             f=fixture()
             if who==0:f[0]['window']['freeze']='65'
             else:f[1]['status']['trigger_us']=0
-            self.assertFalse(self.result(f)['complete'])
+            self.assertFalse(self.result(f)['measurement_complete'])
 
     def test_input_is_reported_as_input(self):
         f=fixture();f[0]['records'].append(f[0]['records'][0] | dict(event=24))
-        result=self.result(f);self.assertFalse(result['complete']);self.assertEqual(result['input_count'],1)
+        result=self.result(f);self.assertFalse(result['measurement_complete']);self.assertEqual(result['input_count'],1)
 
     def test_saved_digest_tamper(self):
         f=fixture();seal(f);f[0]['records'][1]['a']+=1
-        self.assertIn('Pico digest',hc.validate(*f)['errors'])
+        self.assertIn('Pico digest',hc.validate(*f).errors)
 
 
 class Prepare(unittest.TestCase):

@@ -1,0 +1,136 @@
+{
+  "standard": "minimal-ddd-v1",
+  "change": "OBS-20261021-01",
+  "python": [
+    {
+      "path": "firmware/tools/heartbeat_capture.py",
+      "adapter": true
+    },
+    {
+      "path": "firmware/tools/heartbeat_evidence.py",
+      "adapter": true
+    },
+    {
+      "path": "firmware/tools/heartbeat_capture_runner.py",
+      "adapter": true
+    },
+    {
+      "path": "firmware/tools/observation_domain.py",
+      "imports": [
+        "copy",
+        "dataclasses",
+        "observation_values",
+        "collections",
+        "types"
+      ],
+      "initialization_calls": [
+        "object.__setattr__"
+      ]
+    },
+    {
+      "path": "firmware/tools/observation_rules.py",
+      "imports": [
+        "dataclasses",
+        "observation_domain"
+      ]
+    },
+    {
+      "path": "firmware/tools/observation_serialization.py",
+      "adapter": true
+    }
+  ],
+  "restricted_calls": [
+    {
+      "name": "_verified_evidence",
+      "allowed": [
+        [
+          "firmware/tools/heartbeat_evidence.py",
+          "validate_directory"
+        ]
+      ]
+    },
+    {
+      "name": "CaptureReport",
+      "allowed": [
+        [
+          "firmware/tools/observation_domain.py",
+          "confirm"
+        ],
+        [
+          "firmware/tools/observation_domain.py",
+          "incomplete"
+        ],
+        [
+          "firmware/tools/observation_domain.py",
+          "run_outcome"
+        ],
+        [
+          "firmware/tools/observation_domain.py",
+          "operation_failed"
+        ]
+      ]
+    },
+    {
+      "name": "VerifiedEvidence",
+      "allowed": [
+        [
+          "firmware/tools/observation_domain.py",
+          "_verified_evidence"
+        ]
+      ]
+    },
+    {
+      "name": "MeasurementAssessment",
+      "allowed": [
+        [
+          "firmware/tools/observation_rules.py",
+          "assess"
+        ],
+        [
+          "firmware/tools/observation_domain.py",
+          "pending_assessment"
+        ],
+        [
+          "firmware/tools/observation_domain.py",
+          "with_error"
+        ]
+      ]
+    },
+    {
+      "name": "RunReport",
+      "allowed": [
+        [
+          "firmware/tools/observation_domain.py",
+          "run_outcome"
+        ],
+        [
+          "firmware/tools/observation_domain.py",
+          "operation_failed"
+        ]
+      ]
+    }
+  ],
+  "writes": [
+    {
+      "path": "firmware/src/ack_probe.c",
+      "pattern": "probe\\.summary\\.state\\s*=(?!=)",
+      "function_pattern": "(?:[A-Za-z_]\\w*[\\s*]+)+(\\w+)\\s*\\([^;{}]*\\)\\s*\\{",
+      "allowed": [
+        "capture_transition"
+      ]
+    },
+    {
+      "path": "service/src/ack_probe.rs",
+      "pattern": "(?:self|s)\\.phase\\s*=(?!=)",
+      "function_pattern": "fn\\s+(\\w+)[^{]*\\{",
+      "allowed": []
+    }
+  ],
+  "delegations": [
+    {
+      "path": "service/src/ack_probe.rs",
+      "pattern": "pub fn identity\\([^{}]*\\)\\s*->[^{}]*\\{([^{}]*)\\}",
+      "body": "observation_identity::identity(message)"
+    }
+  ]
+}

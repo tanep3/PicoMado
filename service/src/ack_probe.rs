@@ -45,21 +45,20 @@ pub struct Record {
     pub a: u64,
     pub b: u64,
 }
-#[derive(Clone, Copy, Serialize, PartialEq, Eq, Debug)]
-#[serde(rename_all = "snake_case")]
-enum Phase {
-    Idle,
-    Armed,
-    Recording,
-    Frozen,
-}
+#[path="observation_values.rs"]
+mod values;
+#[path="observation_prefix.rs"]
+mod prefix;
+use values::{HostState as Phase, HostEvent as PhaseEvent, HostWindow};
+#[path="observation_identity.rs"]
+mod observation_identity;
 struct State {
     target: String,
     boot: String,
     start: Instant,
     run: u64,
     last_run: u64,
-    phase: Phase,
+    phase: HostWindow,
     reason: &'static str,
     armed: u64,
     trigger: u64,
@@ -102,7 +101,7 @@ impl State {
             start: Instant::now(),
             run: 0,
             last_run: 0,
-            phase: Phase::Idle,
+            phase: HostWindow::new(),
             reason: "none",
             armed: 0,
             trigger: 0,
@@ -153,8 +152,8 @@ impl State {
         self.freeze_reason(now, "manual");
     }
     fn freeze_reason(&mut self, now: u64, reason: &'static str) {
-        if matches!(self.phase, Phase::Armed | Phase::Recording) {
-            self.phase = Phase::Frozen;
+        if matches!(self.phase.state(), Phase::Armed | Phase::Recording) {
+            self.phase.apply(PhaseEvent::Freeze).expect("aggregate transition");
             self.reason = reason;
             self.freeze = now;
             self.sealed = false;
@@ -162,23 +161,23 @@ impl State {
         }
     }
     fn seal(&mut self) {
-        if self.phase == Phase::Frozen && !self.sealed {
+        if self.phase.state() == Phase::Frozen && !self.sealed {
             self.digest = self.frozen_digest();
             self.sealed = true;
         }
     }
     fn expire(&mut self, now: u64) {
-        if self.phase == Phase::Recording && now.saturating_sub(self.trigger) >= WINDOW_US {
+        if self.phase.state() == Phase::Recording && now.saturating_sub(self.trigger) >= WINDOW_US {
             self.freeze_reason(now, "deadline");
         }
     }
     fn push(&mut self, r: Record) -> bool {
         self.expire(r.us);
-        if !matches!(self.phase, Phase::Armed | Phase::Recording) {
+        if !matches!(self.phase.state(), Phase::Armed | Phase::Recording) {
             return false;
         }
         let mut bad_origin = false;
-        if self.phase == Phase::Armed && r.event == Event::Decoded {
+        if self.phase.state() == Phase::Armed && r.event == Event::Decoded {
             let starts = if self.hb_mode {
                 let good = r.message == self.expected_message && r.kind == 5
                     && r.connection == self.hb_connection && r.session == self.hb_session;
@@ -186,7 +185,7 @@ impl State {
                 good
             } else { matches!(r.kind, 6 | 7 | 14 | 15 | 16) };
             if starts {
-                self.phase = Phase::Recording;
+                self.phase.apply(PhaseEvent::Start).expect("aggregate transition");
                 self.trigger = r.us;
                 self.trigger_message = r.message;
             }
@@ -198,7 +197,7 @@ impl State {
         if self.count == CAP {
             let victim = self.records[self.head];
             self.head = (self.head + 1) % CAP;
-            if self.phase == Phase::Armed || victim.us < self.trigger {
+            if self.phase.state() == Phase::Armed || victim.us < self.trigger {
                 self.pre_overwritten = self.pre_overwritten.saturating_add(1);
             } else {
                 self.overwritten = self.overwritten.saturating_add(1);
@@ -211,7 +210,7 @@ impl State {
         true
     }
     fn arm(&mut self, run: u64, now: u64) -> Result<(), &'static str> {
-        if !matches!(self.phase, Phase::Idle) {
+        if !matches!(self.phase.state(), Phase::Idle) {
             return if self.run == run {
                 Ok(())
             } else {
@@ -223,7 +222,7 @@ impl State {
         }
         self.run = run;
         self.last_run = run;
-        self.phase = Phase::Armed;
+        self.phase.apply(PhaseEvent::Arm).expect("aggregate transition");
         self.reason = "none";
         self.armed = now;
         self.trigger = 0;
@@ -246,18 +245,18 @@ impl State {
         Ok(())
     }
     fn release(&mut self, digest: u32) -> Result<(), &'static str> {
-        if self.phase != Phase::Frozen || digest != self.digest {
+        if self.phase.state() != Phase::Frozen || digest != self.digest {
             return Err("digest");
         }
         self.last_digest = digest;
-        self.phase = Phase::Idle;
+        self.phase.apply(PhaseEvent::Release).expect("aggregate transition");
         self.run = 0;
         self.count = 0;
         self.head = 0;
         Ok(())
     }
     fn seen(&mut self, connection: u64, ordinal: u64) {
-        if self.bound == connection && self.phase != Phase::Frozen && ordinal > self.last_message {
+        if self.bound == connection && self.phase.state() != Phase::Frozen && ordinal > self.last_message {
             self.last_message = ordinal;
         }
     }
@@ -265,7 +264,7 @@ impl State {
         if connection <= self.last_accept {
             return false;
         }
-        if self.hb_mode && matches!(self.phase, Phase::Armed | Phase::Recording) {
+        if self.hb_mode && matches!(self.phase.state(), Phase::Armed | Phase::Recording) {
             self.freeze_reason(self.start.elapsed().as_micros() as u64, "heartbeat_connection");
         }
         self.last_message = 0;
@@ -298,7 +297,7 @@ pub fn record(
         return;
     };
     if let Ok(mut s) = state.try_lock() {
-        if !matches!(s.phase, Phase::Armed | Phase::Recording) {
+        if !matches!(s.phase.state(), Phase::Armed | Phase::Recording) {
             ACTIVE.store(false, Ordering::Relaxed);
             return;
         }
@@ -387,20 +386,9 @@ pub fn unbind(connection: u64) {
     }
 }
 pub fn identity(message: &WireMessage) -> (u64, u64, u8) {
-    let (s, f) = match message {
-        WireMessage::ReceiptAck { token } | WireMessage::RenderedAck { token } | WireMessage::StreamStatus { token, .. } => {
-            (token.session_epoch, token.frame_id)
-        }
-        WireMessage::Up { session_epoch, .. }
-        | WireMessage::Down { session_epoch, .. }
-        | WireMessage::Next { session_epoch, .. }
-        | WireMessage::Power { session_epoch, .. }
-        | WireMessage::EnterSub { session_epoch, .. }
-        | WireMessage::Heartbeat { session_epoch, .. } => (*session_epoch, 0),
-        _ => (0, 0),
-    };
-    (s, f, message.kind())
+    observation_identity::identity(message)
 }
+
 pub fn decoded(connection: u64, ordinal: u64, kind: u8, json: &[u8], message: &WireMessage) {
     if !active(connection) {
         return;
@@ -431,7 +419,7 @@ struct Request {
     expected_message: Option<u64>,
 }
 fn status(s: &State) -> serde_json::Value {
-    serde_json::json!({"schema":2,"heartbeat_trigger":1,"trigger_mode":if s.hb_mode{"heartbeat"}else{"input"},"baseline_message":s.baseline_message,"expected_message":s.expected_message,"trigger_message":s.trigger_message,"last_message":s.last_message,"hb_connection":s.hb_connection,"hb_session":s.hb_session,"boot":s.boot,"run":format!("{:x}",s.run),"last_run":format!("{:x}",s.last_run),"target":s.target,"phase":s.phase,"reason":s.reason,"connection":s.bound,"session":s.session,"clock":"host_monotonic_us_since_process_probe_init","armed_us":s.armed,"trigger_us":s.trigger,"freeze_us":s.freeze,"window_us":WINDOW_US,"count":s.count,"capacity":CAP,"pre_overwritten":s.pre_overwritten,"overwritten":s.overwritten,"contended":if s.phase==Phase::Frozen{s.contended_frozen}else{CONTENDED.load(Ordering::Relaxed)},"digest":s.digest,"record_bytes":std::mem::size_of::<Record>(),"hooks":s.hooks,"hook_total_ns":s.total_ns,"hook_max_ns":s.max_ns})
+    serde_json::json!({"schema":2,"heartbeat_trigger":1,"trigger_mode":if s.hb_mode{"heartbeat"}else{"input"},"baseline_message":s.baseline_message,"expected_message":s.expected_message,"trigger_message":s.trigger_message,"last_message":s.last_message,"hb_connection":s.hb_connection,"hb_session":s.hb_session,"boot":s.boot,"run":format!("{:x}",s.run),"last_run":format!("{:x}",s.last_run),"target":s.target,"phase":s.phase.state(),"reason":s.reason,"connection":s.bound,"session":s.session,"clock":"host_monotonic_us_since_process_probe_init","armed_us":s.armed,"trigger_us":s.trigger,"freeze_us":s.freeze,"window_us":WINDOW_US,"count":s.count,"capacity":CAP,"pre_overwritten":s.pre_overwritten,"overwritten":s.overwritten,"contended":if s.phase.state()==Phase::Frozen{s.contended_frozen}else{CONTENDED.load(Ordering::Relaxed)},"digest":s.digest,"record_bytes":std::mem::size_of::<Record>(),"hooks":s.hooks,"hook_total_ns":s.total_ns,"hook_max_ns":s.max_ns})
 }
 fn control(s: &mut State, r: Request, now: u64) -> Result<serde_json::Value, &'static str> {
     s.expire(now);
@@ -451,7 +439,7 @@ fn control(s: &mut State, r: Request, now: u64) -> Result<serde_json::Value, &'s
         return Err("run");
     }
     if r.op == "arm" {
-        let fresh = s.phase == Phase::Idle;
+        let fresh = s.phase.state() == Phase::Idle;
         let hb = match r.trigger.as_deref().unwrap_or("input") {
             "input" => false, "heartbeat" => true, _ => return Err("trigger"),
         };
@@ -460,7 +448,12 @@ fn control(s: &mut State, r: Request, now: u64) -> Result<serde_json::Value, &'s
             let expected = r.expected_message.ok_or("expected_message")?;
             if s.bound == 0 || s.session == 0 || baseline >= u32::MAX as u64
                 || expected != baseline + 1 { return Err("baseline"); }
-            if fresh && s.last_message != baseline { return Err("baseline"); }
+            if fresh && !prefix::same_processed_prefix_candidate(
+                values::PicoSendAttemptOrdinal::from_wire(baseline as u32),
+                values::HostProcessedOrdinal::from_wire(s.last_message),
+                prefix::BoundStream::from_locked_state(s.bound,s.session).ok_or("baseline")?) {
+                return Err("baseline");
+            }
             (baseline, expected)
         } else {
             if r.baseline.is_some() || r.expected_message.is_some() { return Err("trigger"); }
@@ -488,13 +481,13 @@ fn control(s: &mut State, r: Request, now: u64) -> Result<serde_json::Value, &'s
         return Ok(status(s));
     }
     if r.op == "release"
-        && s.phase == Phase::Idle
+        && s.phase.state() == Phase::Idle
         && run == s.last_run
         && r.digest == Some(s.last_digest)
     {
         return Ok(status(s));
     }
-    if s.run != run || s.phase == Phase::Idle {
+    if s.run != run || s.phase.state() == Phase::Idle {
         return Err("run");
     }
     match r.op.as_str() {
@@ -504,7 +497,7 @@ fn control(s: &mut State, r: Request, now: u64) -> Result<serde_json::Value, &'s
             Ok(status(s))
         }
         "read" => {
-            if s.phase != Phase::Frozen {
+            if s.phase.state() != Phase::Frozen {
                 return Err("not_frozen");
             }
             let start = r.start.ok_or("page")?;
@@ -585,7 +578,7 @@ fn serve_control(mut socket: std::os::unix::net::UnixStream) -> std::io::Result<
     if let Some(state) = STATE.get() {
         if let Ok(s) = state.lock() {
             ACTIVE.store(
-                matches!(s.phase, Phase::Armed | Phase::Recording),
+                matches!(s.phase.state(), Phase::Armed | Phase::Recording),
                 Ordering::Relaxed,
             );
         }
@@ -626,7 +619,7 @@ pub fn start_from_env() {
                         s.expire(now);
                         s.seal();
                         ACTIVE.store(
-                            matches!(s.phase, Phase::Armed | Phase::Recording),
+                            matches!(s.phase.state(), Phase::Armed | Phase::Recording),
                             Ordering::Relaxed,
                         );
                     }
@@ -741,7 +734,7 @@ mod tests {
             let mut state=State::new("lcd".into());state.accept(2,9);state.last_message=7;hb_arm(&mut state,7).unwrap();
             state.push(hb_row(200,8,5));
             state.push(Record{us:1000200,event:Event::Decoded,connection:2,message:9,session:seen,frame,kind,..Record::default()});
-            assert_eq!(state.phase,if session==9{Phase::Recording}else{Phase::Frozen});
+            assert_eq!(state.phase.state(),if session==9{Phase::Recording}else{Phase::Frozen});
         }
     }
     #[test]
@@ -750,22 +743,22 @@ mod tests {
         let (session,frame,kind)=identity(&parsed);assert_eq!(session,0);
         let mut state=State::new("lcd".into());state.accept(2,9);state.last_message=7;hb_arm(&mut state,7).unwrap();state.push(hb_row(200,8,5));
         state.push(Record{us:201,event:Event::Decoded,connection:2,message:9,session,frame,kind,..Record::default()});
-        assert_eq!(state.phase,Phase::Recording);
+        assert_eq!(state.phase.state(),Phase::Recording);
     }
     #[test]
     fn heartbeat_origin_requires_baseline_and_exact_ordinal() {
         let mut s=State::new("lcd".into());s.accept(2,9);s.last_message=7;
-        assert_eq!(hb_arm(&mut s,6).unwrap_err(),"baseline");assert_eq!(s.phase,Phase::Idle);
+        assert_eq!(hb_arm(&mut s,6).unwrap_err(),"baseline");assert_eq!(s.phase.state(),Phase::Idle);
         hb_arm(&mut s,7).unwrap();s.push(hb_row(200,8,5));
-        assert_eq!(s.phase,Phase::Recording);assert_eq!(s.trigger_message,8);
+        assert_eq!(s.phase.state(),Phase::Recording);assert_eq!(s.trigger_message,8);
         s.push(hb_row(15_000_200,9,5));assert_eq!(s.trigger,200);
-        s.expire(20_000_200);assert_eq!(s.phase,Phase::Frozen);
+        s.expire(20_000_200);assert_eq!(s.phase.state(),Phase::Frozen);
     }
     #[test]
     fn heartbeat_old_wrong_future_and_duplicate_stop_with_evidence() {
         for (ordinal,kind) in [(7,5),(8,15),(9,5)] {
             let mut s=State::new("lcd".into());s.accept(2,9);s.last_message=7;hb_arm(&mut s,7).unwrap();
-            s.push(hb_row(200,ordinal,kind));assert_eq!(s.phase,Phase::Frozen);
+            s.push(hb_row(200,ordinal,kind));assert_eq!(s.phase.state(),Phase::Frozen);
             assert_eq!(s.reason,"heartbeat_origin");assert_eq!(s.records[s.head+s.count-1].message,ordinal);
         }
         let mut s=State::new("lcd".into());s.accept(2,9);s.last_message=7;hb_arm(&mut s,7).unwrap();
@@ -774,9 +767,9 @@ mod tests {
     #[test]
     fn heartbeat_late_no_arrival_and_reconnect_are_not_forged() {
         let mut s=State::new("lcd".into());s.accept(2,9);s.last_message=7;hb_arm(&mut s,7).unwrap();
-        s.expire(100_000_000);assert_eq!(s.phase,Phase::Armed);assert_eq!(s.trigger,0);
+        s.expire(100_000_000);assert_eq!(s.phase.state(),Phase::Armed);assert_eq!(s.trigger,0);
         s.push(hb_row(100_000_001,8,5));assert_eq!(s.trigger,100_000_001);
-        s.accept(3,10);assert_eq!(s.phase,Phase::Frozen);assert_eq!(s.reason,"heartbeat_connection");
+        s.accept(3,10);assert_eq!(s.phase.state(),Phase::Frozen);assert_eq!(s.reason,"heartbeat_connection");
         assert_eq!(s.last_message,0);assert_eq!(s.hb_connection,2);
     }
     #[test]
@@ -784,7 +777,7 @@ mod tests {
         let mut s=State::new("lcd".into());s.accept(2,9);s.last_message=7;hb_arm(&mut s,7).unwrap();
         hb_arm(&mut s,7).unwrap();let q=request("arm",&s,1);assert_eq!(control(&mut s,q,200).unwrap_err(),"trigger");
         let mut legacy=State::new("lcd".into());legacy.arm(2,1).unwrap();legacy.push(hb_row(2,1,5));
-        assert_eq!(legacy.phase,Phase::Armed);legacy.push(hb_row(3,2,15));assert_eq!(legacy.phase,Phase::Recording);
+        assert_eq!(legacy.phase.state(),Phase::Armed);legacy.push(hb_row(3,2,15));assert_eq!(legacy.phase.state(),Phase::Recording);
     }
     #[test]
     fn ack_probe_wait_and_first_input_deadline() {
@@ -793,14 +786,14 @@ mod tests {
         for i in 0..2000 {
             s.push(row(10_000_000_000 + i, 19));
         }
-        assert_eq!(s.phase, Phase::Armed);
+        assert_eq!(s.phase.state(), Phase::Armed);
         assert_eq!(s.count, CAP);
         assert!(s.pre_overwritten > 0);
         s.push(row(20_000_000_000, 15));
         s.push(row(20_019_000_000, 15));
         assert_eq!(s.trigger, 20_000_000_000);
         s.expire(20_020_000_000);
-        assert_eq!(s.phase, Phase::Frozen);
+        assert_eq!(s.phase.state(), Phase::Frozen);
         assert_eq!(s.overwritten, 0); // Only prehistory was evicted in this case.
         assert!(std::mem::size_of::<State>() < 34000);
     }
@@ -825,7 +818,7 @@ mod tests {
         assert_eq!(s.release(digest ^ 1), Err("digest"));
         s.release(digest).unwrap();
         s.arm(2, 10_000_000_000).unwrap();
-        assert_eq!(s.phase, Phase::Armed);
+        assert_eq!(s.phase.state(), Phase::Armed);
     }
     #[test]
     fn ack_probe_boot_run_and_capacity_validation() {
@@ -838,7 +831,7 @@ mod tests {
             s.push(row(i as u64 + 1, 15));
         }
         assert_eq!(s.count, CAP);
-        assert_eq!(s.phase, Phase::Recording);
+        assert_eq!(s.phase.state(), Phase::Recording);
         assert_eq!(s.overwritten, 500);
         s.freeze(1000);
         let mut r = request("read", &s, 1);
@@ -856,7 +849,7 @@ mod tests {
             q.digest = Some(0);
             assert_eq!(control(&mut s, q, 1).unwrap_err(), "run");
         }
-        assert_eq!(s.phase, Phase::Idle);
+        assert_eq!(s.phase.state(), Phase::Idle);
     }
     #[test]
     fn ack_probe_release_retry_and_old_arm_are_safe() {

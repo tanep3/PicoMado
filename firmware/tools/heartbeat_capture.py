@@ -12,6 +12,7 @@ from pathlib import Path
 import ack_probe_v2 as ap
 import cyw43_inner_collect as cy
 import usb_button_trial as txlib
+from observation_serialization import report_value
 
 CAPS = {'v': '3', 'hb': '1', 'event': '19'}
 WINDOW = 20.0
@@ -150,7 +151,7 @@ def collect(usb, host, ready, out, headers):
     for name, value in [('pico', pico), ('host', server), ('extra', extra), ('headers', headers)]:
         ap.persist(root / (name + '.json'), value)
     result = validate(pico, server, extra, ready, headers)
-    ap.persist(root / 'quality.json', result)
+    ap.persist(root / 'quality.json', result.record())
     raw_hashes = headers.get('SHA256', {})
     require(set(raw_hashes) == {'headers.jsonl', 'recvq.jsonl'}, 'header raw evidence manifest')
     for name, expected_hash in raw_hashes.items():
@@ -176,91 +177,17 @@ def release(usb, host, ready, saved, out):
 
 
 def validate(pico, host, extra, ready, headers):
-    """No quality failure is waived for periodic mode; target ambiguity is fatal."""
-    errors = []
-    def ck(ok, why):
-        if not ok:
-            errors.append(why)
-    ps, hs, tr = pico['status'], host['status'], extra['trigger']
-    rows, tx, inner = pico['records'], extra['tx_rows'], extra['SDK_inner']
-    ts = extra['tx_status']
-    baseline, target = ready['baseline'], ready['expected']
-    ck(0 <= baseline < 0xffffffff and target == baseline + 1, 'ordinal origin')
-    ck(ps['boot'] == tr['b'] == ready['pico_boot'] and ps['run'] == tr['r'] == ready['run'], 'Pico identity')
-    ck(tr['mode'] == '1' and int(tr['o'], 16) == int(tr['g'], 16) == baseline
-       and int(tr['m'], 16) == target and int(tr['flags'], 16) == 0, 'gate/target provenance')
-    ck(ps['state'] == '3' and int(ps['over']) == 0 and int(ps['gen']) == ready['generation'], 'Pico quality/generation')
-    ck(ap.fnv(rows) == int(ps['digest'], 16), 'Pico digest')
-    ck(not any(pico[k] for k in ['prepared_input_detected', 'observation_usb_overlap_detected', 'post_freeze_buttons_detected']), 'USB/input quality')
-    ck(not any(r['event'] in [1, 24] for r in rows), 'unexpected input')
-    ev1 = extra.get('EV1', {})
-    ck(ev1.get('b') == ready['pico_boot'] and ev1.get('on') == ev1.get('sat') == '0'
-       and ev1.get('seq') == ready.get('ev1_sequence') is not None, 'EV1 OFF throughout owned interval')
-    markers = [r for r in rows if r['event'] == 25]
-    ck(len(markers) == 1 and bool(rows) and rows[0]['event'] == 25, 'unique periodic trigger')
-    expected_records = []
-    for event in [25, 12, 13, 14, 15, 16, 23, 17, 18]:
-        matches = [r for r in rows if r['event'] == event and r['message'] == target and r['kind'] == 5]
-        ck(len(matches) == 1, 'target boundary ' + str(event))
-        expected_records.extend(matches[:1])
-    if len(expected_records) == 9:
-        marker, before, locked, encoded, wb, we, copy, output, returned = expected_records
-        ck([rows.index(r) for r in expected_records] == sorted(rows.index(r) for r in expected_records), 'target boundary order')
-        ck(all(r['connection'] == ready['generation'] and r['session'] == ready['session'] for r in expected_records), 'target session/generation')
-        ck(marker['a'] == marker['b'] == baseline and marker['c'] == 0 and marker['d'] == ready['generation'], 'marker origin')
-        ck(not wb['flags'] & 6 and wb['b'] == copy['a'] == copy['d'], 'initial outstanding data/ACK ambiguity')
-        wire = before['b'] + 6 + (6 if before['b'] + 6 < 126 else 8)
-        ck(we['a'] == 0 and returned['a'] == 1 and (copy['b'] - copy['a']) & 0xffffffff == wire, 'target COPY failed/range')
-        decoded = [r for r in host['records'] if r['event'] == 'decoded']
-        found = [r for r in decoded if r['message'] == target]
-        ck(len(found) == 1 and found[0]['kind'] == 5 and found[0]['session'] == marker['session']
-           and found[0]['a'] == before['a'] and found[0]['b'] == before['b'], 'host target ordinal/kind/CRC')
-        ck(bool(decoded) and [r['message'] for r in decoded] == list(range(target, target + len(decoded))), 'host decoded prelude/gap/duplicate')
-        ck(any(t['s'] == copy['a'] and t['e'] == copy['b'] for t in tx), 'target first TX unobserved')
-    ck(hs['boot'] == ready['host_boot'] and hs['run'] == ready['run'] and hs['phase'] == 'frozen', 'host identity')
-    ck(hs.get('trigger_mode') == 'heartbeat' and hs.get('baseline_message') == baseline
-       and hs.get('expected_message') == hs.get('trigger_message') == target
-       and hs.get('hb_connection') == ready['host_connection'] and hs.get('hb_session') == ready['session'], 'host origin mode')
-    ck(all(r['connection'] == ready['host_connection'] for r in host['records']), 'host binding changed')
-    ck(hs['overwritten'] == hs['contended'] == hs['pre_overwritten'] == 0, 'host observation loss')
-    digest = 0
+    """Projection adapter: codec checks become facts; only domain rules assess them."""
+    from observation_rules import assess, IntegrityFacts
+    host_crc=0
     for row in host['records']:
-        canonical = {k: row[k] for k in ['us', 'event', 'connection', 'message', 'session', 'frame', 'kind', 'a', 'b']}
-        digest = zlib.crc32(json.dumps(canonical, separators=(',', ':')).encode(), digest)
-    ck(digest == hs['digest'], 'host digest')
-    ck(int(pico['window']['trigger'], 16) > 0 and int(pico['window']['freeze'], 16) - int(pico['window']['trigger'], 16) >= 20000000
-       and hs['trigger_us'] > 0 and hs['freeze_us'] - hs['trigger_us'] >= 20000000, 'full separate20s windows')
-    ck(ts['b'] == ready['pico_boot'] and ts['r'] == ready['run'] and ts['gen'] == format(ready['generation'], 'x')
-       and ts['active'] == '0' and ts['ok'] == '1' and all(int(ts[k], 16) == 0 for k in ['over', 'bad', 'changed']), 'TX quality')
-    ck(txlib.tx_digest(tx) == int(ts['h'], 16), 'TX digest')
-    ck(inner['caps'] == cy.SCHEMA and inner['status']['b'] == ready['pico_boot'] and inner['status']['r'] == ready['run']
-       and inner['status']['gen'] == format(ready['generation'], 'x') and inner['status']['active'] == '0', 'CY binding/schema')
-    ck(inner['no_diagnostic_loss'] and not any(int(inner['status'][k], 16) for k in ['over', 'inc', 'changed'])
-       and not any(int(inner['quality'][k], 16) for k in ['sat', 'depth', 'reject']), 'CY loss')
-    ck(cy.digest(inner['rows']) == int(inner['status']['h'], 16), 'CY digest')
-    ck(len(tx) == int(ts['n'], 16) <= 32 and len(inner['rows']) == int(inner['status']['n'], 16) <= 15, 'record counts')
-    used = set()
-    for t in tx:
-        matches = [i for i, parts in enumerate(inner['rows']) if
-            (parts[1]['s'], parts[1]['e'], parts[1]['a'], parts[1]['ip'], parts[1]['len']) ==
-            (t['s'], t['e'], t['a'], t['ip'], t['len']) and
-            t['t'] <= parts[0]['t'] <= parts[0]['end'] <= t['t'] + t['dt']]
-        ck(len(matches) == 1 and matches[0] not in used, 'TX/CY unique full join')
-        used.update(matches)
-    ck(len(used) == len(inner['rows']), 'unmatched CY rows')
-    ck(headers.get('complete_interval') is True and headers.get('payload_copied_or_persisted') is False, 'header observer quality')
-    ck(headers.get('scope_valid') is True and headers.get('target_binding') ==
-       {k: ready[k] for k in ['pico_boot', 'host_boot', 'run', 'device', 'host_connection', 'session']}, 'header target scope')
-    workers = [x for x in headers.get('metadata_events', []) if x.get('event') == 'worker_finished']
-    ck(len(workers) == 1 and workers[0]['packet_stats']['kernel_drops'] == 0
-       and workers[0]['sockets_closed'] and not workers[0]['payload_copied'] and not workers[0]['payload_persisted'], 'header loss/scope lifecycle')
-    from heartbeat_evidence import coverage_ok
-    ck(coverage_ok(headers),'observer does not cover controller window')
-    return dict(complete=not errors, errors=errors, trigger='natural_heartbeat',
-                input_count=sum(r['event'] in [1, 24] for r in rows),
-                input_before_or_during=bool(int(tr['flags'], 16) & 1),
-                full_CY_scope='all target tuple data, including retransmissions',
-                clocks_subtracted=False, RF_departure_proven=False)
+        canonical={k:row[k] for k in ['us','event','connection','message','session','frame','kind','a','b']}
+        host_crc=zlib.crc32(json.dumps(canonical,separators=(',',':')).encode(),host_crc)
+    inner=extra['SDK_inner']
+    checks=IntegrityFacts(ap.fnv(pico['records'])==int(pico['status']['digest'],16),
+        host_crc==host['status']['digest'],txlib.tx_digest(extra['tx_rows'])==int(extra['tx_status']['h'],16),
+        inner['caps']==cy.SCHEMA,cy.digest(inner['rows'])==int(inner['status']['h'],16))
+    return assess(pico,host,extra,ready,headers,checks)
 
 
 def confirm_saved(root,ready):
@@ -283,5 +210,5 @@ if __name__ == '__main__':
     parser.add_argument('directory', type=Path)
     args = parser.parse_args()
     result=validate_directory(args.directory)
-    print(json.dumps(result,ensure_ascii=False))
+    print(json.dumps(report_value(result),ensure_ascii=False))
     raise SystemExit(0 if result['complete']else 1)

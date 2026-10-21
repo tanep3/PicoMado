@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ ( $# != 2 && $# != 3 ) || ${1-} != --device || ( $# == 3 && ${3-} != --check-only ) ]]; then
-  echo 'usage: flash.sh --device DEVICE [--check-only]' >&2
+if [[ ( $# != 2 && $# != 3 ) || ${1-} != --device || ( $# == 3 && ${3-} != --check-only && ${3-} != --verify-only ) ]]; then
+  echo 'usage: flash.sh --device DEVICE [--check-only|--verify-only]' >&2
   exit 2
 fi
 device=$2
@@ -11,9 +11,10 @@ if [[ ! $device =~ ^[A-Za-z0-9_-]+$ ]]; then
 fi
 root=$(cd "$(dirname "$0")/.." && pwd)
 expected_file="$root/devices/$device/board-id.txt"
-image="$root/build/$device/$device.uf2"
+build_dir=${PM_BUILD_DIR:-"$root/build/$device"}
+image="$build_dir/$device.uf2"
 config="$root/devices/$device/config.h"
-manifest="$root/build/$device/manifest.txt"
+manifest="$build_dir/manifest.txt"
 if [[ ! -f $expected_file || ! -f $config || ! -f $image || ! -f $manifest ]]; then
   echo 'device config, board binding, UF2, or manifest missing' >&2
   exit 2
@@ -30,6 +31,10 @@ if [[ $mode != OFF || $built_device != "$device" ||
   echo 'UF2 manifest does not match the selected device and image' >&2
   exit 2
 fi
+python3 "$root/../tools/project_gate.py" preflight --candidate "$build_dir/candidate.json" \
+  --review "$build_dir/review.json" --artifact "$image" \
+  --device "$device" --board-id "$expected_file" --config "$config"
+if [[ ${3-} == --verify-only ]]; then exit 0; fi
 image_info=$(picotool info -a "$image")
 if ! grep -Eq '^[[:space:]]*pico_board:[[:space:]]*pico_w[[:space:]]*$' <<< "$image_info"; then
   echo 'selected UF2 is not a Pico W build' >&2

@@ -4,30 +4,12 @@ import json
 from pathlib import Path
 import zlib
 import heartbeat_capture as hc
+import observation_domain as domain
 
 
 def coverage_ok(headers):
-    try:
-        c=headers['controller']
-        if c['clock']!='CLOCK_MONOTONIC'or c.get('errors'):return False
-        starts=[e for e in headers['metadata_events']if e.get('event')=='started']
-        workers=[e for e in headers['metadata_events']if e.get('event')=='worker_finished']
-        if len(starts)!=1 or len(workers)!=1:return False
-        a=starts[0]['clock'];worker=workers[0]
-        points=[c['start_request_before_ns'],a['mono_before_ns'],a['mono_after_ns'],
-                c['start_confirm_after_ns'],c['DTR_low_before_ns'],c['DTR_low_after_ns'],
-                c['required_end_ns'],c['stop_request_before_ns'],c['finished_after_ns']]
-        if not all(type(v)is int and v>=0 for v in points)or points!=sorted(points):return False
-        budget=c['wait_budget_ns']
-        if not 0<budget<=16000000000:return False
-        if c['required_end_ns']!=c['DTR_low_before_ns']+budget+20100000000:return False
-        if worker.get('packet_stats',{}).get('kernel_packets')!=worker.get('packets'):return False
-        if worker.get('reason')!='stop_command'or worker.get('capture_started')is not True:return False
-        low=(c['stop_request_before_ns']-c['start_confirm_after_ns'])/1e9
-        high=(c['finished_after_ns']-c['start_request_before_ns'])/1e9
-        duration=worker['capture_seconds']
-        return isinstance(duration,(int,float))and low-.001<=duration<=high+.001 and worker['max_queue_sample_gap_ns']<=200000000
-    except(KeyError,TypeError,ValueError):return False
+    from observation_rules import coverage_ok as rule
+    return rule(headers)
 
 
 FULL_FILES={'identity.json','ready.json','pico.json','host.json','extra.json',
@@ -114,17 +96,17 @@ def validate_directory(directory):
         if partial:
             hc.require(read(root,'partial.json')==dict(identity=ident,host_captured=captured,never_complete=True),'partial declaration')
             hc.require(int(p['window']['trigger'],16)==0 and not p['records'],'partial capture already triggered')
-            facts=dict(complete=False,errors=['partial preparation/no corresponding trigger'])
+            facts=domain.pending_assessment('partial preparation/no corresponding trigger')
         else:
             ready=read(root,'ready.json');extra=read(root,'extra.json')
             hc.require(saved['ready']==ready and identity(ready)==ident,'saved ready mismatch')
             hc.require(saved['pico_digest']==release['pico']['digest']and saved['host_digest']==release['host']['digest'],'saved digest declaration')
             facts=hc.validate(p,h,extra,ready,headers)
             integrity={'Pico identity','host identity','Pico digest','host digest','TX digest','CY digest','record counts','CY binding/schema'}
-            hc.require(not integrity.intersection(facts['errors']),'saved record integrity')
+            hc.require(not integrity.intersection(facts.errors),'saved record integrity')
             workers=[e for e in headers['metadata_events']if e.get('event')=='worker_finished']
             if len(workers)!=1 or workers[0]['packets']!=len(packets)or not all(x.get('scope_valid')is True for x in packets):
-                facts['errors'].append('raw packet count/scope');facts['complete']=False
-        return facts|dict(evidence_confirmed=True,release=release,kind=kind)
+                facts=domain.with_error(facts,'raw packet count/scope')
+        return domain.confirm(facts,ident,domain._verified_evidence(ident),release=release,kind=kind)
     except(OSError,ValueError,TypeError,KeyError,OverflowError)as problem:
-        return dict(complete=False,evidence_confirmed=False,errors=[str(problem)[:240]])
+        return domain.incomplete(str(problem)[:240])

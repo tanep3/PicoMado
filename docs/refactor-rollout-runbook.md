@@ -1,5 +1,20 @@
 # 次回の反映・退避・復旧・採取手順
 
+## Current staging gate
+
+Read [AGENTS](../AGENTS.md) and [development process](development-process.md) first. Before historical install commands below, run the root gate; stage the exact artifact and obtain independent parent approval. This does not authorize service/device operations.
+
+```bash
+python3 tools/project_gate.py check --out .gate
+python3 tools/project_gate.py build --kind server --build-dir "$PM_STAGE/build" --out "$PM_STAGE/build-receipt.json"
+python3 tools/project_gate.py record --build-receipt "$PM_STAGE/build-receipt.json" --kind server --artifact "$PM_SERVER_CANDIDATE" --out "$PM_STAGE/candidate.json"
+python3 tools/project_gate.py preflight --candidate "$PM_STAGE/candidate.json" --review "$PM_STAGE/review.json" --artifact "$PM_SERVER_CANDIDATE"
+# Offline only. --check-only still accesses USB.
+bash firmware/tools/flash.sh --device "$PM_DEVICE" --verify-only
+```
+
+The worker never manufactures a production approval. Existing accepted binaries stay intact. Direct install/copy/picotool remains a bypass unless external permissions/repository protection enforce the route; those controls are not applied here.
+
 **準備文書であり、以下は未実行。** 現時点の本番反映、実機/USB、サービス操作、SSH、pushの禁止を解除しない。D03B`52d8fdd`は独立43試験で受入済み。対象・操作の親からの指示後に、許可された段階だけを実施する。[状態一覧](refactor-final-acceptance-20261020.md)の実機未検証を合格に変えない。
 
 ## 影響と反映単位

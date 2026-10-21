@@ -60,3 +60,6 @@ Thumbs.db
 *.uf2
 *.elf
 /experiments/**/cache/
+
+# Root-gate receipts and local artifacts
+/.gate/

@@ -1,5 +1,8 @@
 # PicoMado firmware (LCD / E-ink)
 
+> Current development entry: [AGENTS](../AGENTS.md). Run the root gate before builds. New artifact staging uses `tools/project_gate.py record`; deployment requires `preflight` and parent approval. Direct cargo install/cmake/picotool commands below are historical/manual bypass paths, not substitutes for this gate.
+
+
 2026-10-20のソース保存点で採用済みの動画protocol、世代・ACK・取消し・EOF、Pico通常値と診断variantの区別は [採用済み通信と設定](adopted-protocol-and-configuration.md) にまとめています。過去の「現在」「未転送」は各記録時点であり、ソース更新を実機書込みと混同しません。
 
 LCD 接続で小さい制御送信が ACK 待ちに重なる条件に対し、新規 PCB の接続開始前に Nagle を無効にする候補を隔離検証しました。HOME/AWAY/再接続と E-ink の設定維持、同 SDK の送出挙動はローカル試験済みです。既知正常版も Nagle は有効だったため、実機悪化の原因確定や改善確認とは扱いません。後続の承認済み LCD 版へ反映し、ソースも保存しました。実機経過と残る制約は検証記録の末尾にあります。[候補と検証範囲](nagle-candidate-verification-2026-10-19.md)。
@@ -139,3 +142,7 @@ LCD/E-ink_0/E-ink_1の共通通信は、能力frame-bytes-v1でraw pixel kind18�
 Androidの手動起動アプリを使う接続先交換クライアントを追加しました。HOMEは既存direct TCPのまま、`-DPM_AWAY_EEX1=ON`を指定した端末buildのAWAYだけに適用します。既定はOFF、探索UDP portは`PM_EEX1_PORT=48116`。認証成功とSOCKS CONNECT完了で検証した接続先をWi-Fi接続世代中のRAMへ保持し、TCP再接続で再利用します。取得IP/portを永続設定へ書き戻しません。
 
 [参照仕様・出典・ビルド方法・実機確認範囲](../docs/eex1-endpoint-discovery.md)を参照してください。`TARGET_CONNECTED`はSOCKSの宛先接続成功を表し、PiのWelcomeや画像描画成功は別に確認します。Androidアプリは別プロジェクトで管理します。
+
+## Controlled build provenance
+
+Use the root gate receipt with the actual controlled builder. The build directory must be fresh (`PM_BUILD_DIR` may select one); an existing accepted image is never retroactively relabelled by `record`. `build-receipt.json` binds source, SDK/gitlinks, actual flags/compile commands, compiler and artifact. `flash.sh --verify-only` is offline; parent approval binds the exact candidate and build receipt. USB and service operation still require their own authorization.

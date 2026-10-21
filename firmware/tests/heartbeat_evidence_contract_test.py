@@ -29,7 +29,7 @@ def interval(f):
 def saved(root):
     f=interval(fixture());seal(f)
     p,h,e,r,headers=f
-    for name,value in [('pico',p),('host',h),('extra',e),('headers',headers),('quality',hc.validate(*f))]:
+    for name,value in [('pico',p),('host',h),('extra',e),('headers',headers),('quality',hc.validate(*f).record())]:
         hc.ap.persist(root/(name+'.json'),value)
     (root/'headers.jsonl').write_bytes(b'{"scope_valid":true}\n');(root/'recvq.jsonl').write_bytes(b'')
     return f,hc.confirm_saved(root,r)
@@ -48,7 +48,7 @@ class Tests(unittest.TestCase):
                 if fault=='early_stop':c['stop_request_before_ns']=137000000000
                 if fault=='wrong_clock':c['clock']='host_probe_relative'
                 if fault=='duration':worker['capture_seconds']=100.
-                self.assertFalse(hc.validate(*f)['complete'])
+                self.assertFalse(hc.validate(*f).measurement_complete)
     def test_cli_rejects_five_JSON_without_manifest_and_raw(self):
         f=interval(fixture());seal(f)
         with tempfile.TemporaryDirectory()as d:

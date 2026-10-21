@@ -20,10 +20,14 @@ build_dir="$root/build/$device"
 if [[ $sample == ON ]]; then build_dir="$root/build/.samples/$device"; fi
 if [[ $unbound == ON ]]; then build_dir="$root/build/.unbound/$device"; fi
 if [[ $panel == ON ]]; then build_dir="$root/build/.unbound-panel/$device"; fi
+python3 "$root/../tools/project_gate.py" verify-check
+if [[ -n ${PM_BUILD_DIR:-} ]]; then build_dir=$PM_BUILD_DIR; fi
+mode=normal
+if [[ $sample == ON ]]; then mode=sample; fi
+if [[ $unbound == ON ]]; then mode=unbound; fi
+if [[ $panel == ON ]]; then mode=unbound_panel; fi
 umask 077
-cmake -S "$root" -B "$build_dir" -DPM_DEVICE="$device" \
-  -DPM_USE_SAMPLE="$sample" -DPM_PREPARE_UNBOUND="$unbound" -DPM_PREPARE_UNBOUND_PANEL="$panel" -DPICO_BOARD=pico_w -DCMAKE_BUILD_TYPE=Release
-cmake --build "$build_dir" -j4
+python3 "$root/../tools/project_gate.py" build --kind firmware --device "$device" --mode "$mode" --build-dir "$build_dir"
 board_file="$root/devices/$device/board-id.txt"
 if [[ $sample == ON ]]; then board_file="$root/devices/$device/board-id.sample.txt"; fi
 if [[ $unbound == ON ]]; then board=0000000000000000; sample=UNBOUND;
@@ -32,3 +36,8 @@ if [[ $panel == ON ]]; then sample=UNBOUND-PANEL; fi
 hash=$(sha256sum "$build_dir/$device.uf2" | cut -d' ' -f1)
 printf '%s %s %s %s\n' "$sample" "$device" "$board" "$hash" > "$build_dir/manifest.txt"
 printf 'UF2: %s\n' "$build_dir/$device.uf2"
+
+if [[ $sample == OFF && $unbound == OFF ]]; then
+  python3 "$root/../tools/project_gate.py" record --build-receipt "$build_dir/build-receipt.json" --artifact "$build_dir/$device.uf2" --kind firmware \
+    --device "$device" --board-id "$board_file" --config "$root/devices/$device/config.h" --out "$build_dir/candidate.json"
+fi

@@ -13,9 +13,10 @@
     "design": {
       "state": "verified",
       "evidence": [
-        "afbbd4b",
-        "d76617d",
-        "fa9bf58"
+        {
+          "kind": "commit",
+          "commit": "8a74b0b"
+        }
       ]
     },
     "implementation": {
@@ -63,7 +64,7 @@
     "parent closure record after effectiveness confirmation"
   ],
   "zero_bug_guarantee": false,
-  "design_commit": "fa9bf58af23a6968038a94f7c8e89f9c66cc5026",
+  "design_commit": "8a74b0b",
   "design_artifacts": [
     "docs/contracts-observation-design.md",
     "docs/development-process.md",

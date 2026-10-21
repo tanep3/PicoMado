@@ -1,5 +1,8 @@
 # PicoMado user-service layout
 
+> Current development entry: [AGENTS](../../AGENTS.md). Run the root gate before builds. New artifact staging uses `tools/project_gate.py record`; deployment requires `preflight` and parent approval. Direct cargo install/cmake/picotool commands below are historical/manual bypass paths, not substitutes for this gate.
+
+
 `config.toml` is the non-secret server setting file installed at
 `/home/tane/.config/PicoMado/config.toml`. The common transactional SQLite
 database is `/home/tane/.config/PicoMado/data/picomado.db`; it currently holds

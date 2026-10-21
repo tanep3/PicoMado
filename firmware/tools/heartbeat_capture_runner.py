@@ -19,6 +19,8 @@ import termios
 import time
 import event_stream as ev
 import heartbeat_capture as hc
+import observation_domain as domain
+from observation_serialization import value as output_value, report_value
 
 
 class DTRFailure(RuntimeError):
@@ -162,7 +164,7 @@ class Runner:
     def __init__(self,owner,host,resolve_target,observer_factory,out,*,clock=time.monotonic,wait=time.sleep,clock_ns=None):
         self.owner=owner;self.host=HostGuard(host);self.resolve_target=resolve_target
         self.observer_factory=observer_factory;self.root=Path(out);self.clock=clock;self.wait=wait
-        self.persist=hc.ap.persist;self.errors=[];self.session=None;self.target=None;self.ready=None
+        self.persist=lambda path,data:hc.ap.persist(path,output_value(data));self.errors=[];self.session=None;self.target=None;self.ready=None
         self.ns=clock_ns or(time.monotonic_ns if clock is time.monotonic else lambda:int(clock()*1e9))
         self.coverage=dict(clock='CLOCK_MONOTONIC',wait_budget_ns=16000000000)
         self.identity=None;self.headers=None;self.safe_deadline=None;self.high_attempted=False
@@ -203,7 +205,7 @@ class Runner:
             SHA256={n:hashlib.sha256((self.root/n).read_bytes()).hexdigest()for n in ['headers.jsonl','recvq.jsonl']})
         if self.ready is not None and self.target is not None:
             summary=hc.header_evidence(summary,[e for e in events if e.get('event')=='packet'],self.target,self.ready)
-        else:summary|=dict(scope_valid=False)
+        else:summary.update(scope_valid=False)
         summary['controller']=self.coverage|dict(errors=[dict(e)for e in self.errors])
         self.headers=summary;self.persist(self.root/'observer-result.json',summary)
 
@@ -257,8 +259,8 @@ class Runner:
         self.persist(self.root/'headers.json',self.headers)
         if self.ready and self.server and extra['SDK_inner']is not None:
             quality=hc.validate(self.pico,self.server,extra,self.ready,self.headers)
-        else:quality=dict(complete=False,errors=['partial preparation/no corresponding trigger'],trigger='natural_heartbeat')
-        self.persist(self.root/'quality.json',quality)
+        else:quality=domain.pending_assessment('partial preparation/no corresponding trigger')
+        self.persist(self.root/'quality.json',quality.record())
         if self.ready and self.server and extra['SDK_inner']is not None:
             self.quality=hc.confirm_saved(self.root,self.ready)
         else:self.quality=hc.confirm_partial(self.root,self.identity,self.server is not None)
@@ -291,7 +293,7 @@ class Runner:
         self.persist(self.root/'released.json',dict(pico=ps,host=self.host({'op':'status'})))
 
     def run(self,device,run_id):
-        self.quality=dict(complete=False,errors=['not captured']);self.observation_io=dict(reads=0,writes=0)
+        self.quality=domain.incomplete('not captured');self.observation_io=dict(reads=0,writes=0)
         counts=None
         try:
             self.ready=hc.prepare(self.owner,self.host,device,run_id,self.root)
@@ -343,12 +345,11 @@ class Runner:
             except BaseException as problem:self.error('final_status',problem)
             try:self.owner.close()
             except BaseException as problem:self.error('owner_close',problem)
-            result=dict(complete=bool(self.quality['complete']and not self.errors and pico_idle and host_idle and self.owner.closed),
-                capture_quality=self.quality,errors=self.errors,pico_idle=pico_idle,host_idle=host_idle,
-                Pico_status=ps,host_status=hs,owner_closed=self.owner.closed,observation_USB_io=self.observation_io,
+            result=domain.run_outcome(self.quality,errors=self.errors,pico_idle=pico_idle,host_idle=host_idle,owner_closed=self.owner.closed,
+                Pico_status=ps,host_status=hs,observation_USB_io=self.observation_io,
                 automatic_rearm=False,SIM_sent=False,raw_evidence_saved=self.headers is not None)
             try:self.persist(self.root/'result.json',result)
-            except BaseException as problem:self.error('result_save',problem);result['complete']=False
+            except BaseException as problem:self.error('result_save',problem);result=domain.operation_failed(result,self.errors)
         return result
 
 
@@ -378,7 +379,7 @@ def main():
     owner=Owner(cfg['serial_by_id'],args.dir/'owner.private.jsonl')
     runner=Runner(owner,host,resolve,lambda target:client.Session(target,seconds=40,prepare_seconds=20),args.dir)
     result=runner.run(cfg['device'],format(time.time_ns(),'x'))
-    print(json.dumps({k:result[k]for k in ['complete','pico_idle','host_idle','owner_closed','errors']},ensure_ascii=False))
+    print(json.dumps({k:report_value(result)[k]for k in ['complete','pico_idle','host_idle','owner_closed','errors']},ensure_ascii=False))
 
 
 if __name__=='__main__':main()

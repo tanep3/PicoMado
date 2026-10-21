@@ -1,0 +1,18 @@
+name: observation-domain-gate
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  observation-domain-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch locked build dependencies
+        run: cargo fetch --locked --manifest-path service/Cargo.toml
+      - name: Same root gate as local development
+        run: python3 tools/project_gate.py check --out .gate
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: observation-gate-evidence
+          path: .gate/*.log
