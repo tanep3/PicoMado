@@ -2,6 +2,8 @@
 
 対象は `58b6d14` に対する独立レビュー2件。設計・検証条件だけの先行コミットは `1b39771caf855e10049613536e60046674f1f1b3`、修正の固定コミットは `4563976f35d894359337bd75da8e600ae7d5240c`。著者側の修正・ローカル検証は完了し、再レビュー待ちである。旧実装を独立レビューで受入済みと扱わない。
 
+追補：独立再レビューでこの2件の解消は確認された。同時に異seqの追加beginを完全とする退行が見つかったため、[単一開始の状態遷移修正](capture-boundary-state-verification.md) と固定実装 `f2bdc7b` を参照する。以下は前回修正の履歴である。
+
 [checkpoint JSON](checkpoints/20261021/observation-runtime-gap-p2.json) にreview/source/log/artifactのSHA、構成と資源量を保存した。既存の [初回実装](observation-runtime-gap-implementation.md) と [実測](manual-switch-analysis-20261020.md) は履歴として維持する。
 
 ## 修正と実行証拠

@@ -1,0 +1,124 @@
+{
+  "recorded_at_utc": "2026-10-21T01:05:11.307716+00:00",
+  "design_commits": [
+    "c85e8d3d2c9777d84e78f91fbd14ae6b33428eb0",
+    "7cdcd9127f48abff0830019b65b6c8a7f40002b6"
+  ],
+  "runtime_commit": "f2bdc7b2e17cc620e5d568c16842ee6ea871e7b0",
+  "previous_runtime": "4563976f35d894359337bd75da8e600ae7d5240c",
+  "independent_review_sha256": "4bf482cf44e0e151194fed1e6e91bd9077533859cb5571ddfcf2f7341e510481",
+  "invariant": "one accepted begin per anchored Window; every additional in-interval begin invalidates quality without resetting the first begin",
+  "tests": {
+    "table_named_tests": 5,
+    "documented_transition_rows": 16,
+    "fact_ack_byte_cases": 192,
+    "table_saved_PTY_cases": 40,
+    "late_and_abort_saved_PTY_cases": 2,
+    "existing_collector_tests": 27,
+    "existing_causality_tests": 10,
+    "real_IRQ_boundary_byte_replay": "passed",
+    "final_failures": 0
+  },
+  "log_evidence": {
+    "gap-state-table-final.log": {
+      "sha256": "83d0e6000d96ad6b95173b18e03c284796517a3d3c7aacab3fbb7d96b2e36b96",
+      "bytes": 198
+    },
+    "gap-state-collector-final.log": {
+      "sha256": "1dc2613acbe4449dca4de156bbe5e4aae7d2c6b956f27328faf57fd8527dff75",
+      "bytes": 126
+    },
+    "gap-state-causality-final.log": {
+      "sha256": "b2bd89166b4ca4df25153f40255088bb51d22fe7bed914b93875bbd8ea4266a5",
+      "bytes": 109
+    },
+    "gap-state-irq-replay.log": {
+      "sha256": "75ce05b7342104c0ef2e5ed044c1c5c784c056ab1d14ce005ed5b462329bacb4",
+      "bytes": 119
+    },
+    "gap-state-evidence/distinct-final.log": {
+      "sha256": "baa6dba984204bbbada4cbab6842cbde6b40c05de02d5c64f3ea7ca1bf43813f",
+      "bytes": 2050
+    }
+  },
+  "source_hashes": {
+    "firmware/tests/capture_boundary_cases.py": "44d0d2b1d10e943b4b3559f79b15166aabcf94845694dea700ede99a69ffc1a4",
+    "firmware/tests/capture_boundary_state_test.py": "b15ee0467d28d59eda4ef90f3d518fcf59901bdfde479cc08ed65e7b909a0454",
+    "firmware/tests/event_collector_test.py": "e9f218c9f9cd969ca1378f2187095a332fe6481b19253386b332836b0508ed19",
+    "firmware/tools/event_causality.py": "94bd4bd984905f7fad77848228dff0d36f928e5e4f910be195359e4ede416e60",
+    "firmware/tools/event_stream.py": "d4355af207c3ca9d45e80d4041efd07edb54748a864fee27735531ddf56874c9"
+  },
+  "unaffected_source_hashes_match": {
+    "firmware/src/main.c": true,
+    "firmware/src/net.c": true,
+    "firmware/src/net.h": true,
+    "firmware/src/observation.h": true,
+    "firmware/src/observation_transport.h": true,
+    "firmware/src/trace.c": true,
+    "firmware/src/tx_link_probe.c": true,
+    "firmware/src/tx_link_probe.h": true,
+    "firmware/src/usb_control.c": true,
+    "firmware/tests/app_timing_test.c": true,
+    "firmware/tests/eink_app_test.c": true,
+    "firmware/tests/event_causality_test.py": true,
+    "firmware/tests/net_socks_test.c": true,
+    "firmware/tests/net_stubs/lwip/tcp.h": true,
+    "firmware/tests/observation_drain_test.c": true,
+    "firmware/tests/observation_net_test.c": true,
+    "firmware/tests/observation_transport_test.c": true,
+    "firmware/tests/run_contract_tests.sh": true,
+    "firmware/tests/tx_adapter_test.c": true,
+    "service/src/network_observation_tests.rs": true,
+    "service/src/observation.rs": true,
+    "service/src/protocol.rs": true,
+    "service/src/socket_progress.rs": true,
+    "service/src/transport.rs": true,
+    "firmware/tests/observation_boundary_irq_test.c": true,
+    "firmware/tests/observation_boundary_irq_test.py": true
+  },
+  "saved_raw_evidence": {
+    "gap-state-evidence/distinct-final/device.jsonl": {
+      "sha256": "dcdab12a890d937450fa31dde92c58b3214f804c49c5a1a2a730eb6206cd9b90",
+      "bytes": 2202
+    },
+    "gap-state-evidence/distinct-final/device.jsonl.summary.json": {
+      "sha256": "53a42cacb84399fdfe8292e5f94e86664ac678342ea278c0d8ca2b7b1f6a28e6",
+      "bytes": 1622
+    }
+  },
+  "saved_reproduction": {
+    "begin_sequence": 1,
+    "unexpected_begin_sequence": 2,
+    "end_sequence": 3,
+    "causal_ready_callback_count": 0,
+    "causal_complete": false,
+    "transport_complete": false,
+    "reasons": {
+      "unexpected_begin": 1
+    },
+    "storage_durable": true,
+    "storage_loss": 0
+  },
+  "inherited_verification": {
+    "firmware_C_TCP_hook_server_unchanged": true,
+    "previous_P2_checkpoint_sha256": "e088dbd2e2918cd1ee22594678e533112fd66d115005dfdf43c788f3dfabd36a",
+    "ARM_ELF_hashes_rechecked": true,
+    "ARM_rebuilt": false,
+    "server_rebuilt": false,
+    "full_host_or_server_repeated": false,
+    "previous_host_PASS_lines": 175,
+    "previous_ARM_configurations": 4
+  },
+  "constraints": {
+    "hardware_USB_SSH_service_push": false,
+    "firmware_updated": false,
+    "config_or_binding_changed": false,
+    "physical_latency_effect_verified": false
+  },
+  "limits": [
+    "late invalid boundary cannot erase a prior legitimate ready notification; later status/final quality must be false",
+    "before-first-observation and exact raw-to-WS provenance remain unknown",
+    "no physical IRQ/RF/latency acceptance"
+  ],
+  "remaining_blockers": []
+}
