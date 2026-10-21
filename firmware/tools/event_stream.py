@@ -98,27 +98,25 @@ class Window:
         self.end_fact = None
         self.begin_host_sequence = 0
         self.causal_durable_prefix = 0
+        self.boundary_state = 'unanchored'
 
     def fail(self, reason):
         self.reasons[reason] += 1
 
     def begin(self, status):
+        if self.boundary_state != 'unanchored':
+            self.fail('unexpected_start')
+            return
         self.start = status
+        self.boundary_state = 'wait_begin'
         self.last = status['sequence']
         if not status['on'] or status['saturated'] or not status['boot']:
             self.fail('invalid_start')
         for fact, host_sequence in self.prelude:
-            if (fact['component']==8 and fact['event']==1 and fact['phase']==1 and
-                fact['boot']==status['boot'] and fact['sequence']==status['sequence']):
-                self._accept_begin(fact,host_sequence)
-            elif fact['boot'] != status['boot'] or fact['sequence'] > status['sequence']:
-                self.accept(fact,host_sequence)
+            self.accept(fact,host_sequence)
         self.prelude.clear()
 
     def _accept_begin(self, fact, host_sequence):
-        if self.begin_fact is not None:
-            self.fail('duplicate_begin')
-            return
         if self.last != self.start['sequence'] or fact['us'] < self.last_us:
             self.fail('begin_reordered')
         if fact['dropped'] != self.start['dropped']:
@@ -126,21 +124,52 @@ class Window:
         self.begin_fact = fact
         self.begin_host_sequence = host_sequence
         self.last_us = fact['us']
+        self.boundary_state = 'open'
+
+    def _accept_boundary(self, fact, host_sequence):
+        """Single-start transition table; quality errors are sticky in reasons.
+
+        Only the anchored begin consumes no new source sequence. Every other
+        in-range fact still passes the ordinary sequence/time/drop checks.
+        """
+        if fact['component']!=8 or fact['event']!=1:
+            return False
+        if fact['phase']==1:
+            anchored=fact['sequence']==self.start['sequence']
+            if self.boundary_state!='wait_begin' or not anchored:
+                self.fail('duplicate_begin' if anchored and self.begin_fact is not None else 'unexpected_begin')
+            else:
+                self._accept_begin(fact,host_sequence)
+            return anchored
+        if fact['phase']==4:
+            if self.boundary_state!='open':
+                self.fail('duplicate_end' if self.boundary_state=='ended' else 'unexpected_end')
+            if self.end_fact is None:
+                self.end_fact=fact
+                self.boundary_state='ended'
+        else:
+            self.fail('invalid_boundary_phase')
+        return False
 
     def accept(self, fact, host_sequence=0):
+        if self.boundary_state=='aborted':
+            self.fail('event_after_abort')
+            return
         if self.start is None:
             if len(self.prelude) == self.prelude.maxlen:
                 self.fail('prelude_overflow')
             self.prelude.append((fact,host_sequence))
             return
-        if fact['component']==8 and fact['event']==1 and fact['phase']==4:
-            self.end_fact=fact
-        if (fact['component']==8 and fact['event']==1 and fact['phase']==1 and
-            fact['boot']==self.start['boot'] and fact['sequence']==self.start['sequence']):
-            self._accept_begin(fact,host_sequence)
+        same_boot=fact['boot']==self.start['boot']
+        # Proven old prelude and proven post-end suffix are outside this interval.
+        if self.boundary_state=='wait_begin' and same_boot and fact['sequence']<self.start['sequence']:
             return
-        if fact['boot'] != self.start['boot']:
+        if self.boundary_state=='ended' and self.end_fact and (not same_boot or fact['sequence']>self.end_fact['sequence']):
+            return
+        if not same_boot:
             self.fail('boot_changed')
+            return
+        if self._accept_boundary(fact,host_sequence):
             return
         if fact['sequence'] != self.last+1:
             self.fail('sequence_gap_or_reorder')
@@ -171,8 +200,14 @@ class Window:
         def boundary_valid(fact,status,phase):
             return bool(fact and status and fact['boot']==status['boot'] and fact['sequence']==status['sequence'] and
                         fact['phase']==phase and fact['a'] in (2,3) and fact['b']&0x9f==0x9f)
-        causal_complete=not self.reasons and boundary_valid(self.begin_fact,self.start,1) and boundary_valid(self.end_fact,end,4)
+        markers_valid=boundary_valid(self.begin_fact,self.start,1) and boundary_valid(self.end_fact,end,4)
+        if partial or not markers_valid or self.start is None or end is None or (end and (
+                end['boot']!=self.start['boot'] or end['on'] or end['saturated'] or end['sequence']!=self.last or
+                end['dropped']!=self.start['dropped'])):
+            self.boundary_state='aborted'
+        causal_complete=self.boundary_state=='ended' and not self.reasons and markers_valid
         return dict(link_epoch=self.epoch, start=self.start, end=end,causal_complete=causal_complete,
+                    boundary_state=self.boundary_state,
                     begin_fact=self.begin_fact, begin_host_sequence=self.begin_host_sequence,
                     causal_ready_durable_prefix=self.causal_durable_prefix,
                     last_received_sequence=self.last, received=self.received,
@@ -496,7 +531,7 @@ class Collector:
         storage = self.journal.status()
         boundary = self.window.begin_fact if self.window else None
         start = self.window.start if self.window else None
-        causal_ready = bool(start and boundary and boundary['boot']==start['boot'] and
+        causal_ready = bool(start and self.window.boundary_state=='open' and boundary and boundary['boot']==start['boot'] and
                             boundary['sequence']==start['sequence'] and
                             boundary['a'] in (2,3) and boundary['b'] & 0x9f == 0x9f and
                             self.window.begin_host_sequence and

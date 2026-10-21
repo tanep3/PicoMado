@@ -28,10 +28,11 @@ def interval_source(facts, start, end, reasons):
             reasons.append('boot_or_boundary_order')
         selected=[f for f in facts if f['boot']==start['boot'] and start['sequence']<f['sequence']<=end['sequence']]
         window=Window(1);window.begin(start)
-        if len(begins)==1:window.last_us=begins[0][1]['us']
-        for fact in selected:window.accept(fact)
+        # Replay the real begin and every in-interval boundary through the same
+        # transition table as the collector. Window owns prefix/suffix exclusion.
+        for fact in facts:window.accept(fact)
         result=window.finish(end);reasons.extend(result['reasons'])
-        return selected,result['transport_complete'] and not reasons,reasons,ends[0][1]['us'] if len(ends)==1 else 0
+        return selected,result['causal_complete'] and not reasons,reasons,ends[0][1]['us'] if len(ends)==1 else 0
     except (KeyError,TypeError,ValueError):
         return [],False,reasons+['invalid_boundary_or_event'],0
 

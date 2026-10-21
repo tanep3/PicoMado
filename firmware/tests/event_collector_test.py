@@ -536,9 +536,11 @@ class Tests(unittest.TestCase):
                                 self.send(packet(1)); self.send(packet(2))
                                 # Correct CID with the wrong state is not an ON receipt.
                                 self.send(('ev1 s %s 1 0 0 0 0 0 0\n' % words[2]).encode())
-                                self.send(('ev1 s %s 1 2 0 0 0 1 0\n' % words[2]).encode())
+                                self.send(boundary(3,1))
+                                self.send(('ev1 s %s 1 3 0 0 0 1 0\n' % words[2]).encode())
                             elif words[1] == 'OFF':
-                                self.send(('ev1 s %s 1 2 0 0 0 0 0\n' % words[2]).encode())
+                                self.send(boundary(4,4))
+                                self.send(('ev1 s %s 1 4 0 0 0 0 0\n' % words[2]).encode())
                 except OSError as error:
                     if not self.stop.is_set():
                         self.errors.append(error)
@@ -549,8 +551,9 @@ class Tests(unittest.TestCase):
                 try:
                     result, rows = self.capture(d)
                     self.assertTrue(result['transport_complete'], result)
-                    self.assertEqual(result['segments'][0]['start']['sequence'], 2)
-                    self.assertEqual(result['segments'][0]['received'], 0)
+                    self.assertEqual(result['segments'][0]['start']['sequence'], 3)
+                    self.assertEqual(result['segments'][0]['received'], 1)
+                    self.assertTrue(result['causal_complete'])
                     self.assertEqual(int(d.commands[0].split()[2], 16), seed+1)
                     reasons = [r['reason'] for r in rows if r['kind']=='boundary_reply_ignored']
                     self.assertEqual(reasons, ['cid_mismatch', 'control_state_mismatch'])
