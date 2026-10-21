@@ -1,0 +1,39 @@
+{
+  "at_utc": "2026-10-21T01:55:54.064437+00:00",
+  "runtime_commit": "f2bdc7b2e17cc620e5d568c16842ee6ea871e7b0",
+  "firmware_sha256": "fd19ace94a80c0baf9ad97ed9e97255aca563045ee428efd1ac7aad52a2d8e3a",
+  "temporary_server_sha256": "db81e9f7ec6f4c72f79b13d7db44bcf3d6a62626c8a1d4569ad8639d2fa7b2a0",
+  "normal_server_sha256": "e7b52c29d776bf9b9fbfea9125216c7b5c05613f47fadc9660618dedb76c727c",
+  "accepted_review": {
+    "verdict": "accepted",
+    "sha256": "4f433c66d5ebcd02ca225f4458d637ccb9b7c203cc965e37ba2d9dc2debefad5"
+  },
+  "capture": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/observation-recapture-20261021T014716Z",
+  "trials": 5,
+  "device_complete": false,
+  "server_complete": true,
+  "source_loss": 1286,
+  "host_loss": 0,
+  "source_storage_durable": true,
+  "normal_restored": true,
+  "all3_devices_reconnected": true,
+  "firmware_flashes": 1,
+  "additional_firmware_changes": false,
+  "runtime_changes": false,
+  "evidence_sha256": {
+    "device.jsonl": "f21952377f33290d03a4ed8b83b872d477dce0fcabc0d0577e37ce9ea5544c43",
+    "device.jsonl.summary.json": "970bcfcf36f8f2054630652278e9a95bf34610324ea866c5cc8ce4c0e81f144b",
+    "server.jsonl": "55e44ac8a2c7e0109e8765a4245077d56244bf78a354a26a4d093cc215eac0b0",
+    "server.jsonl.summary.json": "138c46fe499497e06dc85367fccba6402d32703d32a0f0ac366cf423a94c1be3",
+    "SIM-trials.jsonl": "022d08ce3d296a82f46fdd25e0a14e8a3522b93bc3ff828e847de07813610067",
+    "SIM-trials-complete.json": "cd2e10bd4627e909deb3ed9e2e891d802ca5a1772d328239b9e43e443ed5b7f0",
+    "capture-ready.json": "a251bc8c66627c29b8d528faf552f4ac60c5ad795a40c04cbf74ca5fe5891f5f",
+    "post-normal-verification.json": "69fee22315b560b287e749b3de4f0d1840b44ce5d86d8cadcab7bac1f2e1b94e"
+  },
+  "limits": [
+    "SIM excludes physical GPIO",
+    "draw completion unknown due source loss",
+    "pre-first-read/kernel arrival unknown",
+    "root cause of retransmission unproven"
+  ]
+}
