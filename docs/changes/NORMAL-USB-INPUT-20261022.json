@@ -19,8 +19,14 @@
       ]
     },
     "implementation": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-18/task/picomado-usb-input-20261022/work/.gate/check.json",
+          "SHA256": "349484751bf32500025fb91be1e782015b3376ad7ee1e75f743fdf7bbcf503f5"
+        }
+      ]
     },
     "independent_verification": {
       "state": "not_started",
