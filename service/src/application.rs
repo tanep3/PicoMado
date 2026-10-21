@@ -3367,6 +3367,39 @@ mod clock_tests {
         assert_eq!(shared.refresh_timed_frames().unwrap(), 0);
     }
     #[test]
+    fn concurrent_durable_publication_keeps_eink_clock_minute_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now = Arc::new(Clock(AtomicI64::new(1_792_336_799)));
+        let shared = crate::shared::Application::new(
+            App::open_with_clock(&tmp.path().join("db"), now.clone()).unwrap(),
+        );
+        let token = {
+            let mut app = shared.lock().unwrap();
+            let token = app.hello("paper", ["eink", crate::protocol::FRAME_BYTES_CAPABILITY,
+                crate::protocol::EINK_CLOCK_CAPABILITY].into_iter().map(str::to_owned).collect(), 1).unwrap();
+            select_clock(&mut app, &token);
+            token
+        };
+        let mut durable = shared.lock().unwrap();
+        now.0.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(shared.refresh_timed_frames().unwrap(), 1);
+        let next = {
+            let app = shared.read().unwrap();
+            let rx = app.published_video_receiver(&token).unwrap();
+            let frame = rx.borrow().as_ref().unwrap().clone();
+            frame
+        };
+        // Force a successful durable publication of an otherwise unchanged
+        // Device while the transient minute update is already visible.
+        durable.heartbeat(&token, 1).unwrap();
+        drop(durable);
+        assert_eq!(shared.refresh_timed_frames().unwrap(), 0);
+        assert!(shared.read().unwrap().start_lcd_latest_send(&next));
+        let ack = crate::protocol::WireMessage::ReceiptAck { token: next.token.clone() };
+        assert!(shared.input_lock(&token, &ack).unwrap().lcd_latest_ack(&next.token, false));
+        assert_eq!(shared.refresh_timed_frames().unwrap(), 0);
+    }
+    #[test]
     fn clock_refresh_metadata_is_negotiated_and_isolated_from_lcd_and_other_plugins() {
         let tmp = tempfile::tempdir().unwrap();
         let now = Arc::new(Clock(AtomicI64::new(1_792_336_799)));

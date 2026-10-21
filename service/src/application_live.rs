@@ -159,6 +159,16 @@ impl App {
                     }
                 }
             }
+            // A timed latest image can change its minute key without changing
+            // the Device. Keep that key when a concurrent durable lease later
+            // publishes its snapshot, but only for the same display identity.
+            if let Some(time) = current.timed_frames.get(id) {
+                let mut display = crate::display_token(id, ours);
+                display.settings_revision = 0;
+                if time.0 == display {
+                    self.timed_frames.insert(id.clone(), time.clone());
+                }
+            }
             if now == before {
                 continue;
             }
@@ -200,9 +210,6 @@ impl App {
                         .merge_transient_view(&ctx, view.as_ref())
                         .map_err(|_| AppError::Conflict("transient plugin view merge failed"))?;
                 }
-            }
-            if let Some(time) = current.timed_frames.get(id) {
-                self.timed_frames.insert(id.clone(), time.clone());
             }
         }
         // IDs are globally reserved. Respect completed old effects without
