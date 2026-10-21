@@ -9,6 +9,7 @@ void pm_lcd_reference_pattern(void);
 void pm_lcd_draw(uint8_t *rgb565be);
 void pm_lcd_local(const char *line1, const char *line2);
 void pm_lcd_black(void);
+void pm_lcd_switch_feedback(bool show, bool restore);
 void pm_lcd_backlight(bool on);
 
 // LCD-only diagnostic control. Call between complete frames, never from IRQs.

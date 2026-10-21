@@ -67,6 +67,7 @@ void restore_interrupts(uint32_t s){(void)s;}
 void flash_range_erase(uint32_t p,size_t n){(void)p;assert(n<=sizeof test_flash_sector);memset(test_flash_sector,255,n);}
 void flash_range_program(uint32_t p,const uint8_t *v,size_t n){(void)p;assert(n<=sizeof test_flash_sector);memcpy(test_flash_sector,v,n);}
 const char *pm_display_capability(void){return PM_DISPLAY_CAPABILITY;}
+void pm_display_feedback(pm_display_feedback_action a){(void)a;}
 void pm_display_init(void){}
 void pm_display_status(const char *a,const char *b){assert(a&&b);status_updates++;}
 bool pm_display_frame(uint8_t *p,size_t n){

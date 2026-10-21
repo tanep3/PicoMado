@@ -4,6 +4,7 @@
 #include "display.h"
 #include "eink_transform.h"
 #include "status_bitmaps.h"
+#include "switch_bitmap.h"
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
 #include "trace.h"
@@ -18,13 +19,14 @@
 
 typedef enum { IDLE, RESET_HIGH, RESET_LOW, RESET_SETTLE, WAIT_RESET,
                WAIT_SOFT_RESET, WRITE_RAM, WRITE_BASE, WAIT_PARTIAL_RESET, WAIT_REFRESH, WAIT_SLEEP } phase;
-typedef enum { NONE, LOCAL, REMOTE } job;
+typedef enum { NONE, LOCAL, REMOTE, FEEDBACK, RESTORE } job;
 static phase stage;
 static job active_job,queued_job;
 static uint8_t queued[PM_IMAGE_BYTES],ram[PM_EINK_RAM_BYTES];
 static unsigned ram_offset;
 static uint32_t until_ms,deadline_ms;
 static bool stopped,result_ready,result_ok,status_valid;
+static bool feedback_requested,feedback_visible;
 static char status_one[32],status_two[32];
 static uint64_t queued_frame_context,active_frame_context;
 static bool queued_clock,active_clock,clock_base_valid,partial_update,awake;
@@ -38,8 +40,45 @@ static void byte(bool data,uint8_t value){
 }
 static void cmd(uint8_t value){byte(false,value);}
 static void data(uint8_t value){byte(true,value);}
+static void cancel_feedback_preparation(void){
+    // RAM writes and reset have no visible effect until command 0x20. A real
+    // frame will start with its own full reset, so it can supersede these jobs.
+    if((active_job==FEEDBACK || active_job==RESTORE) && stage!=WAIT_REFRESH){
+        if(stage==WRITE_RAM || stage==WRITE_BASE)
+            pm_trace_event(PM_TRACE_SPI_END,0,ram_offset,PM_EINK_SPI_BAUD);
+        active_job=NONE;active_clock=false;stage=IDLE;
+    }
+    if(queued_job==RESTORE)queued_job=NONE;
+}
+void pm_display_feedback(pm_display_feedback_action action){
+    if(action==PM_DISPLAY_FEEDBACK_SHOW){
+        if(!stopped){
+            // A newer wait still owns the visible hint. Do not first restore
+            // the old screen merely because an earlier no-op requested it.
+            if(queued_job==RESTORE || active_job==RESTORE)cancel_feedback_preparation();
+            feedback_requested=true;
+        }
+        return;
+    }
+    feedback_requested=false;cancel_feedback_preparation();
+    if(action==PM_DISPLAY_FEEDBACK_RESTORE && !stopped && feedback_visible &&
+       queued_job==NONE && (active_job==NONE || active_job==FEEDBACK)){
+        queued_job=RESTORE;queued_clock=false;queued_frame_context=0;
+    }
+}
+static void pack_feedback(void){
+    // Keep queued[] intact for a no-op response. Use the same landscape mapping
+    // as remote mono1 images, without allocating another full image buffer.
+    memset(ram,0xff,sizeof ram);
+    for(unsigned y=0;y<PM_H;y++)for(unsigned x=0;x<PM_W;x++)
+        if(pm_switch_bitmap_ink(x,y,PM_W,PM_H)){
+            unsigned u=PM_H-1-y;
+            ram[(u/8)*PM_W+x]&=(uint8_t)~(0x80u>>(u&7));
+        }
+}
 static void finish(bool ok){
     if(active_job==REMOTE){result_ready=true;result_ok=ok;}
+    if(active_job==FEEDBACK)feedback_requested=false;
     if(!ok){clock_base_valid=false;awake=false;}
     if(!ok)pm_logf("eink update failed stage=%u connected=%u\n",(unsigned)stage,PM_EINK_PANEL_CONNECTED);
     else if(active_clock){
@@ -62,6 +101,7 @@ void pm_display_init(void){
 }
 bool pm_display_frame(uint8_t *pixels,size_t length){
     if(stopped || !pixels || length!=PM_IMAGE_BYTES || active_job==REMOTE || queued_job==REMOTE || result_ready)return false;
+    pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
     memcpy(queued,pixels,length);queued_job=REMOTE;status_valid=false;queued_clock=false;
     queued_frame_context=pm_trace_current_frame();return true;
 }
@@ -71,7 +111,7 @@ bool pm_display_clock_frame(uint8_t *pixels,size_t length,unsigned minutes,uint6
     if(reset_base)clock_base_valid=false;
     return true;
 }
-bool pm_display_busy(void){return stage!=IDLE || queued_job!=NONE;}
+bool pm_display_busy(void){return stage!=IDLE || queued_job!=NONE || (!stopped && feedback_requested && !feedback_visible);}
 bool pm_display_take_result(bool *ok){
     if(!result_ready)return false;
     *ok=result_ok;result_ready=false;return true;
@@ -79,15 +119,20 @@ bool pm_display_take_result(bool *ok){
 void pm_display_poll(void){
     uint32_t now=clock_ms();
     if(stage==IDLE){
-        if(queued_job==NONE || stopped)return;
-        active_job=queued_job;queued_job=NONE;active_clock=queued_clock;queued_clock=false;
-        active_frame_context=queued_frame_context;queued_frame_context=0;
+        if(stopped)return;
+        if(queued_job==NONE && feedback_requested && !feedback_visible && !result_ready){
+            active_job=FEEDBACK;active_clock=false;active_frame_context=0;
+        }else {
+            if(queued_job==NONE)return;
+            active_job=queued_job;queued_job=NONE;active_clock=queued_clock;queued_clock=false;
+            active_frame_context=queued_frame_context;queued_frame_context=0;
+        }
         active_minute=queued_minute;
         partial_update=active_clock && clock_base_valid && awake &&
             active_minute>=last_full_minute && active_minute-last_full_minute<queued_minutes;
         if(!active_clock)clock_base_valid=false;
         if(!PM_EINK_PANEL_CONNECTED){finish(false);return;}
-        pm_eink_pack_landscape(queued,ram);
+        if(active_job==FEEDBACK)pack_feedback();else pm_eink_pack_landscape(queued,ram);
         deadline_ms=now+PM_EINK_BUSY_TIMEOUT_MS;
         if(partial_update){
             // Official V4 partial reset (no SWRESET, no deep sleep/base loss).
@@ -133,7 +178,9 @@ void pm_display_poll(void){
                 cmd(0x26);ram_offset=0;stage=WRITE_BASE;break;
             }
             pm_trace_event(PM_TRACE_SPI_END,active_frame_context,active_clock&&!partial_update?2*sizeof ram:sizeof ram,PM_EINK_SPI_BAUD);
-            cmd(0x22);data(partial_update?0xff:0xf7);cmd(0x20);until_ms=now+10;stage=WAIT_REFRESH;
+            cmd(0x22);data(partial_update?0xff:0xf7);cmd(0x20);
+            feedback_visible=active_job==FEEDBACK;
+            until_ms=now+10;stage=WAIT_REFRESH;
         }break;
     case WAIT_REFRESH:
         if(reached(now,until_ms) && !gpio_get(PM_EINK_PIN_BUSY))finish(true);
@@ -167,7 +214,8 @@ static void label(const char *text,unsigned y){
 }
 void pm_display_status(const char *one,const char *two){
     if(stopped)return;
-    if(status_valid && !strcmp(status_one,one) && !strcmp(status_two,two))return;
+    pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
+    if(status_valid && !feedback_visible && !strcmp(status_one,one) && !strcmp(status_two,two))return;
     if(queued_job==REMOTE){result_ready=true;result_ok=false;}
     snprintf(status_one,sizeof status_one,"%s",one);snprintf(status_two,sizeof status_two,"%s",two);
     status_valid=true;memset(queued,0xff,sizeof queued);
@@ -183,6 +231,7 @@ void pm_display_status(const char *one,const char *two){
 }
 void pm_display_standby(void){
     // App defers this until physical refresh finishes. Never clear retained pixels.
+    pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
     if(queued_job==REMOTE){result_ready=true;result_ok=false;}
     queued_job=NONE;stopped=true;status_valid=false;queued_clock=false;clock_base_valid=false;
     queued_frame_context=0;
@@ -192,6 +241,7 @@ void pm_display_standby(void){
 void pm_display_wake(void){stopped=false;clock_base_valid=false;}
 void pm_display_reference_pattern(void){
     if(stopped)return;
+    pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
     memset(queued,0xff,sizeof queued);
     for(unsigned y=0;y<PM_H;y++)for(unsigned x=0;x<PM_W;x++)
         if(x==0 || y==0 || x==PM_W-1 || y==PM_H-1 || (x<18 && y<10))dot(x,y);

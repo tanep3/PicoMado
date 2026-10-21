@@ -74,7 +74,13 @@ void flash_range_program(uint32_t offset,const uint8_t *p,size_t n){
     memcpy(test_flash_sector,p,n);clock_ms+=2;
 }
 const char *pm_display_capability(void){return PM_DISPLAY_CAPABILITY;}
+static unsigned feedback_shows,feedback_restores,feedback_replaces,input_sends;
 void pm_display_init(void){}
+void pm_display_feedback(pm_display_feedback_action a){
+    if(a==PM_DISPLAY_FEEDBACK_SHOW){assert(input_sends);feedback_shows++;}
+    else if(a==PM_DISPLAY_FEEDBACK_RESTORE)feedback_restores++;
+    else feedback_replaces++;
+}
 void pm_display_status(const char *a,const char *b){
     assert(a && b);last_lcd_one=a;last_lcd_two=b;clock_ms+=20;
 }
@@ -120,6 +126,7 @@ bool pm_net_send(uint8_t kind,const char *j){
 #ifdef PM_CAUSAL_FIXTURE
     if(wire_observer)wire_observer(kind,j);
 #endif
+    if(kind==7 || kind==14 || kind==15 || kind==16)input_sends++;
     if(kind==1){hello_count++;welcome_available=true;}
     if(kind==5)heartbeat_count++;
     if(kind==8){frame_receipts++;clock_ms++;}

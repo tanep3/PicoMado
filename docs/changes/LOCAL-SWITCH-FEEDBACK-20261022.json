@@ -1,0 +1,38 @@
+{
+  "id": "LOCAL-SWITCH-FEEDBACK-20261022",
+  "title": "200 ms local switch feedback",
+  "status": "in_progress",
+  "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
+  "implementer": "local-switch-feedback worker",
+  "design_commit": "99aea78f3e2d3d3c77845a9ddd1656621ec4be2b",
+  "design_artifacts": [
+    "docs/changes/LOCAL-SWITCH-FEEDBACK-20261022.md"
+  ],
+  "stages": {
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "99aea78f3e2d3d3c77845a9ddd1656621ec4be2b"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}

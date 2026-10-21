@@ -11,6 +11,10 @@
 const char *pm_display_capability(void) { return "lcd"; }
 void pm_display_init(void) { pm_lcd_init(); }
 void pm_display_status(const char *one, const char *two) { pm_lcd_local(one,two); }
+void pm_display_feedback(pm_display_feedback_action action) {
+    pm_lcd_switch_feedback(action==PM_DISPLAY_FEEDBACK_SHOW,
+                           action==PM_DISPLAY_FEEDBACK_RESTORE);
+}
 bool pm_display_frame(uint8_t *pixels, size_t length) {
     if(!pixels || length!=PM_IMAGE_BYTES)return false;
     pm_lcd_draw(pixels);return true;
