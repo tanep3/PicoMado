@@ -19,7 +19,7 @@
       ]
     },
     "implementation": {
-      "state": "not_started",
+      "state": "in_progress",
       "evidence": []
     },
     "independent_verification": {
@@ -34,5 +34,6 @@
       "state": "not_started",
       "evidence": []
     }
-  }
+  },
+  "implementation_commit": "2a5693e2aa3cde29c652717602f0e624c077bc50"
 }
