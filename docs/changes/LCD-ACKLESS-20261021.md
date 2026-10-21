@@ -22,3 +22,9 @@ The server's selected plugin and epoch remain domain state. The latest pixel slo
 ## Regression obligations and limitations
 
 Check legacy LCD fallback, LCD and E-ink latest replacement under slow writer, E-ink draw-busy/pending and refresh metadata, single images, continuous UP/DOWN and stale generations, delayed duplicate ACKs, current ACK status, video playback, all-OFF logo, disconnect/rebind, and complete-frame/CRC on the wire. A frame already in the kernel cannot be retracted; Pico token/epoch rejection remains necessary. Existing Pico RX capacity and backpressure must be exercised with a slow receiver fixture before deployment. Physical switch delay and original packet-loss location remain unproven until live verification after the server build is reviewed.
+
+## First live trial and publication correction
+
+The first server build was deployed for a finite LCD USB trial and then rolled back to the verified previous binary. The LCD input was processed in 24 ms, but its rain-radar image began sending 13.88 s later. During that interval the new server sent 32 ordinary clock images to E-ink_1; the previous binary returned to approximately one clock image per minute. Neither result establishes where the original TCP loss occurs, and the LCD wait must not be attributed to the clock traffic without a controlled comparison.
+
+The bounded slot is shared by the mutable application owner and the published reader. A latest image for a new display epoch must remain eligible when its slot signal reaches the writer before that epoch's application snapshot is published: the writer must retry on publication, reject genuinely stale epochs, and never resend a frame already started. A timed image also publishes its time key together with its latest slot change; otherwise the next time check can republish the same minute. These are publication invariants, not ACK credit. Verify both orderings with local tests before another deployment.
