@@ -200,6 +200,29 @@ fn causal_packets(app: &SharedApp, token: &SessionToken) -> Vec<Packet> {
     while let Some(packet) = queue.pop_for(&token.device_id) {
         packets.push(packet);
     }
+    let view = app.read().unwrap();
+    if view.supports_latest_delivery(token) {
+        let rx = view.published_video_receiver(token).unwrap();
+        let latest = rx.borrow().as_ref().cloned();
+        if let Some(frame) = latest {
+            assert!(view.lcd_video_is_current(&frame));
+            assert!(view.start_lcd_latest_send(&frame));
+            let cause = view.frame_observation_cause(&frame.token);
+            view.observation_source().record_context(
+                crate::observation::Component::Frame,
+                crate::observation::Phase::Pending, 0, 0, 0, 1, frame.token.frame_id, cause,
+            );
+            let mut transfer = crate::lcd_stream::VideoTransfer::new_observed(frame.clone(), cause);
+            while let Some(bytes) = transfer.next_packet().unwrap() {
+                packets.push(Packet {
+                    device_id: token.device_id.clone(), packet_id: id, outbox_id: 0,
+                    finish_effect: false, incarnation: frame.token.incarnation,
+                    display_epoch: frame.token.display_epoch, kind: PacketKind::Video, bytes,
+                });
+                id += 1;
+            }
+        }
+    }
     packets
 }
 #[test]
