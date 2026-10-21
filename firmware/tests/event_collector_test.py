@@ -32,6 +32,8 @@ class Device:
         self.events = [packet(1), packet(2)] if events is None else events
         self.boot, self.dropped = boot, dropped
         self.seq = initial_sequence
+        self.on = False
+        self.suppress_on_reply = 0
         self.disconnect, self.hook = disconnect, hook
         self.commands = []
         self.stop = threading.Event()
@@ -65,9 +67,14 @@ class Device:
                     self.commands.append(command)
                     words = command.split()
                     if words[0] == 'EV1':
-                        on = words[1] != 'OFF'
-                        self.send(('ev1 s %s %x %x %x 0 0 %u 0\n' %
-                                   (words[2], self.boot, self.seq, self.dropped, on)).encode())
+                        if words[1] in ('ON','OFF'):
+                            self.on = words[1]=='ON'
+                        on = self.on
+                        if words[1]=='ON' and self.suppress_on_reply:
+                            self.suppress_on_reply-=1
+                        else:
+                            self.send(('ev1 s %s %x %x %x 0 0 %u 0\n' %
+                                       (words[2], self.boot, self.seq, self.dropped, on)).encode())
                         if words[1] == 'ON':
                             for event in self.events:
                                 self.send(event)
@@ -117,6 +124,59 @@ def rpc(path, value):
 
 
 class Tests(unittest.TestCase):
+    def test_causal_readiness_requires_crc_begin_catalog_and_durable_prefix(self):
+        class Storage:
+            def status(self):return dict(durable_prefix=self.prefix,queue_lost=0,write_lost=0,error=None)
+        owner=object.__new__(ev.Collector);owner.window=ev.Window(1);owner.link_epoch=1
+        owner.stop_requested=False;owner.journal=Storage();owner.journal.prefix=0
+        start=dict(boot=1,sequence=4,dropped=99,on=1,saturated=0)
+        owner.window.begin(start)
+        self.assertTrue(owner.status()['ready']);self.assertFalse(owner.status()['causal_ready'])
+        body=ev.BODY.pack(8,1,1,1,4,1000,4,0,0,0,99,3,0x9f)
+        raw=b'ev1 '+body.hex().encode()+b' '+('%08x'%zlib.crc32(body)).encode()+b'\n'
+        owner.window.accept(ev.decode(raw));owner.window.begin_host_sequence=10
+        self.assertFalse(owner.status()['causal_ready'])
+        owner.journal.prefix=10;self.assertTrue(owner.status()['causal_ready'])
+        owner.window.begin_fact['a']=1;self.assertFalse(owner.status()['causal_ready'])
+        damaged=bytearray(raw);damaged[10]=ord('f') if damaged[10]!=ord('f') else ord('e')
+        with self.assertRaises(ValueError):ev.decode(bytes(damaged))
+
+    def test_slow_port_factory_and_dtr_prelude_do_not_age_command_deadline(self):
+        from unittest.mock import patch
+        device=Device();real=time.monotonic;offset=[0]
+        def opened(path):
+            port=device.open(path);offset[0]+=5
+            device.send(b'timing snapshot prelude\n'*64)
+            return port
+        try:
+            with tempfile.TemporaryDirectory() as temp,patch.object(ev.time,'monotonic',side_effect=lambda:real()+offset[0]):
+                root=Path(temp)
+                result=ev.collect('new-PTY-only',root/'events',root/'owner',.12,port_factory=opened)
+                self.assertTrue(result['transport_complete'],result)
+                self.assertEqual([c.split()[1] for c in device.commands],['STATUS','ON','OFF'])
+                rows=[json.loads(line) for line in (root/'events').read_text().splitlines()]
+                self.assertEqual(sum(r['kind']=='prelude_line' and r['line']=='timing snapshot prelude' for r in rows),64)
+                self.assertFalse(any(r['kind']=='command_uncertain' for r in rows))
+        finally:device.close()
+
+    def test_uncertain_on_is_reconciled_by_status_off_then_new_nonce(self):
+        from unittest.mock import patch
+        real=time.monotonic;offset=[0]
+        def hook(device):
+            if device.events:
+                offset[0]+=5;device.events=[]
+        device=Device(hook=hook);device.suppress_on_reply=1
+        try:
+            with tempfile.TemporaryDirectory() as temp,patch.object(ev.time,'monotonic',side_effect=lambda:real()+offset[0]):
+                root=Path(temp)
+                result=ev.collect('new-PTY-only',root/'events',root/'owner',.12,port_factory=device.open)
+                self.assertFalse(result['transport_complete'])
+                self.assertTrue(result['segments'][-1]['transport_complete'],result)
+                self.assertEqual([c.split()[1] for c in device.commands],['STATUS','ON','STATUS','OFF','ON','OFF'])
+                self.assertEqual(len(set(c.split()[2] for c in device.commands)),6)
+                self.assertEqual(result['command_uncertain'],1)
+        finally:device.close()
+
     def capture(self, device, **options):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp)
@@ -148,11 +208,12 @@ class Tests(unittest.TestCase):
                 threads[0].join(2)
                 self.assertFalse(threads[0].is_alive())
                 self.assertTrue(result['transport_complete'], result)
+                self.assertFalse(result['causal_complete']) # fixture lacks source begin/end
                 self.assertTrue(result['storage_durable'])
                 self.assertIsNone(result['application_complete'])
                 self.assertEqual(answers[0]['replies'], ['sim status phase=0'])
                 self.assertEqual(answers[1]['state'], 'stopping')
-                self.assertEqual([c.split()[1] for c in device.commands if c.startswith('EV1')], ['ON', 'OFF'])
+                self.assertEqual([c.split()[1] for c in device.commands if c.startswith('EV1')], ['STATUS', 'ON', 'OFF'])
                 self.assertEqual(len([c for c in device.commands if c.startswith('SIM')]), 1)
             finally:
                 device.close()
@@ -323,6 +384,7 @@ class Tests(unittest.TestCase):
                         for byte in os.read(self.master,1024):
                             if byte!=10:pending.append(byte);continue
                             command=pending.decode().strip();pending.clear();self.commands.append(command);words=command.split()
+                            if words[1]=='STATUS':self.send(('ev1 s %s 1 0 0 0 0 0 0\n'%words[2]).encode())
                             if words[1]=='ON':
                                 self.seq=1;self.send(record(1,8,1,a=2,b=0x9f))
                                 self.send(('ev1 s %s 1 1 0 0 0 1 0\n'%words[2]).encode())
@@ -336,8 +398,15 @@ class Tests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as temp:
                 root=Path(temp);path=root/'events'
-                result=ev.collect('new-PTY-only',path,root/'owner',.12,port_factory=device.open)
+                announced=[]
+                result=ev.collect('new-PTY-only',path,root/'owner',.12,port_factory=device.open,
+                                  journal_factory=lambda p:ev.Journal(p,sync_seconds=.02),causal_ready=announced.append)
                 self.assertTrue(result['transport_complete'],result)
+                self.assertTrue(result['causal_complete'],result)
+                self.assertEqual(len(announced),1)
+                self.assertTrue(announced[0]['causal_ready'])
+                self.assertGreaterEqual(announced[0]['storage']['durable_prefix'],result['segments'][0]['begin_host_sequence'])
+                self.assertGreater(result['segments'][0]['causal_ready_durable_prefix'],0)
                 parsed=causal.device_source(path);self.assertTrue(parsed[1],parsed)
                 cause=dict(version=1,boot=1,operation=2)
                 server=([dict(component=c,phase=p,frame=f,cause=cause) for c,p,f in [('Api','Dispatched',0),('State','Committed',0),('Frame','Pending',8)]],True,[])
@@ -374,6 +443,7 @@ class Tests(unittest.TestCase):
                                 pending.append(b); continue
                             command = pending.decode().strip(); pending.clear()
                             self.commands.append(command); words = command.split()
+                            if words[1]=='STATUS':self.send(('ev1 s %s 1 2 0 0 0 0 0\n'%words[2]).encode())
                             if words[1] == 'ON':
                                 self.send(b'ev1 s 1 1 0 0 0 0 1 0\n')
                                 self.send(packet(1)); self.send(packet(2))
@@ -418,7 +488,7 @@ class Tests(unittest.TestCase):
                 self.assertTrue(result['transport_complete'], result)
                 self.assertEqual(len(answers), len(commands)+1)
                 self.assertTrue(all('cannot be forwarded' in a.get('error', '') for a in answers[:-1]))
-                self.assertEqual([c.split()[1] for c in d.commands], ['ON', 'OFF'])
+                self.assertEqual([c.split()[1] for c in d.commands], ['STATUS', 'ON', 'OFF'])
             finally:
                 d.close()
 

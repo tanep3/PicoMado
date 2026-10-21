@@ -98,6 +98,7 @@ fn process_on_connection(app:&SharedApp,current:&mut Option<SessionToken>,messag
     process_with_observation(app,current,message,diagnostics,accept_order,None)
 }
 
+#[cfg(test)]
 fn process_with_observation(
     app: &SharedApp,
     current: &mut Option<SessionToken>,
@@ -106,6 +107,12 @@ fn process_with_observation(
     accept_order: Option<std::num::NonZeroU64>,
     cause: Option<crate::observation::Cause>,
 ) -> Result<Option<WireMessage>, &'static str> {
+    process_with_observation_parent(app,current,message,diagnostics,accept_order,cause,0)
+}
+fn process_with_observation_parent(
+    app:&SharedApp,current:&mut Option<SessionToken>,message:WireMessage,diagnostics:&mut AckDiagnostics,
+    accept_order:Option<std::num::NonZeroU64>,cause:Option<crate::observation::Cause>,api_operation:u64
+)->Result<Option<WireMessage>,&'static str>{
     let received = std::time::Instant::now();
     let received_unix_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -129,7 +136,7 @@ fn process_with_observation(
         &mut lock_wait,
         &mut persistence_us,
         &mut image_preparation_us,
-        cause,
+        cause,api_operation,
     );
     let elapsed = received.elapsed();
     let sampled = diagnostics.ignored == ignored_before
@@ -161,6 +168,7 @@ fn process_inner(
     persistence_us: &mut u128,
     image_preparation_us: &mut u128,
     cause: Option<crate::observation::Cause>,
+    api_operation:u64,
 ) -> Result<Option<WireMessage>, &'static str> {
     if let WireMessage::Hello {
         device_id,
@@ -175,6 +183,7 @@ fn process_inner(
         let waiting = std::time::Instant::now();
         let mut guard = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Reader).map_err(|_| "unavailable")?;
         *lock_wait = waiting.elapsed();
+        guard.observation_source().record_context(crate::observation::Component::Api,crate::observation::Phase::Dispatched,0,api_operation,0,1,0,cause);
         let totals = guard.operation_totals();
         let result = match accept_order {
             Some(order) => guard.hello_from_connection(&device_id, caps, screen_owner_epoch, order),
@@ -201,7 +210,7 @@ fn process_inner(
         return Err("stale_session");
     }
     let totals = guard.operation_totals();
-    guard.observation_source().record_context(crate::observation::Component::Api,crate::observation::Phase::Dispatched,0,0,0,message.kind() as u64,0,cause);
+    guard.observation_source().record_context(crate::observation::Component::Api,crate::observation::Phase::Dispatched,0,api_operation,0,message.kind() as u64,0,cause);
     let result = guard.with_observation_cause(&token.device_id,cause,|guard| match message {
         WireMessage::SettingsStored {
             incarnation,
@@ -385,7 +394,33 @@ fn process_inner(
     result
 }
 
+#[derive(Clone)]
+struct ReplyObservation {
+    #[cfg(feature="boundary-observation")]
+    source: crate::observation::Source,
+    #[cfg(feature="boundary-observation")]
+    connection: u64,
+    #[cfg(feature="boundary-observation")]
+    parent: u64,
+    #[cfg(feature="boundary-observation")]
+    operation: u64,
+}
+impl ReplyObservation {
+    fn new(source:crate::observation::Source,connection:u64,parent:u64)->Self {
+        #[cfg(feature="boundary-observation")]
+        {Self{source,connection,parent,operation:0}}
+        #[cfg(not(feature="boundary-observation"))]
+        {let _=(source,connection,parent);Self{}}
+    }
+    fn record(&self,detail:crate::observation::NetworkBoundary,phase:crate::observation::Phase)->u64 {
+        #[cfg(feature="boundary-observation")]
+        {self.source.record_network(detail,phase,self.operation,self.parent,self.connection,0,0,None)}
+        #[cfg(not(feature="boundary-observation"))]
+        {let _=(detail,phase);0}
+    }
+}
 struct QueuedReply {
+    observation: Option<ReplyObservation>,
     message: WireMessage,
     cause: Option<crate::observation::Cause>,
     #[cfg(feature="stream-diagnostics")]
@@ -403,7 +438,7 @@ impl WriterCommand {
     #[inline(always)]
     fn reply(message:WireMessage)->Self {Self::reply_observed(message,None,None)}
     fn reply_observed(message:WireMessage,cause:Option<crate::observation::Cause>,binding:Option<SessionToken>)->Self {
-        let reply=QueuedReply{message,cause,#[cfg(feature="stream-diagnostics")] enqueued_at:crate::diagnostics::mark()};
+        let reply=QueuedReply{message,cause,observation:None,#[cfg(feature="stream-diagnostics")] enqueued_at:crate::diagnostics::mark()};
         match binding {Some(token)=>Self::BoundReply(token,reply),None=>Self::Reply(reply)}
     }
 }
@@ -415,15 +450,33 @@ async fn enqueue_reply(tx:&tokio::sync::mpsc::Sender<WriterCommand>,message:Wire
     enqueue_reply_common(tx,message,session,None,None).await
 }
 async fn enqueue_reply_common(tx:&tokio::sync::mpsc::Sender<WriterCommand>,message:WireMessage,_session:u64,cause:Option<crate::observation::Cause>,binding:Option<SessionToken>)->Result<(),()> {
-    #[cfg(not(feature="stream-diagnostics"))]
-    {tx.send(WriterCommand::reply_observed(message,cause,binding)).await.map_err(|_|())}
-    #[cfg(feature="stream-diagnostics")]
-    {
-        let start=crate::diagnostics::mark();
-        let permit=tx.reserve().await.map_err(|_|())?;
-        crate::diagnostics::duration(crate::diagnostics::Kind::ReplyCapacity,start,_session,0,0);
-        permit.send(WriterCommand::reply_observed(message,cause,binding));Ok(())
+    enqueue_reply_traced(tx,message,_session,cause,binding,None).await
+}
+async fn enqueue_reply_traced(tx:&tokio::sync::mpsc::Sender<WriterCommand>,message:WireMessage,_session:u64,cause:Option<crate::observation::Cause>,binding:Option<SessionToken>,observation:Option<ReplyObservation>)->Result<(),()> {
+    #[cfg(feature="boundary-observation")]
+    let mut observation=observation;
+    #[cfg(feature="boundary-observation")]
+    if let Some(trace)=&mut observation {
+        trace.operation=trace.record(crate::observation::NetworkBoundary::ReplyQueue,crate::observation::Phase::Pending);
     }
+    let mut command=WriterCommand::reply_observed(message,cause,binding);
+    match &mut command {WriterCommand::Reply(reply)|WriterCommand::BoundReply(_,reply)=>reply.observation=observation.clone(),_=>{}}
+    #[cfg(not(feature="stream-diagnostics"))]
+    let result=tx.send(command).await.map_err(|_|());
+    #[cfg(feature="stream-diagnostics")]
+    let result={
+        let start=crate::diagnostics::mark();
+        match tx.reserve().await {
+            Ok(permit)=>{
+                crate::diagnostics::duration(crate::diagnostics::Kind::ReplyCapacity,start,_session,0,0);
+                permit.send(command);Ok(())
+            },Err(_)=>Err(()),
+        }
+    };
+    if let Some(trace)=observation {
+        trace.record(crate::observation::NetworkBoundary::ReplyQueue,if result.is_ok(){crate::observation::Phase::Completed}else{crate::observation::Phase::Error});
+    }
+    result
 }
 const SEND_TIMEOUT: Duration = Duration::from_millis(250);
 // Local kernel-write acceptance only; no TCP ACK or device arrival inference.
@@ -772,6 +825,9 @@ async fn writer_loop_with_progress<S>(
                     pending_command=Some(WriterCommand::Reply(reply));
                 },
                 Some(WriterCommand::Reply(reply))=>{
+                    if let Some(trace)=&reply.observation {
+                        trace.record(crate::observation::NetworkBoundary::WriterDequeue,crate::observation::Phase::Received);
+                    }
                     #[cfg(feature="stream-diagnostics")]
                     crate::diagnostics::duration(crate::diagnostics::Kind::ReplyQueue,reply.enqueued_at,current.as_ref().map_or(0,|s|s.session_epoch),0,0);
                     let message=reply.message;
@@ -784,7 +840,10 @@ async fn writer_loop_with_progress<S>(
                     let diagnostic_started=crate::diagnostics::mark();
                     let (_,_,session)=session_identity(&current);
                     crate::diagnostics::event(crate::diagnostics::Kind::ReplyStart,session,0,0,0,0);
-                    if let Err(failure)=write_observed_wire(&mut sink,message,reply.cause).await {
+                    if let Some(trace)=&reply.observation {trace.record(crate::observation::NetworkBoundary::ReplySink,crate::observation::Phase::Dispatched);}
+                    let sent=write_observed_wire(&mut sink,message,reply.cause).await;
+                    if let Some(trace)=&reply.observation {trace.record(crate::observation::NetworkBoundary::ReplySink,if sent.is_ok(){crate::observation::Phase::Completed}else{crate::observation::Phase::Error});}
+                    if let Err(failure)=sent {
                         crate::diagnostics::event(crate::diagnostics::Kind::ReplyError,session,0,failure as u64,0,0);
                         let (id,incarnation,session_epoch)=session_identity(&current);
                         eprintln!("picomado control_write_failed id={} incarnation={} session_epoch={} kind={}",id,incarnation,session_epoch,kind);
@@ -848,7 +907,7 @@ async fn writer_loop_with_progress<S>(
                         #[cfg(feature="boundary-observation")]
                         let cause=crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).ok().and_then(|a|{
                             let cause=a.frame_observation_cause(&frame.token);
-                            a.observation_source().record_context(crate::observation::Component::Frame,crate::observation::Phase::Pending,0,0,0,0,frame.token.frame_id,cause);
+                            a.observation_source().record_context(crate::observation::Component::Frame,crate::observation::Phase::Pending,0,0,0,1,frame.token.frame_id,cause);
                             cause
                         });
                         #[cfg(not(feature="boundary-observation"))]
@@ -996,6 +1055,12 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
         None => (crate::socket_progress::next_accept_order(), "websocket_start"),
     };
     let (tx, rx) = tokio::sync::mpsc::channel(32);
+    #[cfg(feature="boundary-observation")]
+    let observations=app.read().ok().map(|app|app.observation_source());
+    #[cfg(not(feature="boundary-observation"))]
+    let observations:Option<crate::observation::Source>=None;
+    #[cfg(feature="boundary-observation")]
+    if let (Some(progress),Some(source))=(&write_progress,&observations){progress.observe_reads(source.clone());}
     let mut writer = tokio::spawn(writer_loop_with_progress(sink, rx, app.clone(),None,write_progress));
     let mut decoder = Decoder::default();
     let mut current: Option<SessionToken> = None;
@@ -1010,10 +1075,6 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
     let mut end_reason = "read_eof";
     let mut end_detail = "none";
     let mut diagnostics = AckDiagnostics::default();
-    #[cfg(feature="boundary-observation")]
-    let observations=app.read().ok().map(|app|app.observation_source());
-    #[cfg(not(feature="boundary-observation"))]
-    let observations:Option<crate::observation::Source>=None;
     eprintln!("picomado websocket_open connection_id={} accept_order={} order_source={}", connection_id, accept_order, order_source);
     loop {
         let incoming = tokio::select! {
@@ -1065,6 +1126,12 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
             }
         };
         rx_bytes += bytes.len() as u64;
+        let ws_operation=observations.as_ref().map_or(0,|source|source.record_network(crate::observation::NetworkBoundary::WsComplete,crate::observation::Phase::Received,0,0,accept_order.get(),rx_bytes-bytes.len() as u64,rx_bytes,None));
+        #[cfg(feature="boundary-observation")]
+        let buffered=decoder.buffered_bytes() as u64;
+        #[cfg(not(feature="boundary-observation"))]
+        let buffered=0;
+        let decode_operation=observations.as_ref().map_or(0,|source|source.record_network(crate::observation::NetworkBoundary::Decode,crate::observation::Phase::Dispatched,0,ws_operation,accept_order.get(),rx_bytes-bytes.len() as u64-buffered,rx_bytes,None));
         #[cfg(feature="ack-path-probe")]
         crate::ack_probe::record(crate::ack_probe::Event::DecodeBegin,accept_order.get(),rx_messages+1,0,0,0,bytes.len()as u64,0);
         #[cfg(feature="ack-path-probe")]
@@ -1073,6 +1140,7 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
         let decoded=decoder.push_observed(&bytes);
         #[cfg(not(feature="boundary-observation"))]
         let decoded=decoder.push(&bytes);
+        if let Some(source)=&observations {source.record_network(crate::observation::NetworkBoundary::Decode,if decoded.is_ok(){crate::observation::Phase::Completed}else{crate::observation::Phase::Error},decode_operation,ws_operation,accept_order.get(),rx_bytes-bytes.len() as u64-buffered,rx_bytes,None);}
         let messages = match decoded {
             Ok(messages) => messages,
             Err(_) => {
@@ -1090,10 +1158,11 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
             #[cfg(not(feature="boundary-observation"))]
             let (message,cause,invalid_cause)=(received,None,false);
             let cause=if matches!(message,WireMessage::Next{..}|WireMessage::Up{..}|WireMessage::Down{..}|WireMessage::Power{..}|WireMessage::EnterSub{..}){cause}else{None};
-            if let Some(source)=&observations {
-                source.record_context(crate::observation::Component::Api,crate::observation::Phase::Received,0,0,0,message.kind() as u64,0,cause);
+            let api_operation=observations.as_ref().map_or(0,|source|{
+                let operation=source.record_context(crate::observation::Component::Api,crate::observation::Phase::Received,0,decode_operation,0,message.kind() as u64,0,cause);
                 if invalid_cause{source.record(crate::observation::Component::Observation,crate::observation::Phase::Rejected,0,0,0,1);}
-            }
+                operation
+            });
             rx_messages += 1;
             let kind = wire_label(&message);
             let was_unbound = current.is_none();
@@ -1103,7 +1172,7 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
             crate::ack_probe::record(crate::ack_probe::Event::ProcessBegin,accept_order.get(),rx_messages,probe_identity.0,probe_identity.1,probe_identity.2,0,0);
             #[cfg(feature="ack-path-probe")]
             let probe_process_started=crate::ack_probe::active(accept_order.get()).then(std::time::Instant::now);
-            match process_with_observation(&app, &mut current, message, &mut diagnostics, Some(accept_order),cause) {
+            match process_with_observation_parent(&app, &mut current, message, &mut diagnostics, Some(accept_order),cause,api_operation) {
                 Ok(reply) => {
                     #[cfg(feature="ack-path-probe")]
                     {if was_unbound {probe_bind_pending=true;}if probe_bind_pending {if let Some(token)=&current {probe_bind_pending=!crate::ack_probe::bind_accepted(&app,token,accept_order.get());}}}
@@ -1114,7 +1183,7 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
                         let queued = std::time::Instant::now();
                         #[cfg(feature="ack-path-probe")]
                         crate::ack_probe::record(crate::ack_probe::Event::ReplyQueueBegin,accept_order.get(),rx_messages,probe_identity.0,probe_identity.1,probe_identity.2,tx.capacity()as u64,0);
-                        if enqueue_reply_common(&tx,reply,current.as_ref().map_or(0,|s|s.session_epoch),cause,binding).await.is_err() {
+                        if enqueue_reply_traced(&tx,reply,current.as_ref().map_or(0,|s|s.session_epoch),cause,binding,observations.as_ref().map(|source|ReplyObservation::new(source.clone(),accept_order.get(),api_operation))).await.is_err() {
                             end_reason = "writer_command_closed";
                             failed = true;
                             break;
@@ -4324,5 +4393,7 @@ mod tests {
 
     #[cfg(feature="boundary-observation")]
     include!("causal_contract_tests.rs");
+    #[cfg(feature="boundary-observation")]
+    include!("network_observation_tests.rs");
 
 }

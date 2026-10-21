@@ -39,6 +39,11 @@ pub enum Phase {
     Cancelled = 7,
     Committed = 8,
 }
+/// Catalog 3 network boundaries. RawRead means userspace read completion,
+/// never kernel arrival. Connection offsets are endpoint-local, not wire ACKs.
+#[derive(Clone, Copy, Debug)]
+#[repr(u16)]
+pub enum NetworkBoundary { Registered=1, RawRead, WsComplete, Decode, ReplyQueue, WriterDequeue, ReplySink }
 #[derive(Clone, Debug, Serialize)]
 pub struct Fact {
     pub sequence: u64,
@@ -52,6 +57,10 @@ pub struct Fact {
     pub boot: u64,
     pub frame: u64,
     pub cause: Option<Cause>,
+    pub detail: u16,
+    pub connection: u64,
+    pub first: u64,
+    pub end: u64,
 }
 #[derive(Clone, Copy, Debug, Default, Serialize)]
 pub struct Status {
@@ -74,6 +83,7 @@ mod enabled {
         time::Instant,
     };
     pub const CAPACITY: usize = 256;
+    #[derive(Debug)]
     struct Inner {
         boot: u64,
         start: Instant,
@@ -102,7 +112,7 @@ mod enabled {
             self.0.fetch_sub(1, Ordering::SeqCst);
         }
     }
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct Source(Arc<Inner>);
     impl Default for Source {
         fn default() -> Self {
@@ -152,6 +162,14 @@ mod enabled {
             frame: u64,
             cause: Option<Cause>,
         ) -> u64 {
+            self.record_detail(component,phase,operation,parent,revision,argument,frame,cause,0,0,0,0)
+        }
+        pub fn record_network(&self, detail: NetworkBoundary, phase: Phase, operation: u64,
+            parent: u64, connection: u64, first: u64, end: u64, cause: Option<Cause>) -> u64 {
+            self.record_detail(Component::Network,phase,operation,parent,0,0,0,cause,detail as u16,connection,first,end)
+        }
+        fn record_detail(&self,component:Component,phase:Phase,operation:u64,parent:u64,
+            revision:u64,argument:u64,frame:u64,cause:Option<Cause>,detail:u16,connection:u64,first:u64,end:u64)->u64 {
             self.0.active.fetch_add(1, Ordering::SeqCst);
             let _producer = Producer(&self.0.active);
             if !self.enabled() {
@@ -181,7 +199,7 @@ mod enabled {
                         argument,
                         boot: self.0.boot,
                         frame,
-                        cause,
+                        cause, detail, connection, first, end,
                     });
                     return sequence;
                 }
@@ -385,7 +403,7 @@ mod enabled {
             *bytes += data.len();
             Ok(())
         }
-        let header = serde_json::json!({"kind":"begin","status":begin,"us":begin_us,"catalog":2,"coverage":235});
+        let header = serde_json::json!({"kind":"begin","status":begin,"us":begin_us,"catalog":3,"coverage":239});
         if let Err(e) = write_row(
             file,
             &header,
@@ -429,7 +447,7 @@ mod enabled {
                     && end.dropped == begin.dropped
                     && !end.saturated
                     && last == end.sequence;
-                let footer = serde_json::json!({"kind":"end","status":end,"us":source.now_us(),"catalog":2,"coverage":235,"complete":complete,"storage_lost":lost,"error":error});
+                let footer = serde_json::json!({"kind":"end","status":end,"us":source.now_us(),"catalog":3,"coverage":239,"complete":complete,"storage_lost":lost,"error":error});
                 write_row(file, &footer, &mut bytes, max_bytes)?;
                 file.sync_all().map_err(|e| e.to_string())?;
                 return if complete {
@@ -646,7 +664,7 @@ mod enabled {
 #[cfg(feature = "boundary-observation")]
 pub use enabled::{Capture, Source};
 #[cfg(not(feature = "boundary-observation"))]
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Source;
 #[cfg(not(feature = "boundary-observation"))]
 impl Source {
@@ -670,6 +688,7 @@ impl Source {
     ) -> u64 {
         0
     }
+    pub fn record_network(&self,_d:NetworkBoundary,_p:Phase,_o:u64,_r:u64,_c:u64,_f:u64,_e:u64,_cause:Option<Cause>)->u64{0}
     pub fn stop_producers(&self, _timeout: std::time::Duration) -> bool {
         true
     }

@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "rx_stats.h"
+#include "observation.h"
 
 typedef struct {
     const char *ssid, *password;
@@ -27,6 +28,10 @@ pm_net_stage pm_net_state(void);
 bool pm_net_take(uint8_t *kind, char *json, size_t cap);
 size_t pm_net_payload_length(void);
 bool pm_net_send(uint8_t kind, const char *json);
+#if PM_EVENT_STREAM
+bool pm_net_send_observed(uint8_t kind,const char *json,uint64_t notify,uint64_t parent,uint64_t session);
+void pm_net_observed_api(uint64_t operation,uint64_t frame);
+#endif
 
 bool pm_net_send_optional(uint8_t kind,const char *json);
 

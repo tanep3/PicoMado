@@ -477,6 +477,9 @@ static bool token_from(const char *j,pm_token *t) {
         number(j,"frame_id",&t->frame_id);
 }
 static bool send_simple(uint8_t kind,const char *type){
+#if PM_EVENT_STREAM
+    pm_observation_drain(6,768,200);
+#endif
     pm_ack_probe_context(session_epoch,0);
     uint64_t parent=0;
 #if PM_EVENT_STREAM
@@ -496,8 +499,16 @@ static bool send_simple(uint8_t kind,const char *type){
     n=snprintf(outbound_json,sizeof outbound_json,
         "{\"type\":\"%s\",\"data\":{\"incarnation\":%llu,\"session_epoch\":%llu}}",
         type,(unsigned long long)incarnation,(unsigned long long)session_epoch);
-    bool ok=n>0 && (size_t)n<sizeof outbound_json && pm_net_send(kind,outbound_json);
+    bool ok=n>0 && (size_t)n<sizeof outbound_json &&
+#if PM_EVENT_STREAM
+        pm_net_send_observed(kind,outbound_json,op,parent,session_epoch);
+#else
+        pm_net_send(kind,outbound_json);
+#endif
     pm_observe(PM_OB_NETWORK,kind,ok?PM_OB_PENDING:PM_OB_ERROR,op,parent,session_epoch,0,0,0);
+#if PM_EVENT_STREAM
+    pm_observation_drain(6,768,200);
+#endif
     return ok;
 }
 static uint64_t observed_parent(const char *j){
@@ -751,6 +762,9 @@ static void process_frame_bytes(const uint8_t *p,size_t length){
     pm_token t={.incarnation=binary_u64(fields),.session_epoch=binary_u64(fields+8),
         .display_epoch=binary_u64(fields+16),.screen_owner_epoch=binary_u64(fields+24),.frame_id=binary_u64(fields+32)};
     uint32_t offset=(uint32_t)fields[40]<<24|(uint32_t)fields[41]<<16|(uint32_t)fields[42]<<8|fields[43];
+#if PM_EVENT_STREAM
+    pm_net_observed_api(0,t.frame_id);
+#endif
     receive_chunk(t,offset,p+header,length-header);
 }
 /* Capability handlers accept validated API envelopes. They do not select
@@ -899,6 +913,9 @@ static void process(uint8_t kind,const char *j){
     if(kind==12 || kind==13)(void)number(j,"frame_id",&requested_frame);
 #endif
     uint64_t op=pm_observe(PM_OB_API,kind,PM_OB_RECEIVED,0,parent,session_epoch,requested_frame,(uint32_t)state,0);
+#if PM_EVENT_STREAM
+    pm_net_observed_api(op,requested_frame);
+#endif
     const pm_device_api *api=pm_device_api_find(device_apis,sizeof device_apis/sizeof device_apis[0],kind);
     if(!api || !string_equals(j,"type",api->type)){
         pm_observe(PM_OB_API,kind,PM_OB_REJECTED,op,parent,session_epoch,requested_frame,1,0);retry();return;
@@ -1019,6 +1036,9 @@ static void poll_local_inputs(uint32_t now,bool allowed){
 }
 static void finish_loop(uint64_t started){
     pm_trace_flush();
+#if PM_EVENT_STREAM
+    pm_observation_drain(4,768,500);
+#endif
     pm_trace_slow(PM_TRACE_SLOW_LOOP,started,(uint32_t)state);
     pm_stats_note(PM_STAT_LOOP,started);
 }
@@ -1158,6 +1178,9 @@ int main(void){
                 if(kind==18)process_frame_bytes((const uint8_t *)json,pm_net_payload_length());
                 else process(kind,json);
                 pm_stats_note(PM_STAT_PROCESS,process_started);
+#if PM_EVENT_STREAM
+                pm_observation_drain(6,768,200);
+#endif
                 if(state==ACTIVE){
                     pm_net_poll();
                     if(recover_transport_failure())break;

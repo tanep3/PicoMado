@@ -13,12 +13,12 @@ typedef uint16_t u16_t;
 #define TF_NODELAY 0x40U
 #define tcp_nagle_disable(pcb) ((pcb)->flags |= TF_NODELAY)
 struct tcp_pcb { unsigned flags,so_options,keep_idle,keep_intvl,keep_cnt,rcv_wnd,rcv_ann_wnd,rcv_nxt;void *ooseq,*unsent,*unacked;unsigned snd_nxt,lastack,cwnd,snd_wnd,snd_queuelen,snd_lbb;
-#if PM_TX_LINK_PROBE
+#if PM_TX_LINK_PROBE || PM_EVENT_STREAM
  ip_addr_t local_ip,remote_ip;uint16_t local_port,remote_port;uint8_t nrtx;
 #endif
 };
 struct pbuf { unsigned tot_len;const uint8_t *payload;
-#if PM_TX_LINK_PROBE
+#if PM_TX_LINK_PROBE || PM_EVENT_STREAM
  struct pbuf *next;unsigned len;uint16_t ref;uint8_t flags;
 #endif
 };

@@ -21,15 +21,41 @@ pub(crate) fn next_accept_order() -> NonZeroU64 {
 pub struct WriteProgress {
     bytes: Arc<AtomicU64>,
     accept_order: NonZeroU64,
+    #[cfg(feature="boundary-observation")]
+    reads: Arc<ReadObservation>,
+}
+#[cfg(feature="boundary-observation")]
+#[derive(Debug, Default)]
+struct ReadObservation {
+    bytes: AtomicU64,
+    source: std::sync::OnceLock<crate::observation::Source>,
 }
 impl Default for WriteProgress {
     fn default() -> Self {
-        Self { bytes: Arc::default(), accept_order: next_accept_order() }
+        Self { bytes: Arc::default(), accept_order: next_accept_order(),
+            #[cfg(feature="boundary-observation")] reads: Arc::default() }
     }
 }
 impl WriteProgress {
     pub fn bytes(&self) -> u64 { self.bytes.load(Ordering::Relaxed) }
     pub(crate) fn accept_order(&self) -> NonZeroU64 { self.accept_order }
+    #[cfg(feature="boundary-observation")]
+    pub(crate) fn observe_reads(&self, source: crate::observation::Source) {
+        use crate::observation::{NetworkBoundary as N, Phase};
+        if self.reads.source.set(source.clone()).is_ok() {
+            let prefix=self.reads.bytes.load(Ordering::Relaxed);
+            source.record_network(N::Registered,Phase::Received,0,0,self.accept_order.get(),0,prefix,None);
+        }
+    }
+    #[cfg(feature="boundary-observation")]
+    fn read_accepted(&self,n:usize) {
+        if n==0{return;}
+        let first=self.reads.bytes.fetch_add(n as u64,Ordering::Relaxed);
+        if let Some(source)=self.reads.source.get() {
+            source.record_network(crate::observation::NetworkBoundary::RawRead,crate::observation::Phase::Received,
+                0,0,self.accept_order.get(),first,first.saturating_add(n as u64),None);
+        }
+    }
     fn accepted(&self, n: usize) { self.bytes.fetch_add(n as u64, Ordering::Relaxed); }
     #[cfg(test)]
     pub(crate) fn test_accept(&self, n: usize) { self.accepted(n); }
@@ -38,14 +64,20 @@ impl WriteProgress {
 pub struct TrackedIo<I> { inner: I, progress: WriteProgress }
 impl<I: AsyncRead + Unpin> AsyncRead for TrackedIo<I> {
     fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
-        #[cfg(not(feature="ack-path-probe"))]
-        {Pin::new(&mut self.get_mut().inner).poll_read(cx, buf)}
+        let this=self.get_mut();let before=buf.filled().len();
         #[cfg(feature="ack-path-probe")]
-        {let this=self.get_mut();let connection=this.progress.accept_order().get();let before=buf.filled().len();
-         crate::ack_probe::record(crate::ack_probe::Event::RawPoll,connection,0,0,0,0,0,0);
-         let result=Pin::new(&mut this.inner).poll_read(cx,buf);
-         let event=match &result{Poll::Pending=>crate::ack_probe::Event::RawPending,Poll::Ready(Ok(()))=>crate::ack_probe::Event::RawReady,Poll::Ready(Err(_))=>crate::ack_probe::Event::RawError};
-         crate::ack_probe::record(event,connection,0,0,0,0,(buf.filled().len()-before)as u64,0);result}
+        crate::ack_probe::record(crate::ack_probe::Event::RawPoll,this.progress.accept_order().get(),0,0,0,0,0,0);
+        let result=Pin::new(&mut this.inner).poll_read(cx,buf);
+        let n=buf.filled().len()-before;
+        #[cfg(feature="ack-path-probe")]
+        {
+            let event=match &result{Poll::Pending=>crate::ack_probe::Event::RawPending,Poll::Ready(Ok(()))=>crate::ack_probe::Event::RawReady,Poll::Ready(Err(_))=>crate::ack_probe::Event::RawError};
+            crate::ack_probe::record(event,this.progress.accept_order().get(),0,0,0,0,n as u64,0);
+        }
+        #[cfg(feature="boundary-observation")]
+        if matches!(&result,Poll::Ready(Ok(()))){this.progress.read_accepted(n);}
+        let _=n;
+        result
     }
 }
 impl<I: AsyncWrite + Unpin> AsyncWrite for TrackedIo<I> {
@@ -84,6 +116,27 @@ impl<L:Listener> Connected<IncomingStream<'_,TrackedListener<L>>> for WriteProgr
 mod tests {
     use super::*;
     use futures_util::task::noop_waker;
+    #[cfg(feature="boundary-observation")]
+    #[tokio::test]
+    async fn raw_read_keeps_unobserved_prefix_and_never_claims_arrival() {
+        use tokio::io::{AsyncReadExt,AsyncWriteExt};
+        use crate::observation::{Source,NetworkBoundary};
+        let (inner,mut peer)=tokio::io::duplex(64);
+        let progress=WriteProgress::default();
+        let mut io=TrackedIo{inner,progress:progress.clone()};
+        peer.write_all(b"abc").await.unwrap();let mut prefix=[0;3];io.read_exact(&mut prefix).await.unwrap();
+        let source=Source::default();source.enable(true);progress.observe_reads(source.clone());
+        let registered=source.drain();assert_eq!(registered.len(),1);
+        assert_eq!((registered[0].detail,registered[0].end),(NetworkBoundary::Registered as u16,3));
+        // Fixture knows when bytes were written; observation does not receive that oracle.
+        peer.write_all(b"de").await.unwrap();tokio::time::sleep(std::time::Duration::from_millis(12)).await;
+        assert!(source.drain().is_empty());
+        let mut bytes=[0;2];io.read_exact(&mut bytes).await.unwrap();
+        let facts=source.drain();assert_eq!(facts.len(),1);
+        assert_eq!((facts[0].detail,facts[0].first,facts[0].end),(NetworkBoundary::RawRead as u16,3,5));
+        assert_eq!(facts[0].parent,0);assert_eq!(facts[0].cause,None);
+        assert_eq!(facts[0].connection,progress.accept_order.get());
+    }
 
     struct MemoryListener(std::collections::VecDeque<tokio::io::DuplexStream>);
     impl Listener for MemoryListener {

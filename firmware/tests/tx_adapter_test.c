@@ -37,7 +37,10 @@ static void packet_init(void){
 static void invoke(void){cyw43_arch_lwip_begin();assert(first.linkoutput(&first,&head)==original_result);cyw43_arch_lwip_end();}
 static pthread_barrier_t before_reset,after_reset;
 static void *writer(void *unused){(void)unused;for(unsigned i=0;i<1500;i++)invoke();pthread_barrier_wait(&before_reset);pthread_barrier_wait(&after_reset);for(unsigned i=0;i<1500;i++)invoke();return NULL;}
-int main(void){
+#ifndef PM_TX_ADAPTER_MAIN
+#define PM_TX_ADAPTER_MAIN main
+#endif
+int PM_TX_ADAPTER_MAIN(void){
  packet_init();first.linkoutput=original1;second.linkoutput=original2;netif_default=&first;clock_us=100;
  cyw43_arch_lwip_begin();tx_attach();tx_attach();tx_sync();cyw43_arch_lwip_end();assert(first.linkoutput==tx_wrapper&&tx_original==original1);
  struct pbuf saved_head=head,saved_tail=tail;uint8_t saved[64];memcpy(saved,frame,64);
@@ -64,4 +67,5 @@ int main(void){
  cyw43_arch_lwip_begin();ap_generation++;cyw43_arch_lwip_end();pm_net_tx_status(&s);assert(!s.active&&s.generation_changed);
  cyw43_arch_lwip_begin();tx_detach();assert(first.linkoutput==original1);tx_attach();tx_attach();assert(tx_original==original1);netif_default=&second;tx_attach();assert(first.linkoutput==original1&&second.linkoutput==tx_wrapper&&tx_original==original2);assert(second.linkoutput(&second,&head)==0);tx_detach();assert(second.linkoutput==original2);cyw43_arch_lwip_end();assert(calls2==1);
  puts("PASS production TX adapter: chained pbuf/ref/content/return preserved, original once, SDK-lock threaded snapshots/reset, full/drop, freeze/release/run/generation, attach/detach without recursion; no AP2 callback writes");
+ return 0;
 }

@@ -20,6 +20,9 @@ static size_t sent_length;
 static unsigned sends;
 static unsigned credits_returned;
 static int write_result,output_result;
+#if PM_NET_TEST_OUTPUT_HOOK
+static void (*test_output_hook)(void);
+#endif
 #if PM_TRACE_ENABLE
 static uint64_t clock_us;static char trace_text[32768];static size_t trace_used;
 uint64_t time_us_64(void){return clock_us;}
@@ -64,9 +67,16 @@ unsigned tcp_sndbuf(struct tcp_pcb *p){assert(lwip_depth==1);assert(p==&socket_i
 err_t tcp_write(struct tcp_pcb *p,const void *bytes,size_t n,int flags){
     assert(lwip_depth==1);assert(p==&socket_instance && n<=sizeof sent && flags==TCP_WRITE_FLAG_COPY);
     if(write_result)return write_result;
-    memcpy(sent,bytes,n);sent_length=n;sends++;return ERR_OK;
+    memcpy(sent,bytes,n);sent_length=n;sends++;
+#if PM_NET_TEST_OUTPUT_HOOK
+    p->snd_lbb+=(unsigned)n;
+#endif
+    return ERR_OK;
 }
 err_t tcp_output(struct tcp_pcb *p){assert(lwip_depth==1);assert(p==&socket_instance);
+#if PM_NET_TEST_OUTPUT_HOOK
+    if(test_output_hook)test_output_hook();
+#endif
 #if PM_TRACE_ENABLE
     clock_us+=60000;
 #endif
@@ -77,7 +87,7 @@ void tcp_abort(struct tcp_pcb *p){assert(lwip_depth==1);assert(p==&socket_instan
 void tcp_recved(struct tcp_pcb *p,u16_t n){assert(lwip_depth==1);assert(p==&socket_instance);credits_returned+=n;}
 unsigned pbuf_copy_partial(const struct pbuf *p,void *out,unsigned n,unsigned offset){
     assert(offset+n<=p->tot_len);
-#if PM_TX_LINK_PROBE
+#if PM_TX_LINK_PROBE || PM_EVENT_STREAM
     unsigned copied=0;
     while(p && copied<n){if(offset>=p->len){offset-=p->len;p=p->next;continue;}
         unsigned take=p->len-offset;if(take>n-copied)take=n-copied;
@@ -89,7 +99,11 @@ unsigned pbuf_copy_partial(const struct pbuf *p,void *out,unsigned n,unsigned of
 }
 unsigned char pbuf_free(struct pbuf *p){assert(p);return 1;}
 static void feed(const uint8_t *data,size_t n){
-    struct pbuf buffer={(unsigned)n,data};assert(receive_callback);
+    struct pbuf buffer={.tot_len=(unsigned)n,.payload=data,
+#if PM_TX_LINK_PROBE || PM_EVENT_STREAM
+        .len=(unsigned)n,.ref=1,
+#endif
+    };assert(receive_callback);
     cyw43_arch_lwip_begin();
     assert(receive_callback(NULL,&socket_instance,&buffer,ERR_OK)==ERR_OK);
     cyw43_arch_lwip_end();pm_net_poll();

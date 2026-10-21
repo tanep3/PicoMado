@@ -19,7 +19,7 @@ def bounded_lines(path):
 def interval_source(facts, start, end, reasons):
     """Validate the interval before returning only its source/sequence facts."""
     try:
-        markers=[(i,f) for i,f in enumerate(facts) if f['component']==8 and f['event']==1 and f['a']==2 and (f['b']&0x9f)==0x9f]
+        markers=[(i,f) for i,f in enumerate(facts) if f['component']==8 and f['event']==1 and f['a'] in (2,3) and (f['b']&0x9f)==0x9f]
         begins=[(i,f) for i,f in markers if f['phase']==1 and f['sequence']==start['sequence'] and f['boot']==start['boot']]
         ends=[(i,f) for i,f in markers if f['phase']==4 and f['sequence']==end['sequence'] and f['boot']==end['boot']]
         if len(begins)!=1 or len(ends)!=1:
@@ -108,7 +108,9 @@ def server_source(path):
             reasons.append('server_storage_unconfirmed')
     except (OSError,ValueError):
         reasons.append('server_storage_unconfirmed')
-    if any(r.get('catalog')!=2 or (r.get('coverage',0)&0xeb)!=0xeb for r in [begin,end]):
+    if any(r.get('catalog') not in (2,3) or
+           (r.get('coverage',0)&(0xef if r.get('catalog')==3 else 0xeb))!=(0xef if r.get('catalog')==3 else 0xeb)
+           for r in [begin,end]):
         reasons.append('server_catalog_or_coverage')
     a,b = begin['status'], end['status']
     if not a['boot'] or a['boot']!=b['boot'] or b.get('saturated') or a['dropped']!=b['dropped'] or not end.get('complete'):
@@ -181,7 +183,11 @@ def analyze(device, server, *, slow_us=500000, deadline_us=3000000, require_fram
                 result['reasons']=['capture_ended_before_deadline']
             else:
                 result.update(status='missing_after_deadline', boundary=expected)
-    return dict(transport_complete=dc,server_complete=sc,device_reasons=dr,server_reasons=sr,results=results)
+    return dict(transport_complete=dc,server_complete=sc,device_reasons=dr,server_reasons=sr,results=results,
+                boundary_limits=dict(pre_first_observation='unknown',
+                    raw_read='userspace read completion, not kernel arrival',
+                    raw_to_ws='unknown without exact transport consumption provenance',
+                    cross_source_duration='unknown without an explicit clock mapping'))
 
 
 def main():

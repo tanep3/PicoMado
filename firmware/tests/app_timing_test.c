@@ -128,6 +128,10 @@ bool pm_net_send(uint8_t kind,const char *j){
     return true;
 }
 bool pm_net_send_optional(uint8_t kind,const char *j){return pm_net_send(kind,j);}
+#if PM_EVENT_STREAM
+bool pm_net_send_observed(uint8_t k,const char *j,uint64_t n,uint64_t p,uint64_t s){(void)n;(void)p;(void)s;return pm_net_send(k,j);}
+void pm_net_observed_api(uint64_t operation,uint64_t frame){(void)operation;(void)frame;}
+#endif
 size_t pm_net_payload_length(void){return 0;}
 bool pm_net_take(uint8_t *kind,char *j,size_t n){
     if(!welcome_available)return false;

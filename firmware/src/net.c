@@ -52,9 +52,55 @@ static uint8_t tx_packet[1040];
 static char upgrade_request[320];
 static uint8_t socks_auth_request[513];
 static ip_addr_t server_addr, proxy_addr;
-#if PM_TX_LINK_PROBE
+#if PM_EVENT_STREAM
+#include "observation_transport.h"
+static struct {
+    uint64_t connection,capture,notify,parent,session,last_take;
+    uint32_t received,consumed;
+    bool overflow;
+    pm_ob_tx_map tx;pm_ob_rx_map rx;pm_ob_app_map app;
+} observed_net;
+static uint64_t observe_connection(void){
+    pm_observation_status status=pm_observation_read();
+    if(!status.enabled){if(observed_net.connection)memset(&observed_net,0,sizeof observed_net);return 0;}
+    if(observed_net.capture!=status.capture){memset(&observed_net,0,sizeof observed_net);observed_net.capture=status.capture;}
+    if(!observed_net.connection){
+        observed_net.connection=pm_observe(PM_OB_NETWORK,PM_OB_NET_CONNECTION,PM_OB_RECEIVED,0,0,0,0,(uint32_t)rx_used,(uint32_t)app_used);
+        observed_net.received=(uint32_t)rx_used;observed_net.app.unknown=app_used!=0;
+    }
+    return observed_net.connection;
+}
+static uint64_t observe_copy(uint32_t first,uint32_t end){
+    uint64_t connection=observe_connection();if(!connection)return 0;
+    uint64_t copy=0;
+    if(observed_net.notify){
+        copy=pm_observe(PM_OB_NETWORK,PM_OB_NET_COPY,PM_OB_PENDING,0,observed_net.notify,connection,0,first,end);
+        pm_observe(PM_OB_NETWORK,PM_OB_NET_WINDOW,PM_OB_PENDING,copy,observed_net.notify,connection,0,pcb->cwnd,pcb->snd_wnd);
+        pm_observe(PM_OB_NETWORK,PM_OB_NET_POSITION,PM_OB_PENDING,copy,observed_net.notify,connection,0,pcb->snd_nxt,pcb->lastack);
+    }
+    /* Publish after COPY, before synchronous tcp_output/linkoutput. */
+    pm_ob_tx_publish(&observed_net.tx,first,end,copy,observed_net.notify);
+    return copy;
+}
+static void observe_rx(size_t n){
+    uint64_t connection=observe_connection();if(!connection)return;
+    if(n>UINT32_MAX-observed_net.received){observed_net.overflow=true;return;}
+    uint32_t first=observed_net.received;observed_net.received+=(uint32_t)n;
+    uint64_t op=pm_observe(PM_OB_NETWORK,PM_OB_NET_RX,PM_OB_RECEIVED,0,0,connection,0,first,observed_net.received);
+    if(!observed_net.overflow)pm_ob_rx_publish(&observed_net.rx,first,observed_net.received,op);
+}
+void pm_net_observed_api(uint64_t operation,uint64_t frame){
+    if(observed_net.last_take){
+        pm_observe(PM_OB_NETWORK,PM_OB_NET_API,PM_OB_DISPATCHED,operation,observed_net.last_take,observed_net.connection,frame,0,0);
+        observed_net.last_take=0;
+    }
+}
+#endif
+#if PM_TX_LINK_PROBE || PM_EVENT_STREAM
 #include "lwip/netif.h"
+#if PM_TX_LINK_PROBE
 static pm_tx_probe tx_probe;
+#endif
 static struct netif *tx_netif;
 static netif_linkoutput_fn tx_original;
 static bool tx_read(const void *packet,unsigned offset,void *out,unsigned n){
@@ -66,25 +112,53 @@ static int tx_forward(void *context,const void *packet){
 }
 static err_t tx_wrapper(struct netif *n,struct pbuf *p){
     /* SDK lock serializes callback writes with main snapshots/reset; no AP2 writer here. */
+#if PM_EVENT_STREAM
+    uint64_t operation=0,copy=0,connection=observe_connection();
+    if(connection && pcb){
+        pm_tx_tuple tuple;memcpy(tuple.local,ip_2_ip4(&pcb->local_ip),4);memcpy(tuple.peer,ip_2_ip4(&pcb->remote_ip),4);
+        tuple.local_port=pcb->local_port;tuple.peer_port=pcb->remote_port;
+        pm_tx_row key={0};
+        if(pm_tx_packet_key(&tuple,tx_read,p,&key,NULL)){
+            pm_ob_tx_range range=pm_ob_tx_find(&observed_net.tx,key.seq,key.end);copy=range.copy;
+            operation=pm_observe(PM_OB_NETWORK,PM_OB_NET_LINK,PM_OB_DISPATCHED,0,copy,connection,0,key.seq,key.end);
+        }
+    }
+#endif
+#if PM_TX_LINK_PROBE
     unsigned refs=p->ref;
-    return (err_t)pm_tx_observe(&tx_probe,tx_read,p,tx_forward,n,time_us_64,
+    err_t result=(err_t)pm_tx_observe(&tx_probe,tx_read,p,tx_forward,n,time_us_64,
         pcb?pcb->nrtx:0,refs>255?255:(uint8_t)refs);
+#else
+    err_t result=(err_t)tx_forward(n,p);
+#endif
+#if PM_EVENT_STREAM
+    if(operation)pm_observe(PM_OB_NETWORK,PM_OB_NET_LINK,result==ERR_OK?PM_OB_COMPLETED:PM_OB_ERROR,operation,copy,connection,0,(uint32_t)result,pcb?pcb->nrtx:0);
+#endif
+    return result;
 }
 static void tx_detach(void){
     if(tx_netif && tx_netif->linkoutput==tx_wrapper)tx_netif->linkoutput=tx_original;
-    tx_netif=NULL;tx_original=NULL;tx_probe.attached=false;
+    tx_netif=NULL;tx_original=NULL;
+#if PM_TX_LINK_PROBE
+    tx_probe.attached=false;
     if(tx_probe.active)tx_probe.generation_changed=true;
     tx_probe.active=false;
 #if PM_CYW43_INNER_PROBE
     pm_cyw_probe_sync(tx_probe.boot,tx_probe.run,tx_probe.generation,false,tx_probe.generation_changed,tx_probe.deadline_us,0,&tx_probe.tuple);
+#endif
 #endif
 }
 static void tx_attach(void){
     struct netif *n=netif_default;
     if(n==tx_netif && n && n->linkoutput==tx_wrapper)return;
     tx_detach();
-    if(n && n->linkoutput && n->linkoutput!=tx_wrapper){tx_netif=n;tx_original=n->linkoutput;n->linkoutput=tx_wrapper;tx_probe.attached=true;}
+    if(n && n->linkoutput && n->linkoutput!=tx_wrapper){tx_netif=n;tx_original=n->linkoutput;n->linkoutput=tx_wrapper;
+#if PM_TX_LINK_PROBE
+        tx_probe.attached=true;
+#endif
+    }
 }
+#if PM_TX_LINK_PROBE
 static void tx_sync(void){
     uint64_t boot,run,deadline,frozen;unsigned state;uint32_t generation;
     bool recording=pm_ack_probe_capture(&boot,&run,&deadline,&state,&frozen,&generation);
@@ -116,6 +190,9 @@ bool pm_net_tx_read(uint64_t boot,uint64_t run,unsigned index,pm_tx_row *row){
     if(ok)*row=tx_probe.rows[index];
     cyw43_arch_lwip_end();return ok;
 }
+#else
+#define tx_sync() ((void)0)
+#endif
 #else
 #define tx_sync() ((void)0)
 #define tx_attach() ((void)0)
@@ -161,8 +238,17 @@ static pm_rx_state rx_observe(void){
 #endif
 
 static void consume(size_t n) {
+#if PM_EVENT_STREAM
+    bool tracked=observe_connection()!=0;
+#endif
     size_t credit=0;
     if (!pm_rx_flow_consume(&rx_flow,n,&credit)) { RX_OBSERVE(pm_rx_fault,PM_RX_INVALID,0,); stage=PM_NET_FAILED; return; }
+#if PM_EVENT_STREAM
+    if(tracked){
+        if(n>UINT32_MAX-observed_net.consumed)observed_net.overflow=true;
+        else observed_net.consumed+=(uint32_t)n;
+    }
+#endif
     memmove(rx,rx+n,rx_used);
     if(pcb && credit)tcp_recved(pcb,(u16_t)credit);
     RX_OBSERVE(pm_rx_consume,(uint32_t)n,(uint32_t)credit,);
@@ -188,6 +274,9 @@ static bool send_raw(const void *p, size_t n) {
 #endif
     );
     uint64_t write_started=pm_trace_clock();
+#if PM_EVENT_STREAM
+    uint32_t copy_first=pcb->snd_lbb;
+#endif
     err_t result=tcp_write(pcb,p,n,TCP_WRITE_FLAG_COPY);
     pm_ack_probe_net(PM_AP_WRITE_END,ack_probe_flags(),(uint32_t)result,tcp_sndbuf(pcb),
 #if PM_ACK_PATH_PROBE
@@ -202,6 +291,9 @@ static bool send_raw(const void *p, size_t n) {
         pm_logf("net tcp_write_failed sdk_result=%d\n",(int)result);
         RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,(int)result,);stage=PM_NET_FAILED; return false;
     }
+#if PM_EVENT_STREAM
+    uint64_t copy=observe_copy(copy_first,pcb->snd_lbb);
+#endif
     pm_ack_probe_net(PM_AP_TX_POSITION,ack_probe_flags(),
 #if PM_ACK_PATH_PROBE
         pcb->snd_lbb-(uint32_t)n,pcb->snd_lbb,pcb->snd_nxt,pcb->lastack
@@ -211,6 +303,11 @@ static bool send_raw(const void *p, size_t n) {
     );
     uint64_t output_started=pm_trace_clock();
     err_t output_result=tcp_output(pcb);
+#if PM_EVENT_STREAM
+    if(copy)pm_observe(PM_OB_NETWORK,PM_OB_NET_OUTPUT,output_result==ERR_OK?PM_OB_COMPLETED:PM_OB_ERROR,
+        copy,observed_net.notify,observed_net.connection,0,(uint32_t)output_result,
+        pcb?(1u|(pcb->unsent?2u:0u)|(pcb->unacked?4u:0u)|((pcb->flags&TF_NODELAY)?8u:0u)):0);
+#endif
     pm_ack_probe_net(PM_AP_OUTPUT_END,ack_probe_flags(),(uint32_t)output_result,
 #if PM_ACK_PATH_PROBE
         pcb->snd_nxt,pcb->lastack,tcp_sndbuf(pcb)
@@ -278,6 +375,9 @@ static err_t recv_body(void *arg, struct tcp_pcb *p, struct pbuf *buf, err_t e) 
         last_failure=PM_NET_FAIL_PROTOCOL;socket_dead=true;stage=PM_NET_FAILED;return ERR_OK;
     }
     pbuf_copy_partial(buf,rx+rx_used,n,0);
+#if PM_EVENT_STREAM
+    observe_rx(n);
+#endif
 #if PM_TRACE_STATS
     unsigned freed=pbuf_free(buf);
 #else
@@ -339,6 +439,9 @@ bool pm_net_init(void) {
     return cyw43_arch_init()==0;
 }
 static void close_unlocked(void) {
+#if PM_EVENT_STREAM
+    memset(&observed_net,0,sizeof observed_net);
+#endif
     tx_detach();
     pm_diag_drain_error();
     pm_diag_connection(false);
@@ -534,13 +637,27 @@ again:
             if(app_rx[4]!=1 || n-2>=cap){stage=PM_NET_FAILED;return false;}
             if(app_rx[5]<1 || app_rx[5]>18){stage=PM_NET_FAILED;return false;}
             last_payload_length=n-2;*kind=app_rx[5];memcpy(json,app_rx+6,n-2);json[n-2]=0;
-            app_used-=n+4;memmove(app_rx,app_rx+n+4,app_used);return true;
+#if PM_EVENT_STREAM
+            uint32_t first=0,end=0;uint64_t parent=0;
+            bool known=observe_connection() && !observed_net.overflow && pm_ob_app_take(&observed_net.app,n+4,&first,&end);
+            if(known)parent=pm_ob_rx_find(&observed_net.rx,first,end);
+            observed_net.last_take=pm_observe(PM_OB_NETWORK,(uint16_t)(PM_OB_NET_TAKE_BASE+*kind),PM_OB_COMPLETED,
+                0,parent,observed_net.connection,0,known?first:UINT32_MAX,known?end:UINT32_MAX);
+#endif
+            app_used-=n+4;memmove(app_rx,app_rx+n+4,app_used);
+#if PM_EVENT_STREAM
+            if(!app_used)memset(&observed_net.app,0,sizeof observed_net.app);
+#endif
+            return true;
         }
     }
     if(ws_remaining){
         size_t n=rx_used;if(n>ws_remaining)n=ws_remaining;
         if(n>sizeof app_rx-app_used)n=sizeof app_rx-app_used;
         if(!n)return false;
+#if PM_EVENT_STREAM
+        if(observe_connection() && !observed_net.overflow)pm_ob_app_append(&observed_net.app,observed_net.consumed,(uint32_t)n);
+#endif
         memcpy(app_rx+app_used,rx,n);app_used+=n;ws_remaining-=n;consume(n);
         goto again;
     }
@@ -616,6 +733,17 @@ bool pm_net_send(uint8_t kind,const char *json){
     uint64_t started=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,started);
     pm_ack_probe_locked(kind);tx_sync();bool ok=send_unlocked(kind,json);cyw43_arch_lwip_end();pm_ack_probe_send_return(kind,ok);pm_stats_note(PM_STAT_NET_SEND,started);return ok;
 }
+#if PM_EVENT_STREAM
+bool pm_net_send_observed(uint8_t kind,const char *json,uint64_t notify,uint64_t parent,uint64_t session){
+    pm_ack_probe_before_lock(kind,json);
+    uint64_t started=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,started);
+    pm_ack_probe_locked(kind);tx_sync();
+    observe_connection();
+    observed_net.notify=notify;observed_net.parent=parent;observed_net.session=session;
+    bool ok=send_unlocked(kind,json);observed_net.notify=observed_net.parent=observed_net.session=0;
+    cyw43_arch_lwip_end();pm_ack_probe_send_return(kind,ok);pm_stats_note(PM_STAT_NET_SEND,started);return ok;
+}
+#endif
 bool pm_net_take(uint8_t *kind,char *json,size_t cap){
     uint64_t started=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,started);
     size_t before_rx=rx_used,before_app=app_used,before_ws=ws_remaining;

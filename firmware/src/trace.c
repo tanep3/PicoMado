@@ -30,7 +30,17 @@ static uint64_t frame_context;
 #if PM_EVENT_STREAM
 #define OBSERVATION_KIND (UINT32_MAX-1u)
 static pm_observation_status observation;
+static pm_observation_metrics metrics;
 static bool observation_negotiated;
+static void metric_add(uint64_t *counter,uint64_t amount){
+    if(UINT64_MAX-*counter<amount){*counter=UINT64_MAX;metrics.saturated=true;}
+    else *counter+=amount;
+}
+static void metric_queue(void){if(count>metrics.highwater)metrics.highwater=count;}
+pm_observation_metrics pm_observation_metrics_read(void){
+    uint32_t irq=save_and_disable_interrupts();pm_observation_metrics m=metrics;
+    restore_interrupts(irq);return m;
+}
 static void observation_lost(uint64_t seq){
     if(!observation.first_lost)observation.first_lost=seq;
     observation.last_lost=seq;
@@ -38,7 +48,9 @@ static void observation_lost(uint64_t seq){
 }
 void pm_observation_init(uint64_t boot){observation.boot=boot?boot:1;}
 void pm_observation_enable(bool enabled){
-    uint32_t irq=save_and_disable_interrupts();observation.enabled=enabled;
+    uint32_t irq=save_and_disable_interrupts();
+    if(enabled && !observation.enabled)observation.capture=observation.sequence==UINT64_MAX?UINT64_MAX:observation.sequence+1;
+    observation.enabled=enabled;
     if(enabled)observation_negotiated=true;
     restore_interrupts(irq);
 }
@@ -50,12 +62,13 @@ uint64_t pm_observe(uint8_t component,uint16_t event,uint8_t phase,
     uint64_t operation,uint64_t parent,uint64_t session,uint64_t frame,uint32_t a,uint32_t b){
     uint32_t irq=save_and_disable_interrupts();
     if(!observation.enabled){restore_interrupts(irq);return 0;}
+    metric_add(&metrics.offered,1);
     if(observation.sequence==UINT64_MAX){observation.saturated=true;observation.enabled=false;restore_interrupts(irq);return 0;}
     uint64_t seq=++observation.sequence;
     /* Half the shared queue remains available to command replies. Drop newest;
      * never wait, overwrite a control reply, format or enter the SDK here. */
     if(count>=RECORDS/2){observation_lost(seq);restore_interrupts(irq);return seq;}
-    record *r=&queue[tail];tail=(tail+1)%RECORDS;count++;
+    record *r=&queue[tail];tail=(tail+1)%RECORDS;count++;metric_queue();
     r->kind=OBSERVATION_KIND;r->us=time_us_64();
     r->data.observation.sequence=seq;r->data.observation.operation=operation?operation:seq;
     r->data.observation.parent=parent;r->data.observation.session=session;r->data.observation.frame=frame;
@@ -97,6 +110,9 @@ static record *reserve(void){
 #endif
     if(count==RECORDS){head=(head+1)%RECORDS;count--;dropped++;}
     record *r=&queue[tail];tail=(tail+1)%RECORDS;count++;
+#if PM_EVENT_STREAM
+    if(observation_negotiated)metric_queue();
+#endif
     r->us=pm_trace_clock();return r;
 }
 void pm_trace_event(pm_trace_kind kind,uint64_t frame,int32_t a,uint32_t b){
@@ -137,14 +153,17 @@ bool pm_trace_try_line(const char *line,size_t length){
 #endif
     if(count>=limit){restore_interrupts(irq);return false;}
     record *r=&queue[tail];tail=(tail+1)%RECORDS;count++;r->us=pm_trace_clock();r->kind=UINT32_MAX;memcpy(r->data.text,line,length);r->data.text[length]=0;
+#if PM_EVENT_STREAM
+    if(observation_negotiated)metric_queue();
+#endif
     restore_interrupts(irq);return true;
 }
 #endif
-static void flush_one(void){
+static size_t flush_one(size_t cap){
     // At most one bounded record/write per call. Keep partial output; never wait.
     if(!pending_length){
         uint32_t irq=save_and_disable_interrupts();
-        if(!count){restore_interrupts(irq);return;}
+        if(!count){restore_interrupts(irq);return 0;}
         record saved=queue[head];head=(head+1)%RECORDS;count--;
         uint32_t lost=dropped;restore_interrupts(irq);
         record *r=&saved;
@@ -158,21 +177,49 @@ static void flush_one(void){
             "timing us=%llu event=%s frame=%llu a=%ld b=%lu dropped=%lu\n",
             (unsigned long long)r->us,names[r->kind],(unsigned long long)r->data.event.frame,
             (long)r->data.event.a,(unsigned long)r->data.event.b,(unsigned long)lost);
-        if(n<=0)return;
+        if(n<=0)return 0;
         pending_length=(size_t)n<sizeof pending?(size_t)n:sizeof pending-1;
         pending_offset=0;
     }
     size_t left=pending_length-pending_offset;
+    if(left>cap)left=cap;
+    if(!left)return 0;
     size_t written=pm_trace_usb_write(pending+pending_offset,left);
     if(written>left)written=left;
     pending_offset+=written;
+#if PM_EVENT_STREAM
+    if(observation_negotiated){
+        metric_add(&metrics.write_calls,1);metric_add(&metrics.bytes,written);
+        if(!written)metric_add(&metrics.zero_writes,1);
+        else if(pending_offset<pending_length)metric_add(&metrics.partial_writes,1);
+    }
+#endif
     if(pending_offset==pending_length){pending_length=0;pending_offset=0;}
+    return written;
 }
 void pm_trace_flush(void){
     uint64_t started=pm_stats_clock();
-    flush_one();
+    (void)flush_one(SIZE_MAX);
     pm_stats_note(PM_STAT_FLUSH,started);
 }
+#if PM_EVENT_STREAM
+void pm_observation_drain(unsigned calls,size_t bytes,uint32_t microseconds){
+    if(!observation.enabled || !calls || !bytes || !microseconds)return;
+    if(calls>8)calls=8;
+    if(bytes>1024)bytes=1024;
+    if(microseconds>500)microseconds=500;
+    metric_add(&metrics.drain_calls,1);uint64_t started=time_us_64();
+    unsigned used=0;size_t written=0;
+    while(used<calls && written<bytes && (pending_length || count)){
+        if(time_us_64()-started>=microseconds)break;
+        size_t n=flush_one(bytes-written);used++;written+=n;
+        if(!n)break;
+    }
+    uint64_t elapsed=time_us_64()-started;
+    if(elapsed>metrics.max_drain_us)metrics.max_drain_us=elapsed;
+    if((pending_length || count) && (used==calls || written==bytes || elapsed>=microseconds))metric_add(&metrics.budget_stops,1);
+}
+#endif
 
 #if PM_TRACE_STATS
 typedef struct {

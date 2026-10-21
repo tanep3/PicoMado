@@ -121,6 +121,18 @@ static void command(const char *line){
     }
     canonical[used]=0;
 #if PM_EVENT_STREAM
+    if(n==4 && !strcmp(w[0],"OBS") && !strcmp(w[1],"METRICS")){
+        uint64_t cid,page;
+        if(!hex(w[2],&cid) || !cid || !hex(w[3],&page) || page>3){response("obs error=syntax\n");return;}
+        pm_observation_metrics m=pm_observation_metrics_read();
+        pm_observation_status s=pm_observation_read();uint64_t a,b,c;
+        if(page==0){a=m.offered;b=s.dropped;c=m.highwater;}
+        else if(page==1){a=m.drain_calls;b=m.write_calls;c=m.bytes;}
+        else if(page==2){a=m.partial_writes;b=m.zero_writes;c=m.budget_stops;}
+        else {a=m.max_drain_us;b=m.saturated;c=s.queued;}
+        response("obs m %llx %llx %llx %llx %llx\n",(unsigned long long)cid,
+            (unsigned long long)page,(unsigned long long)a,(unsigned long long)b,(unsigned long long)c);return;
+    }
     if(n>=2 && !strcmp(w[0],"EV1")){
         uint64_t cid=0;bool tagged=n==3 && hex(w[2],&cid) && cid;
         if(n!=2 && !tagged){response("ev1 error=syntax\n");return;}

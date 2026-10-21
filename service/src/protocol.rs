@@ -410,6 +410,9 @@ pub struct Decoder {
 }
 
 impl Decoder {
+    #[cfg(feature="boundary-observation")]
+    pub(crate) fn buffered_bytes(&self)->usize{self.buffer.len()}
+
     #[cfg(feature="ack-path-probe")]
     pub(crate) fn probe_bind(&mut self,connection:u64,message:u64){self.probe_connection=connection;self.probe_message=message;}
 

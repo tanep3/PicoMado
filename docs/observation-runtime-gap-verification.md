@@ -18,3 +18,5 @@
 V-05は平均帯域だけで合格にしない。1loop当たりのproducer burstと排出位置を再現し、queue拡大だけで長時間安定を宣言しない。実IRQ、USB負荷、動的heap／stack、RF、物理パネルは別の実機受入であり、host fixtureの数値を転用しない。
 
 今回完了しているのは、保存ログの全4切替のcause/frame照合、同一sourceの区間和、journal同一stream順序、server上限、Pi clock pairingの条件付き下限、source欠番885とdrop増分885／host保存欠落0の一致の確認である。[実測照合](manual-switch-analysis-20261020.md)とcheckpoint JSONを参照する。
+
+設計コミット `d70dd84` 後の実装・ローカル試験と識別限界は [実装検証](observation-runtime-gap-implementation.md) に追記する。上記「未実施」は設計先行時点の記録であり、実機受入は引き続き別工程。

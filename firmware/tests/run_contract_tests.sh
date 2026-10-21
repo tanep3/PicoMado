@@ -15,6 +15,12 @@ cc "${base[@]}" -DPM_USE_SAMPLE_CONFIG=1 -DPM_ACK_PATH_PROBE=1 -DPM_USB_BUTTON_S
 "$work/compat"
 cc "${base[@]}" -DPM_EVENT_STREAM=1 -DPM_TRACE_ENABLE=1 -DPM_USE_SAMPLE_CONFIG=1 -Idevices/sample-a -Itests/app_stubs tests/observation_limits_test.c src/usb_control.c -o "$work/limits"
 "$work/limits"
+cc "${base[@]}" -DPM_EVENT_STREAM=1 -DPM_TRACE_ENABLE=1 -DPM_USE_SAMPLE_CONFIG=1 -Idevices/sample-a -Itests/app_stubs tests/observation_drain_test.c src/usb_control.c -o "$work/drain"
+"$work/drain"
+cc "${base[@]}" tests/observation_transport_test.c -o "$work/provenance"
+"$work/provenance"
+cc "${base[@]}" -DPM_USE_SAMPLE_CONFIG=1 -DPM_TRACE_ENABLE=1 -DPM_EVENT_STREAM=1 -DPM_ACK_PATH_PROBE=1 -DPM_TX_LINK_PROBE=1 -DPM_NET_TX_THREADS=1 -Idevices/sample-a -Itests/net_stubs -Itests/app_stubs -I. tests/observation_net_test.c src/ws_accept.c src/trace.c src/rx_stats.c src/tx_link_probe.c -pthread -o "$work/net"
+"$work/net"
 
 cc "${base[@]}" tests/observation_json_test.c -o "$work/metadata"
 "$work/metadata"

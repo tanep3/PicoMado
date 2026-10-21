@@ -75,6 +75,19 @@ class Tests(unittest.TestCase):
         raw,rows=self.evidence();rows[3]['event']['cause']['operation']=99
         self.assertEqual(causal.analyze(*self.parse(raw,rows))['results'][0]['status'],'unknown')
 
+    def test_catalog3_coverage_and_pre_read_limit_are_explicit(self):
+        raw,rows=self.evidence()
+        for row in (rows[0],rows[-1]):row.update(catalog=3,coverage=0xef)
+        device,server=self.parse(raw,rows);self.assertTrue(server[1])
+        limits=causal.analyze(device,server)['boundary_limits']
+        self.assertEqual(limits['pre_first_observation'],'unknown')
+        self.assertIn('not kernel arrival',limits['raw_read'])
+        for row in (rows[0],rows[-1]):row['coverage']=0xeb
+        self.assertFalse(self.parse(raw,rows)[1][1])
+        # Historical catalog2 remains readable without gaining Network coverage.
+        for row in (rows[0],rows[-1]):row['catalog']=2
+        self.assertTrue(self.parse(raw,rows)[1][1])
+
     def test_complete_missing_after_deadline_and_finite_end_before_deadline(self):
         d,s=self.parse(*self.evidence(draw=False))
         result=causal.analyze(d,s)['results'][0]

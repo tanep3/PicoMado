@@ -24,6 +24,7 @@ typedef struct {
 typedef bool (*pm_tx_reader)(const void *packet,unsigned offset,void *out,unsigned length);
 typedef int (*pm_tx_forwarder)(void *context,const void *packet);
 typedef uint64_t (*pm_tx_clock)(void);
+bool pm_tx_packet_key(const pm_tx_tuple *tuple,pm_tx_reader read,const void *packet,pm_tx_row *row,uint32_t *malformed);
 int pm_tx_observe(pm_tx_probe *probe,pm_tx_reader read,const void *packet,pm_tx_forwarder forward,
                   void *context,pm_tx_clock clock,uint8_t nrtx,uint8_t refs);
 uint32_t pm_tx_digest(const pm_tx_probe *probe);

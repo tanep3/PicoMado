@@ -94,6 +94,10 @@ class Window:
         self.reasons = collections.Counter()
         self.prelude = collections.deque(maxlen=32)
         self.received = 0
+        self.begin_fact = None
+        self.end_fact = None
+        self.begin_host_sequence = 0
+        self.causal_durable_prefix = 0
 
     def fail(self, reason):
         self.reasons[reason] += 1
@@ -101,6 +105,8 @@ class Window:
     def begin(self, status):
         self.start = status
         self.last = status['sequence']
+        if self.begin_fact and self.begin_fact['boot']==status['boot'] and self.begin_fact['sequence']==status['sequence']:
+            self.last_us=self.begin_fact['us']
         if not status['on'] or status['saturated'] or not status['boot']:
             self.fail('invalid_start')
         for fact in self.prelude:
@@ -109,6 +115,13 @@ class Window:
         self.prelude.clear()
 
     def accept(self, fact):
+        if fact['component']==8 and fact['event']==1 and fact['phase']==4:
+            self.end_fact=fact
+        if fact['component']==8 and fact['event']==1 and fact['phase']==1:
+            self.begin_fact = fact
+            if self.start and fact['boot']==self.start['boot'] and fact['sequence']==self.start['sequence'] and self.last==fact['sequence']:
+                self.last_us=fact['us']
+                return
         if self.start is None:
             if len(self.prelude) == self.prelude.maxlen:
                 self.fail('prelude_overflow')
@@ -143,7 +156,13 @@ class Window:
                 self.fail('end_watermark_gap')
             if end['dropped'] != self.start['dropped']:
                 self.fail('source_drop')
-        return dict(link_epoch=self.epoch, start=self.start, end=end,
+        def boundary_valid(fact,status,phase):
+            return bool(fact and status and fact['boot']==status['boot'] and fact['sequence']==status['sequence'] and
+                        fact['phase']==phase and fact['a'] in (2,3) and fact['b']&0x9f==0x9f)
+        causal_complete=not self.reasons and boundary_valid(self.begin_fact,self.start,1) and boundary_valid(self.end_fact,end,4)
+        return dict(link_epoch=self.epoch, start=self.start, end=end,causal_complete=causal_complete,
+                    begin_fact=self.begin_fact, begin_host_sequence=self.begin_host_sequence,
+                    causal_ready_durable_prefix=self.causal_durable_prefix,
                     last_received_sequence=self.last, received=self.received,
                     transport_complete=not self.reasons, reasons=dict(self.reasons))
 
@@ -427,12 +446,13 @@ class SerialPort:
 
 class Collector:
     def __init__(self, serial_path, output, socket_path, seconds, reconnects=0,
-                 port_factory=SerialPort, journal_factory=Journal, ready=None):
+                 port_factory=SerialPort, journal_factory=Journal, ready=None, causal_ready=None):
         if not 0 < seconds <= 86400 or not 0 <= reconnects <= 2:
             raise ValueError('finite duration and 0..2 reconnect attempts required')
         self.serial_path, self.output, self.socket_path = serial_path, Path(output), Path(socket_path)
         self.seconds, self.reconnects = seconds, reconnects
         self.port_factory, self.ready = port_factory, ready
+        self.causal_ready_callback = causal_ready
         # RNG failure must precede acquisition of worker, output FD and selector.
         self.mux = Commands(audit=self.audit)
         self.journal = journal_factory(self.output)
@@ -448,6 +468,7 @@ class Collector:
         self.beginning = self.closing = None
         self.started = time.monotonic()
         self.data_deadline = None
+        self.remaining_seconds = seconds
         self.hard_deadline = self.started+seconds+14
         self.retry_at = 0
         self.stop_requested = self.interrupted = self.done = False
@@ -460,12 +481,27 @@ class Collector:
         self.journal.submit(dict(value, link_epoch=self.link_epoch))
 
     def status(self):
+        storage = self.journal.status()
+        boundary = self.window.begin_fact if self.window else None
+        start = self.window.start if self.window else None
+        causal_ready = bool(start and boundary and boundary['boot']==start['boot'] and
+                            boundary['sequence']==start['sequence'] and
+                            boundary['a'] in (2,3) and boundary['b'] & 0x9f == 0x9f and
+                            self.window.begin_host_sequence and
+                            storage['durable_prefix']>=self.window.begin_host_sequence and
+                            not self.window.reasons and not self.stop_requested and
+                            not storage['queue_lost'] and not storage['write_lost'] and not storage['error'])
         return dict(ready=self.window is not None and self.window.start is not None and not self.window.reasons.get('invalid_start') and not self.stop_requested,
+                    causal_ready=causal_ready, begin_fact=boundary,
+                    readiness_contract='ready is transport only; causal_ready requires durable source begin',
                     source=self.window.start if self.window else None,
                     link_epoch=self.link_epoch, stopping=self.stop_requested,
-                    storage=self.journal.status())
+                    storage=storage)
 
     def _open(self):
+        if self.data_deadline is not None:
+            self.remaining_seconds=max(.001,self.data_deadline-time.monotonic())
+            self.data_deadline=None
         self.port = self.port_factory(self.serial_path)
         try:
             self.sel.register(self.port, selectors.EVENT_READ, 'serial')
@@ -477,7 +513,13 @@ class Collector:
         self.window = Window(self.link_epoch)
         self.framing = Lines()
         self.mux = Commands(start_id=self.mux.next_id, audit=self.audit)
-        self.beginning = self.mux.submit('ON', internal=True)
+        # Same exclusive owner drains DTR snapshots before any command deadline.
+        now = time.monotonic()
+        self.prelude_started = self.prelude_last = now
+        self.prelude_bytes = 0
+        self.bootstrap = 'quiet'
+        self.start_reconciled = False
+        self.beginning = None
         self.closing = None
         self.audit(kind='link_open')
 
@@ -514,16 +556,19 @@ class Collector:
             self.retry_at = time.monotonic()+0.05
 
     def _line(self, line):
+        prelude = self.bootstrap in ('quiet','status','off')
         try:
             fact = decode(line)
-            self.audit(kind='event' if fact else 'line', event=fact,
+            self.audit(kind=('prelude_event' if prelude else 'event') if fact else ('prelude_line' if prelude else 'line'), event=fact,
                        line=None if fact else line.decode('ascii', errors='replace').rstrip())
-            if fact:
+            if fact and not prelude:
                 self.window.accept(fact)
+                if fact is self.window.begin_fact:
+                    self.window.begin_host_sequence = self.journal.attempted
             self.mux.receive(line)
         except ValueError as error:
-            self.window.fail('decode_error')
-            self.audit(kind='decode_error', reason=str(error), line=line.decode('ascii', errors='replace').rstrip())
+            if not prelude:self.window.fail('decode_error')
+            self.audit(kind='prelude_decode_error' if prelude else 'decode_error', reason=str(error), line=line.decode('ascii', errors='replace').rstrip())
 
     def _drop_client(self, client):
         self.sel.unregister(client)
@@ -613,6 +658,7 @@ class Collector:
                 if self.port is None and now >= self.retry_at:
                     try:
                         self._open()
+                        now = time.monotonic() # factory/DTR startup can take time
                     except (OSError, termios.error) as error:
                         self.errors.append('open: '+str(error))
                         self.port = None
@@ -622,13 +668,45 @@ class Collector:
                         self.interrupted = True
                         self.retry_at = now+0.05
                 if self.port is not None:
+                    if self.bootstrap == 'quiet':
+                        if now-self.prelude_started>=2 or self.prelude_bytes>=65536:
+                            self._lost('prelude_limit')
+                            continue
+                        if now-self.prelude_last>=.15 and not self.framing.partial():
+                            self.bootstrap='status'
+                            self.beginning=self.mux.submit('STATUS',internal=True)
                     if self.beginning is not None and self.beginning.done():
                         try:
                             status = self.beginning.result()['status']
                         except Exception:
+                            if self.bootstrap=='on' and not self.start_reconciled:
+                                # Never resend uncertain ON. Resolve with a fresh STATUS,
+                                # close the unverified interval, then open a new window.
+                                self.start_reconciled=True
+                                self.window.fail('uncertain_start')
+                                self.segments.append(self.window.finish(None))
+                                self.window=Window(self.link_epoch)
+                                self.interrupted=True
+                                self.bootstrap='status'
+                                self.beginning=self.mux.submit('STATUS',internal=True)
+                                self.audit(kind='uncertain_start_reconcile')
+                                continue
                             self._lost('start_response_missing')
                             continue
                         self.beginning = None
+                        if self.bootstrap in ('status','off'):
+                            if status['on']:
+                                self.bootstrap='off'
+                                self.beginning=self.mux.submit('OFF',internal=True)
+                            else:
+                                if self.stop_requested:
+                                    self._close_link(end=status)
+                                    self.done=True
+                                    continue
+                                self.bootstrap='on'
+                                self.beginning=self.mux.submit('ON',internal=True)
+                            continue
+                        self.bootstrap='active'
                         self.window.begin(status)
                         if status['sequence'] < self.prior_source_sequences.get(status['boot'], 0):
                             self.window.fail('source_sequence_reset')
@@ -636,12 +714,12 @@ class Collector:
                             self._lost('invalid_start')
                             continue
                         if self.data_deadline is None:
-                            self.data_deadline = now+self.seconds
+                            self.data_deadline = now+self.remaining_seconds
                         if self.ready:
                             self.ready(self.status())
                     if self.data_deadline is not None and now >= self.data_deadline:
                         self.stop_requested = True
-                    if self.stop_requested and self.closing is None:
+                    if self.stop_requested and self.closing is None and self.bootstrap=='active':
                         self.closing = self.mux.submit('OFF', internal=True)
                     try:
                         self.mux.tick(self.port.write, now)
@@ -660,6 +738,12 @@ class Collector:
                             self._close_link(end=end)
                             self.done = True
                         continue
+                    status=self.status()
+                    if status['causal_ready'] and not self.window.causal_durable_prefix:
+                        self.window.causal_durable_prefix=status['storage']['durable_prefix']
+                        self.audit(kind='causal_ready',begin_host_sequence=self.window.begin_host_sequence,
+                                   durable_prefix=self.window.causal_durable_prefix)
+                        if self.causal_ready_callback:self.causal_ready_callback(status)
                 for key, mask in self.sel.select(0.02):
                     if key.data == 'listener':
                         client, _ = self.listener.accept()
@@ -677,9 +761,12 @@ class Collector:
                                 self._lost('disconnected')
                                 continue
                             prior_errors = self.framing.errors
+                            if self.bootstrap=='quiet':
+                                self.prelude_bytes+=len(data)
+                                self.prelude_last=time.monotonic()
                             for line in self.framing.feed(data):
                                 self._line(line)
-                            if self.framing.errors != prior_errors:
+                            if self.framing.errors != prior_errors and self.bootstrap not in ('quiet','status','off'):
                                 self.window.fail('line_overflow')
                         except BlockingIOError:
                             pass
@@ -707,6 +794,8 @@ class Collector:
             durable = self.journal.close()
         complete = bool(self.segments) and all(s['transport_complete'] for s in self.segments) and not self.interrupted and not self.errors and durable
         summary = dict(transport_complete=complete, complete=complete, application_complete=None,
+                       causal_complete=complete and all(s['causal_complete'] for s in self.segments),
+                       complete_semantics='legacy transport alias; causal_complete also requires actual source boundaries',
                        storage_durable=durable, storage=self.journal.status(),
                        interrupted=self.interrupted, reconnect_attempts=self.reopened, command_uncertain=self.command_uncertain,
                        segments=self.segments, errors=self.errors)
