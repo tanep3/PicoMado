@@ -59,18 +59,31 @@ def validate_check_proof(report,subject=None):
     return all(c['exit']==0 and sha(c['log'])==c['SHA256']for c in report['checks'])
 
 
+def load_proof(ref,root=ROOT):
+    path=Path(ref['path']);path=path if path.is_absolute()else root/path
+    require(path.stat().st_size<=1048576 and sha(path)==ref['SHA256'],'workflow evidence missing/changed')
+    return json.loads(path.read_text())
+
+
+def route_module():
+    spec=importlib.util.spec_from_file_location('route_evidence',ROOT/'development/standard/v1/route_evidence.py')
+    mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod);return mod
+
+
+ROUTE_ENTRIES=('AGENTS.md','tools/project_gate.py','development/standard/v1/standard.md')
+
+
 def workflow_admission(action,root=ROOT):
     record=json.loads((root/'docs/changes'/f'{CASE}.json').read_text());snap=input_snapshot(root)
-    def load(ref):
-        path=Path(ref['path']);path=path if path.is_absolute()else root/path
-        require(path.stat().st_size<=1048576 and sha(path)==ref['SHA256'],'workflow evidence missing/changed')
-        return json.loads(path.read_text())
+    def load(ref):return load_proof(ref,root)
     def design(ref,case):
         commit=ref['commit']
         if subprocess.run(['git','merge-base','--is-ancestor',commit,'HEAD'],cwd=root,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode:return False
         if commit!=case['design_commit']:return False
         return bool(case['design_artifacts'])and all(subprocess.check_output(['git','show',commit+':'+name],cwd=root)==(root/name).read_bytes() for name in case['design_artifacts'])
-    mod=workflow_module(root);errors=mod.admit(record,action,snap['subject_digest'],load,design,lambda p:validate_check_proof(p,snap['subject_digest']))
+    def scoped(stage,proof,case):
+        return route_module().verify(stage,proof,case,root,snap['subject_digest'],ROUTE_ENTRIES,input_snapshot,load,validate_check_proof)
+    mod=workflow_module(root);errors=mod.admit(record,action,snap['subject_digest'],load,design,lambda p:validate_check_proof(p,snap['subject_digest']),scoped)
     require(not errors,'; '.join(errors));return snap
 
 
@@ -120,6 +133,12 @@ def verify_check(path,action='stage'):
     path=Path(path);report=json.loads(path.read_text());snap=workflow_admission(action)
     require(validate_check_proof(report,snap['subject_digest']),'invalid/stale check receipt or changed logs')
     return report
+
+
+def probe_route(args):
+    snap=workflow_admission('ship')
+    return route_module().produce(ROOT,Path(args.active_root),snap['subject_digest'],ROUTE_ENTRIES,
+        input_snapshot,args.report,args.out,Path(sys.executable).resolve(),load_proof,validate_check_proof,write)
 
 
 def artifact(path,kind):
@@ -182,6 +201,7 @@ def main():
     sub.add_parser('static')
     c=sub.add_parser('check');c.add_argument('--out',default=str(ROOT/'.gate'));c.add_argument('--rustc-deps',type=Path)
     c=sub.add_parser('verify-check');c.add_argument('--report',default=str(ROOT/'.gate/check.json'))
+    c=sub.add_parser('probe-route');c.add_argument('--active-root',required=True);c.add_argument('--report',required=True);c.add_argument('--out',required=True)
     c=sub.add_parser('record');c.add_argument('--build-receipt',required=True);c.add_argument('--report',default=str(ROOT/'.gate/check.json'));c.add_argument('--artifact',required=True);c.add_argument('--kind',choices=['firmware','server'],required=True);c.add_argument('--out',required=True)
     for flag in ['device','board-id','config']:c.add_argument('--'+flag)
     c=sub.add_parser('build');c.add_argument('--kind',choices=['firmware','server'],required=True);c.add_argument('--build-dir',required=True);c.add_argument('--report',default=str(ROOT/'.gate/check.json'));c.add_argument('--out');c.add_argument('--device');c.add_argument('--mode',choices=['normal','sample','unbound','unbound_panel'],default='normal');c.add_argument('--features',default='');c.add_argument('--no-default-features',action='store_true')
@@ -192,6 +212,7 @@ def main():
         if a.op=='static':static();print('static domain/boundary gate PASS')
         elif a.op=='check':check(a.out,a.rustc_deps)
         elif a.op=='verify-check':verify_check(a.report);print('current check receipt PASS')
+        elif a.op=='probe-route':print(json.dumps(probe_route(a)))
         elif a.op=='build':print(json.dumps(lineage_module().run(ROOT,a,sys.modules[__name__])))
         elif a.op=='record':record(a)
         elif a.op=='preflight':preflight(a)

@@ -10,7 +10,7 @@ def intent(record):
     return {k:v for k,v in record.items() if k not in ('stages','status','design_commit','unapplied')}
 
 
-def validate(record,subject,load_proof,verify_design,verify_check):
+def validate(record,subject,load_proof,verify_design,verify_check,verify_scoped=None):
     errors=[];stages=record.get('stages',{})
     if record.get('status')not in ['registered','in_progress','on_hold','complete']:errors.append('unknown workflow status')
     if not str(record.get('owner','')).startswith('parent'):errors.append('parent completion owner required')
@@ -39,16 +39,18 @@ def validate(record,subject,load_proof,verify_design,verify_check):
                 elif name=='operational_application':
                     if proof.get('owner')!='parent'or proof.get('applied')is not True or not proof.get('active_root'):
                         raise ValueError('application proof required')
+                    if verify_scoped is None or not verify_scoped(name,proof,record):raise ValueError('verified route execution required')
                 elif name=='effectiveness_confirmation':
-                    if proof.get('owner')!='parent'or proof.get('confirmed')is not True or not proof.get('refusal_evidence'):
+                    if proof.get('owner')!='parent'or proof.get('confirmed')is not True:
                         raise ValueError('effectiveness proof required')
+                    if verify_scoped is None or not verify_scoped(name,proof,record):raise ValueError('verified route execution required')
             except (OSError,ValueError,KeyError,TypeError)as problem:errors.append(name+': '+str(problem))
     if record.get('status')=='complete'and any(stages[p].get('state')!='verified'for p in STAGES):errors.append('incomplete workflow cannot close')
     return errors
 
 
-def admit(record,action,subject,load_proof,verify_design,verify_check):
-    errors=validate(record,subject,load_proof,verify_design,verify_check)
+def admit(record,action,subject,load_proof,verify_design,verify_check,verify_scoped=None):
+    errors=validate(record,subject,load_proof,verify_design,verify_check,verify_scoped)
     needed={'develop':('design',),'build':('design',),'stage':('design',),
             'ship':STAGES[:3],'close':STAGES}.get(action)
     if needed is None:return errors+['unknown workflow action']
@@ -56,12 +58,12 @@ def admit(record,action,subject,load_proof,verify_design,verify_check):
     return errors
 
 
-def transition(record,stage,state,evidence,actor,subject,load_proof,verify_design,verify_check):
+def transition(record,stage,state,evidence,actor,subject,load_proof,verify_design,verify_check,verify_scoped=None):
     if stage not in STAGES or state not in STATES:raise ValueError('unknown workflow transition')
     old=record['stages'][stage]['state']
     if STATES.index(state)<STATES.index(old)or STATES.index(state)>STATES.index(old)+1:raise ValueError('invalid workflow transition')
     if stage in STAGES[2:]and actor!='parent':raise ValueError('parent owns independent/application/closure stages')
     updated=deepcopy(record);updated['stages'][stage]=dict(state=state,evidence=evidence)
-    errors=validate(updated,subject,load_proof,verify_design,verify_check)
+    errors=validate(updated,subject,load_proof,verify_design,verify_check,verify_scoped)
     if errors:raise ValueError('; '.join(errors))
     return updated

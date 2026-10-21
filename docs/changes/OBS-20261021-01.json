@@ -15,7 +15,7 @@
       "evidence": [
         {
           "kind": "commit",
-          "commit": "8a74b0b"
+          "commit": "82156eb79085fe9a55ffca506773e8da4676ca90"
         }
       ]
     },
@@ -63,7 +63,7 @@
     "parent closure record after effectiveness confirmation"
   ],
   "zero_bug_guarantee": false,
-  "design_commit": "8a74b0b",
+  "design_commit": "82156eb79085fe9a55ffca506773e8da4676ca90",
   "design_artifacts": [
     "docs/contracts-observation-design.md",
     "docs/development-process.md",

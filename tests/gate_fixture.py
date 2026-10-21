@@ -13,7 +13,7 @@ SOURCE=Path(__file__).resolve().parents[1]
 class GateFixture:
     def __init__(self,root):
         self.root=Path(root)
-        for name in ['tools/project_gate.py','tools/build_lineage.py','development/standard/v1/workflow.py','firmware/tools/flash.sh']:
+        for name in ['AGENTS.md','tools/project_gate.py','tools/build_lineage.py','development/standard/v1/standard.md','development/standard/v1/workflow.py','development/standard/v1/route_evidence.py','firmware/tools/flash.sh']:
             p=self.root/name;p.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(SOURCE/name,p)
         (self.root/'.gitignore').write_text('/.gate/\n/sdk/\n/firmware/build/\n/firmware/devices/*/config.h\n/firmware/devices/*/board-id.txt\n__pycache__/\n')
         self.put('contracts/development-context.json',dict(active_change='FIXTURE'))
