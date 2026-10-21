@@ -1,5 +1,4 @@
 #include "usb_control.h"
-#if PM_USB_BUTTON_SIM || PM_ACK_PATH_PROBE || PM_EVENT_STREAM
 #include "ack_probe.h"
 #include "trace.h"
 #include "net.h"
@@ -30,7 +29,13 @@ static pm_observation_status observation_boundary(bool enabled){
 #define LEDGER 8u
 static struct {
     uint64_t boot,last_command,session;
-    unsigned state,used,head,count,ledger_next,reply_drops;
+    unsigned state,used,head,count,ledger_next,reply_drops,buttons;
+    uint8_t operations;
+    pm_input_handler input;
+    uint64_t input_last_id;
+    pm_operation input_last_operation;
+    pm_input_result input_last_result;
+    bool input_have_result;
     uint32_t now;
     bool overflow,connected,turn;
     char line[LINE],replies[2][REPLY];
@@ -47,19 +52,44 @@ static void response(const char *format,...){
     char line[REPLY];va_list args;va_start(args,format);int n=vsnprintf(line,sizeof line,format,args);va_end(args);
     if(n<0 || (size_t)n>=sizeof line){enqueue("usb error=response_length\n");return;}enqueue(line);
 }
-#if PM_USB_BUTTON_SIM || PM_TX_LINK_PROBE || PM_CYW43_INNER_PROBE || PM_EVENT_STREAM
 static bool hex(const char *s,uint64_t *v){
     if(!*s || strlen(s)>16)return false;
     *v=0;
     for(;*s;s++){unsigned c;if(*s>='0'&&*s<='9')c=(unsigned)(*s-'0');else if(*s>='a'&&*s<='f')c=(unsigned)(*s-'a'+10);else if(*s>='A'&&*s<='F')c=(unsigned)(*s-'A'+10);else return false;*v=(*v<<4)|c;}return true;
 }
-#endif
-void pm_usb_control_init(uint64_t boot,unsigned buttons){memset(&ctl,0,sizeof ctl);ctl.boot=boot?boot:1;pm_observation_init(ctl.boot);
+void pm_usb_control_init(uint64_t boot,unsigned buttons){memset(&ctl,0,sizeof ctl);ctl.boot=boot?boot:1;ctl.buttons=buttons;pm_observation_init(ctl.boot);
 #if PM_USB_BUTTON_SIM
     pm_sim_init(&ctl.sim,buttons);
 #else
     (void)buttons;
 #endif
+}
+void pm_usb_control_set_operations(uint8_t operations,pm_input_handler handler){
+    ctl.operations=operations&PM_OPERATION_MASK;ctl.input=handler;
+}
+static void input_reply(uint64_t id,pm_operation operation,pm_input_result result){
+    response("input result b=%llx id=%llx op=%s status=%s\n",(unsigned long long)ctl.boot,
+        (unsigned long long)id,pm_operation_name(operation),pm_input_result_name(result));
+}
+static void input_command(char **w,unsigned n){
+    if(n==2&&!strcmp(w[1],"CAPS")){
+        response("input caps b=%llx ops=%x keys=%u last_request_id=%llx\n",(unsigned long long)ctl.boot,ctl.operations,ctl.buttons,(unsigned long long)ctl.input_last_id);return;
+    }
+    uint64_t boot,id;pm_operation operation={0};
+    if(n!=5||strcmp(w[1],"DO")||!hex(w[2],&boot)||!hex(w[3],&id)||!id||
+       !pm_operation_from_name(w[4],&operation)){response("input error=syntax\n");return;}
+    if(boot!=ctl.boot){response("input error=boot\n");return;}
+    if(!ctl.connected){response("input error=disconnected\n");return;}
+    if(ctl.input_have_result&&id<=ctl.input_last_id){
+        if(id<ctl.input_last_id)response("input error=stale_id\n");
+        else if(operation.value!=ctl.input_last_operation.value)response("input error=conflict\n");
+        else input_reply(id,operation,ctl.input_last_result);
+        return;
+    }
+    if(ctl.count==2){response("input error=busy\n");return;}
+    pm_input_result result=ctl.input?ctl.input(operation):PM_INPUT_BUSY;
+    ctl.input_last_id=id;ctl.input_last_operation=operation;ctl.input_last_result=result;ctl.input_have_result=true;
+    input_reply(id,operation,result);
 }
 const pm_button_sim *pm_usb_sim_status(void){
 #if PM_USB_BUTTON_SIM
@@ -167,6 +197,7 @@ static void command(const char *line){
             (unsigned long long)s.first_lost,(unsigned long long)s.last_lost,s.enabled,s.saturated);return;
     }
 #endif
+    if(n && !strcmp(w[0],"INPUT")){input_command(w,n);return;}
     if(n && !strcmp(w[0],"AP2")){
         if(ctl.count){response("usb error=busy\n");return;}pm_ack_probe_command(canonical);
 #if PM_USB_BUTTON_SIM
@@ -243,4 +274,3 @@ void pm_usb_control_dispatched(pm_sim_dispatch event,uint64_t session,unsigned s
     (void)event;(void)session;(void)state;(void)now;
 #endif
 }
-#endif

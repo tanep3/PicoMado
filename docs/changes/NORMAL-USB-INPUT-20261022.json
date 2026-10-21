@@ -1,0 +1,38 @@
+{
+  "id": "NORMAL-USB-INPUT-20261022",
+  "title": "Normal terminal operation API and GPIO/USB adapters",
+  "status": "in_progress",
+  "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
+  "implementer": "normal-usb-input worker",
+  "design_commit": "fc25aacabc8ec69de52ad83830be246d61ed79dc",
+  "design_artifacts": [
+    "docs/changes/NORMAL-USB-INPUT-20261022.md"
+  ],
+  "stages": {
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "fc25aacabc8ec69de52ad83830be246d61ed79dc"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "in_progress",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}

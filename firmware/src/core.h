@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "input_types.h"
 #ifdef PM_USE_SAMPLE_CONFIG
 #include "config.sample.h"
 #else
@@ -43,6 +44,18 @@ bool pm_token_current(pm_token token, uint64_t incarnation, uint64_t session,
 
 typedef struct { bool raw, stable; uint32_t changed_ms; uint32_t held_ms; bool wake_reported, wake_armed; uint32_t press_long_ms; bool long_reported; } pm_button;
 bool pm_button_step(pm_button *button, bool pressed, uint32_t now_ms);
+
+// GPIO gesture bindings are data. The processor works for any layout length.
+typedef struct {
+    pm_operation short_operation,long_operation;
+    bool on_press,short_wakes,long_wakes;
+} pm_button_binding;
+const pm_button_binding *pm_button_binding_at(unsigned count,unsigned index);
+bool pm_button_binding_step(pm_button *button,const pm_button_binding *binding,
+    bool pressed,uint32_t now_ms,uint32_t long_ms,bool standby,
+    pm_operation *operation,bool *long_press);
+bool pm_button_event_is_long(unsigned count,unsigned index,unsigned logical);
+
 
 // Four-button POWER index2 wakes on the existing debounced press.
 // Two-button DOWN index1 wakes once after the configured long hold.

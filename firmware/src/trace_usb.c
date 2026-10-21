@@ -1,5 +1,4 @@
 #include "trace.h"
-#if PM_TRACE_ENABLE
 #include "hardware/sync.h"
 #include "tusb.h"
 size_t pm_trace_usb_write(const char *bytes,size_t length){
@@ -17,4 +16,3 @@ size_t pm_trace_usb_write(const char *bytes,size_t length){
     pm_stats_note(PM_STAT_USB_WRITE,started);
     return written;
 }
-#endif

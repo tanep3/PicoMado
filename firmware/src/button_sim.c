@@ -12,7 +12,7 @@ void pm_sim_cancel(pm_button_sim *s,pm_sim_reason why,uint32_t now) {
 }
 pm_sim_result pm_sim_begin(pm_button_sim *s,uint64_t job,unsigned n,uint64_t session,unsigned state,uint32_t now) {
     if(active(s))return PM_SIM_BUSY;
-    if(s->buttons!=2 && s->buttons!=4)return PM_SIM_UNSUPPORTED;
+    if(!pm_button_binding_at(s->buttons,0))return PM_SIM_UNSUPPORTED;
     if(!job || !n || n>PM_SIM_STEPS)return PM_SIM_INVALID;
     if(job<=s->last_job)return PM_SIM_OLD_JOB;
     unsigned buttons=s->buttons;bool connected=s->connected,ever=s->ever_connected;
@@ -38,7 +38,7 @@ pm_sim_result pm_sim_commit(pm_button_sim *s,uint64_t job,uint32_t now) {
     s->detached=true;s->phase=PM_SIM_WAIT_CLOSE;s->lease_end_ms=now+10000;return PM_SIM_OK;
 }
 pm_sim_result pm_sim_press(pm_button_sim *s,uint64_t job,unsigned key,uint32_t lease,uint64_t session,unsigned state,uint32_t now) {
-    if(s->buttons!=2 && s->buttons!=4)return PM_SIM_UNSUPPORTED;
+    if(!pm_button_binding_at(s->buttons,0))return PM_SIM_UNSUPPORTED;
     if(!s->connected || key>=s->buttons || lease<80 || lease>PM_SIM_HOLD_MAX_MS)return PM_SIM_INVALID;
     pm_sim_result r=pm_sim_begin(s,job,1,session,state,now);if(r!=PM_SIM_OK)return r;
     s->steps[0]=(pm_sim_step){.key=key,.present=true,.accepted=true,.logical=-1};
@@ -74,7 +74,7 @@ pm_sim_dispatch pm_sim_tick(pm_button_sim *s,bool connected,unsigned real_mask,b
     }
     if(!allowed){if(s->raw_down || s->virtual_button.stable)pm_sim_cancel(s,PM_SIM_CANCEL_BUSY,now);return out;}
     int event=pm_button_input_step(&s->virtual_button,s->buttons,v->key,s->raw_down,now,long_ms,standby);
-    if(event>=0)out=(pm_sim_dispatch){.valid=true,.logical=(unsigned)event,.step=s->current,.long_press=s->buttons==2 && (event==0 || event==2),.job=s->id};
+    if(event>=0)out=(pm_sim_dispatch){.valid=true,.logical=(unsigned)event,.step=s->current,.long_press=pm_button_event_is_long(s->buttons,v->key,(unsigned)event),.job=s->id};
     if(s->release_requested && !s->virtual_button.stable && !s->virtual_button.raw && due(now,s->release_ms+35)){
         v->released=true;v->released_ms=now;s->current++;s->release_requested=false;s->raw_down=false;memset(&s->virtual_button,0,sizeof s->virtual_button);
         if(s->current==s->count)s->phase=PM_SIM_DONE;

@@ -12,9 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "pico/stdlib.h"
-#if PM_ACK_PATH_PROBE || PM_USB_BUTTON_SIM || PM_EVENT_STREAM
 #include "pico/rand.h"
-#endif
 #include "pico/cyw43_arch.h"
 #include "pico/unique_id.h"
 #include "pico/stdio_usb.h"
@@ -209,9 +207,7 @@ static void log_usb_snapshot(void){
 #if PM_ACK_PATH_PROBE
     pm_ack_probe_live(session_epoch,state==ACTIVE);
 #endif
-#if PM_ACK_PATH_PROBE || PM_USB_BUTTON_SIM || PM_EVENT_STREAM
     if(connected)for(unsigned n=0;n<16;n++){int ch=getchar_timeout_us(0);if(ch<0)break;pm_usb_control_input(ch);}
-#endif
     pm_usb_control_poll(connected);
     if(connected && !was_connected)pm_net_rx_snapshot();
     pm_stats_usb_poll(connected);
@@ -1006,7 +1002,7 @@ static void poll_display(void){
     if(panel_standby && !pm_display_busy()){panel_standby=false;standby();}
 }
 #endif
-static void apply_local_input(pm_input_transition t,uint64_t accepted_us){
+static bool apply_local_input(pm_input_transition t,uint64_t accepted_us){
     if(t.clear_retained)retained_pixels=false;
     switch(t.action){
     case PM_INPUT_WAKE:start_wifi();break;
@@ -1022,16 +1018,17 @@ static void apply_local_input(pm_input_transition t,uint64_t accepted_us){
     case PM_INPUT_STANDBY:standby();break;
     case PM_INPUT_POWER:
         /* Completion is fed back before applying post-send local state. */
-        if(!send_button_input(7,"power",accepted_us)){retry();return;}
+        if(!send_button_input(7,"power",accepted_us)){retry();return false;}
         if(sub_mode){pending_sub_cancel=true;await_selection=true;reset_assembly();}
         else {pending_standby=true;await_selection=true;started_ms=now_ms();reset_assembly();}
         break;
-    case PM_INPUT_SUB:send_button_input(14,"enter_sub",accepted_us);break;
+    case PM_INPUT_SUB:return send_button_input(14,"enter_sub",accepted_us);
     case PM_INPUT_UP:case PM_INPUT_DOWN:
         if(t.await_before_send){await_selection=true;reset_assembly();}
-        send_button_input(t.action==PM_INPUT_UP?15:16,t.action==PM_INPUT_UP?"up":"down",accepted_us);break;
-    case PM_INPUT_IGNORE:break;
+        return send_button_input(t.action==PM_INPUT_UP?15:16,t.action==PM_INPUT_UP?"up":"down",accepted_us);
+    case PM_INPUT_IGNORE:return false;
     }
+    return true;
 }
 static void poll_switch_feedback(void){
     if(state!=ACTIVE || pending_standby){
@@ -1047,23 +1044,37 @@ static void poll_switch_feedback(void){
     if(pm_switch_request_hint(&switching,time_us_64()))
         pm_display_feedback(PM_DISPLAY_FEEDBACK_SHOW);
 }
-static void button_with_origin(unsigned i,bool long_press,unsigned origin){
-#if PM_DIAGNOSTIC_STAGE
-    pm_logf("diag button=%u state=%u\n",i,(unsigned)state);
+#ifndef PM_INPUT_OPERATIONS_MASK
+#define PM_INPUT_OPERATIONS_MASK PM_OPERATION_MASK
 #endif
+_Static_assert((PM_INPUT_OPERATIONS_MASK&~PM_OPERATION_MASK)==0,"unsupported operation capability bits");
+/* This is the one application operation API. Adapters supply a completed
+ * semantic operation; only GPIO/SIM adapters interpret physical gestures. */
+static pm_input_result perform_operation(pm_operation operation,unsigned origin,bool long_press){
+    bool blocked=false;
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+    blocked=panel_standby;
+#endif
+    pm_input_plan plan=pm_input_decide((pm_input_view){state,sub_mode,PM_INPUT_OPERATIONS_MASK,blocked},operation);
+    if(plan.result!=PM_INPUT_READY)return plan.result;
+    unsigned i=pm_operation_index(operation);pm_input_transition t=plan.transition;
     uint64_t op=pm_observe(PM_OB_INPUT,(uint16_t)i,PM_OB_RECEIVED,0,0,session_epoch,0,(uint32_t)state,(long_press?1u:0u)|(origin<<1));
-    pm_input_transition t=pm_input_decide((pm_input_view){state,PM_BUTTON_COUNT,sub_mode},i,long_press);
     pm_observe(PM_OB_INPUT,(uint16_t)i,PM_OB_DISPATCHED,op,0,session_epoch,0,t.action,t.await_before_send);
 #if PM_EVENT_STREAM
     uint64_t previous=input_operation;input_operation=op;
 #endif
-    apply_local_input(t,time_us_64());
+    bool ok=apply_local_input(t,time_us_64());
 #if PM_EVENT_STREAM
     input_operation=previous;
 #endif
-    pm_observe(PM_OB_INPUT,(uint16_t)i,PM_OB_COMPLETED,op,0,session_epoch,0,(uint32_t)state,t.action);
+    pm_observe(PM_OB_INPUT,(uint16_t)i,ok?PM_OB_COMPLETED:PM_OB_ERROR,op,0,session_epoch,0,(uint32_t)state,t.action);
+    return ok?PM_INPUT_DISPATCHED:PM_INPUT_FAILED;
 }
-static void button(unsigned i,bool long_press){button_with_origin(i,long_press,0);}
+static pm_input_result usb_operation(pm_operation operation){return perform_operation(operation,2,false);}
+static void button_with_origin(unsigned i,bool long_press,unsigned origin){
+    pm_operation operation;if(pm_operation_from_index(i,&operation))(void)perform_operation(operation,origin,long_press);
+}
+static inline void button(unsigned i,bool long_press){button_with_origin(i,long_press,0);}
 #if PM_DIAGNOSTIC_STAGE
 static void diagnostic_hold(uint32_t duration_ms,bool watch_buttons){
     static const char *names[PM_BUTTON_COUNT]={"SUB","UP","POWER","DOWN"};
@@ -1092,12 +1103,13 @@ static void poll_local_inputs(uint32_t now,bool allowed){
     if(!allowed)return;
     for(unsigned i=0;i<input_count();i++){
         bool was_pressed=buttons[i].stable;
-        int event=pm_button_input_step(&buttons[i],PM_BUTTON_COUNT,i,raw[i],now,settings.long_ms,state==STANDBY);
+        pm_operation operation;bool long_press;
+        bool event=pm_button_binding_step(&buttons[i],pm_button_binding_at(PM_BUTTON_COUNT,i),raw[i],now,
+            settings.long_ms,state==STANDBY,&operation,&long_press);
         if(!was_pressed && buttons[i].stable)pm_trace_event(PM_TRACE_BUTTON,0,(int32_t)i,(uint32_t)state);
-        if(event>=0){
-            bool long_press=PM_BUTTON_COUNT==2 && (event==0 || event==2);
-            if(state==ACTIVE)pm_ack_probe_button(session_epoch,display_epoch,owner_epoch,(unsigned)event,long_press);
-            button((unsigned)event,long_press);
+        if(event){
+            if(state==ACTIVE)pm_ack_probe_button(session_epoch,display_epoch,owner_epoch,pm_operation_index(operation),long_press);
+            (void)perform_operation(operation,0,long_press);
         }
     }
     if(synthetic.valid){
@@ -1116,13 +1128,10 @@ static void finish_loop(uint64_t started){
 }
 int main(void){
     stdio_init_all();
-#if PM_ACK_PATH_PROBE || PM_USB_BUTTON_SIM || PM_EVENT_STREAM
     uint64_t control_boot=((uint64_t)get_rand_32()<<32)|get_rand_32();
     pm_ack_probe_init_boot(control_boot);
     pm_usb_control_init(control_boot,input_count());
-#else
-    pm_ack_probe_init();
-#endif
+    pm_usb_control_set_operations(PM_INPUT_OPERATIONS_MASK,usb_operation);
     bool net_ok=pm_net_init();
 #if PM_AWAY_EEX1
     pm_endpoint_client_init(&endpoint_client,pm_endpoint_sdk_io());
@@ -1179,9 +1188,7 @@ int main(void){
         bool draining=panel_standby;
         poll_display();
         if(draining){
-#if PM_USB_BUTTON_SIM || PM_ACK_PATH_PROBE || PM_EVENT_STREAM
             poll_local_inputs(now,false);log_usb_snapshot();
-#endif
             finish_loop(loop_started);sleep_ms(5);continue;
         }
 #endif

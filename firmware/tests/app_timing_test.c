@@ -10,6 +10,7 @@
 #define main pm_firmware_entry
 #include PM_APP_MAIN_SOURCE
 #undef main
+#include "normal_usb_stubs.h"
 
 uint8_t test_flash_sector[4096];
 cyw43_t cyw43_state;
@@ -25,10 +26,12 @@ static bool sta_on,server_ready,welcome_available;
 static bool usb_connected;
 static bool drop_during_retry;
 uint64_t time_us_64(void){return (uint64_t)clock_ms*1000;}
-#if PM_TRACE_ENABLE
+#if PM_TRACE_ENABLE || defined(PM_TEST_REAL_USB_CONTROL)
 static bool trace_output;static char trace_text[32768];static size_t trace_used;
+static size_t trace_write_cap=SIZE_MAX;
 size_t pm_trace_usb_write(const char *p,size_t n){
     if(!trace_output)return 0;
+    if(n>trace_write_cap)n=trace_write_cap;
     assert(trace_used+n<sizeof trace_text);
     memcpy(trace_text+trace_used,p,n);trace_used+=n;trace_text[trace_used]=0;return n;
 }

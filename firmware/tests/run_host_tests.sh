@@ -88,6 +88,9 @@ done
 
 build switch-feedback tests/switch_feedback_test.c src/core.c
 run switch-feedback
+python3 tests/input_types_test.py
+build button-bindings tests/button_bindings_test.c src/core.c
+run button-bindings
 build input tests/input_test.c src/core.c
 run input
 build eink-pending tests/eink_pending_test.c src/core.c
@@ -126,7 +129,7 @@ run eink-feedback-absent
 for device in E-ink_0 E-ink_1; do
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 \
         '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
-        -I"devices/$device" -Isrc -Itests/app_stubs tests/eink_app_test.c src/core.c src/video.c \
+        -I"devices/$device" -Isrc -Itests/app_stubs tests/eink_app_test.c src/core.c src/video.c src/trace.c \
         -o "$work/eink-app-$device"
     run "eink-app-$device"
 done
@@ -152,6 +155,25 @@ build switch-app-trace-off -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=0 \
     '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
     -Itests/app_stubs tests/switch_feedback_app_test.c src/core.c src/video.c src/trace.c src/rx_stats.c
 run switch-app-trace-off
+
+# Normal operation transport exists with every optional diagnostic disabled.
+for device in sample-a E-ink_0 E-ink_1; do
+    for trace in 0 1; do
+        cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=$trace \
+            '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
+            -I"devices/$device" -Isrc -Itests/app_stubs tests/normal_usb_api_test.c src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c \
+            -o "$work/normal-usb-$device-$trace"
+        run "normal-usb-$device-$trace"
+    done
+done
+build normal-usb-restricted -DPM_INPUT_OPERATIONS_MASK=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=0 \
+    '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
+    -Itests/app_stubs tests/normal_usb_api_test.c src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c
+run normal-usb-restricted
+build normal-usb-ap2 -DPM_ACK_PATH_PROBE=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 \
+    '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
+    -Itests/app_stubs tests/normal_usb_api_test.c src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c src/ack_probe.c
+run normal-usb-ap2
 
 # Exercise the same production LCD parser and functional deadlines without diagnostics.
 build control-trace-off -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=0 \

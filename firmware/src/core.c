@@ -63,37 +63,66 @@ bool pm_button_step(pm_button *b, bool pressed, uint32_t now_ms) {
     return false;
 }
 
+// Composition data for the existing boards; gesture processing below has no
+// knowledge of a button count. Custom layouts can call the same processor.
+static const pm_button_binding four_bindings[]={
+    {{PM_OP_SUB},{0},true,false,false},{{PM_OP_UP},{0},true,false,false},
+    {{PM_OP_POWER},{0},true,true,true},{{PM_OP_DOWN},{0},true,false,false}
+};
+static const pm_button_binding two_bindings[]={
+    {{PM_OP_UP},{PM_OP_SUB},false,false,false},
+    {{PM_OP_DOWN},{PM_OP_POWER},false,false,true}
+};
+const pm_button_binding *pm_button_binding_at(unsigned count,unsigned index){
+    const pm_button_binding *bindings=count==4?four_bindings:count==2?two_bindings:NULL;
+    return bindings&&index<count?&bindings[index]:NULL;
+}
+bool pm_button_event_is_long(unsigned count,unsigned index,unsigned logical){
+    const pm_button_binding *b=pm_button_binding_at(count,index);
+    return b&&!b->on_press&&pm_operation_index(b->long_operation)==logical;
+}
 bool pm_button_wakes(unsigned count,unsigned index,bool long_press){
-    return (count==4 && index==2) || (count==2 && index==1 && long_press);
+    const pm_button_binding *b=pm_button_binding_at(count,index);
+    return b&&(long_press?b->long_wakes:b->short_wakes);
 }
 bool pm_button_wake_step(pm_button *b,unsigned count,unsigned index,
                          bool pressed,uint32_t now,uint32_t long_ms){
+    const pm_button_binding *binding=pm_button_binding_at(count,index);if(!binding)return false;
     bool edge=pm_button_step(b,pressed,now);
     if(edge){b->held_ms=now;b->wake_reported=false;b->wake_armed=true;}
     if(!b->stable){b->wake_reported=false;b->wake_armed=false;return false;}
-    if(count==4)return edge && pm_button_wakes(count,index,false);
-    if(count!=2 || !long_ms || !b->wake_armed || b->wake_reported || !pressed ||
-       (uint32_t)(now-b->held_ms)<long_ms)return false;
-    if(!pm_button_wakes(count,index,true))return false;
+    if(binding->on_press)return edge&&binding->short_wakes;
+    if(!long_ms||!b->wake_armed||b->wake_reported||!pressed||
+       (uint32_t)(now-b->held_ms)<long_ms||!binding->long_wakes)return false;
     b->wake_reported=true;return true;
 }
-
+bool pm_button_binding_step(pm_button *b,const pm_button_binding *binding,bool pressed,
+                         uint32_t now,uint32_t long_ms,bool standby,
+                         pm_operation *operation,bool *long_press){
+    if(!binding||!operation||!long_press||!pm_operation_valid(binding->short_operation))return false;
+    bool was_stable=b->stable,edge=pm_button_step(b,pressed,now);
+    if(binding->on_press){
+        if(!edge||(standby&&!binding->short_wakes))return false;
+        *operation=binding->short_operation;*long_press=false;return true;
+    }
+    if(edge){b->held_ms=now;b->press_long_ms=long_ms;b->long_reported=false;b->wake_armed=true;}
+    if(b->stable&&pressed&&b->wake_armed&&!b->long_reported&&
+       pm_operation_valid(binding->long_operation)&&(uint32_t)(now-b->held_ms)>=b->press_long_ms){
+        b->long_reported=true;
+        if(standby&&!binding->long_wakes)return false;
+        *operation=binding->long_operation;*long_press=true;return true;
+    }
+    if(was_stable&&!b->stable){
+        bool short_press=b->wake_armed&&!b->long_reported;b->wake_armed=false;
+        if(short_press&&(!standby||binding->short_wakes)){
+            *operation=binding->short_operation;*long_press=false;return true;
+        }
+    }
+    return false;
+}
 int pm_button_input_step(pm_button *b,unsigned count,unsigned index,bool pressed,
                          uint32_t now,uint32_t long_ms,bool standby){
-    bool was_stable=b->stable;
-    bool edge=pm_button_step(b,pressed,now);
-    if(count==4)return edge && (!standby || index==2)?(int)index:-1;
-    if(count!=2 || index>=2)return -1;
-    if(edge){b->held_ms=now;b->press_long_ms=long_ms;b->long_reported=false;b->wake_armed=true;}
-    if(b->stable && pressed && b->wake_armed && !b->long_reported &&
-       (uint32_t)(now-b->held_ms)>=b->press_long_ms){
-        b->long_reported=true;
-        return !standby || index==1?(index==0?0:2):-1;
-    }
-    if(was_stable && !b->stable){
-        bool short_press=b->wake_armed && !b->long_reported;
-        b->wake_armed=false;
-        return short_press && !standby?(index==0?1:3):-1;
-    }
-    return -1;
+    pm_operation operation;bool held;
+    return pm_button_binding_step(b,pm_button_binding_at(count,index),pressed,now,long_ms,
+        standby,&operation,&held)?(int)pm_operation_index(operation):-1;
 }

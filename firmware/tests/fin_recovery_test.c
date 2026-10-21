@@ -15,6 +15,7 @@
 #endif
 #include PM_TEST_APP_MAIN_SOURCE
 #undef main
+#include "normal_usb_stubs.h"
 
 uint8_t test_flash_sector[4096];
 cyw43_t cyw43_state;
