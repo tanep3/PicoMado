@@ -1,0 +1,62 @@
+{
+  "id": "OBS-20261021-01",
+  "title": "Observation domain ownership and enforced development route",
+  "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
+  "implementer": "independent prevention worker",
+  "status": "in_progress",
+  "cause": "Meaning-distinct facts and lifecycle/completion judgments were represented as raw counters/dicts across adapters.",
+  "introduction_cause": "StreamStatus fell through identity extraction; controller/observer interval and durable evidence were not an aggregate boundary.",
+  "escape_cause": "Fixture expectations followed implementation structure and passing counts; no shared mandatory root/ship gate or structural ownership enforcement.",
+  "domain_authority": "docs/contracts-observation-design.md#obs-20261021-01-observation-domain",
+  "standard": "development/standard/v1/standard.md",
+  "stages": {
+    "design": {
+      "state": "in_progress",
+      "evidence": []
+    },
+    "implementation": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  },
+  "dependencies": [
+    "Preserve capacity WIP six hashes and accepted firmware/server artifacts",
+    "Parent independently owns final acceptance",
+    "External protection/permission changes separately authorized"
+  ],
+  "deliverables": [
+    "semantic values and aggregate-owned completion",
+    "minimal reusable standard + project-specific boundary configuration",
+    "root CLI/CI/build/pre-write route",
+    "structural and historical-fault refusal evidence",
+    "active-route adoption record"
+  ],
+  "unapplied": [
+    "implementation",
+    "independent review",
+    "canonical work-route integration",
+    "external CI branch protection",
+    "OS write restriction"
+  ],
+  "completion_evidence_required": [
+    "fixed design and implementation commits",
+    "static/compiler refusal logs S01-S05",
+    "historical rejection R01-R03 and pre-write G01",
+    "independent review pinned to implementation",
+    "active AGENTS/root route invocation proof",
+    "parent closure record after effectiveness confirmation"
+  ],
+  "zero_bug_guarantee": false
+}

@@ -97,3 +97,38 @@ Pico は既存 trace の32件キューを共用する。EV1 有効後は通常�
 [2026-10-20の手押し結果](manual-switch-analysis-20261020.md)では、4操作の正の入力→描画事実を得た一方、動画中のsource queue欠測885件により採取全体はincompleteだった。C-03の有界・非待機・通常機能独立と、C-08の欠測を成功にしない方針を維持し、source境界・排出・cold startの不足を[修正前契約](observation-runtime-gap-contract.md)と[検証条件](observation-runtime-gap-verification.md)で具体化した。
 
 入力受付・TCP COPY受理・output呼出し・実linkoutput・kernel受理・対向API受付・物理描画を区別する。今回測れていないserver Network／Pico RX・TCP境界をcoverage済みとせず、根因の仮説を実装へ先取りしない。runtimeコードはこのフィードバックでは変更していない。
+
+## OBS-20261021-01 observation domain
+
+This section is the project domain-model authority for the prevention change. [Process](development-process.md) and [change state](changes/OBS-20261021-01.json) reference it instead of duplicating completion rules. A small `contracts/observation-domain.json` is its executable representation.
+
+### Language and ownership
+
+- `PicoSendAttemptOrdinal`: encoded send attempts, including a failed COPY; it is not a delivery count. `TcpCopyRange` describes accepted bytes, not transmission or reception.
+- `HostDecodedOrdinal` and `HostProcessedOrdinal`: receive decode and successful processing facts. Match to send attempts only through an origin mapping under the checked boot/run/session/generation; never compare unrelated counters directly.
+- `PicoMicros`, `HostProbeMicros`, `PiMonotonicNs`: distinct clock domains. Only Pi controller/observer boundaries share a clock; no cross-endpoint subtraction.
+- `MeasurementAssessment`: immutable pure judgment of captured facts, not durable success. `VerifiedEvidence`: capability issued only by the shared evidence verifier after mandatory files, binding, hashes and frozen digests. `CaptureWindow`: aggregate owning draft → assessed → confirmed/rejected and the sole completed report. `RunOutcome`: capture result plus cleanup outcome, owned by orchestration.
+
+Data definitions have no IO. Pure rules and transitions depend only on data/model. Evidence/USB/network/filesystem adapters depend on the domain; the domain never imports them. The runner orders effects through existing owner/session abstractions, and does not reconstruct domain completion. Concrete plugins stay outside this boundary.
+
+### State tables
+
+| Owner | Event | Allowed transition | Rejection |
+|---|---|---|---|
+| Pico private aggregate | ARM | IDLE→PREPARED/ARMED | retained/mode/run mismatch |
+| Pico | gate close/open | PREPARED↔ARMED | never starts recording |
+| Pico | proper input or periodic event | ARMED→RECORDING | wrong mode does not impersonate origin |
+| Pico | deadline/manual freeze | ARMED/RECORDING/PREPARED→FROZEN | cannot erase retained data |
+| Pico | verified release | FROZEN→IDLE | digest mismatch |
+| Host private aggregate | arm/decoded/freeze/release | IDLE→ARMED→RECORDING→FROZEN→IDLE | ordinal/session/binding mismatch freezes as failure |
+| Evidence aggregate | assess raw facts | DRAFT→ASSESSED | may produce an incomplete assessment only |
+| Evidence aggregate | confirm assessment + verified evidence | ASSESSED→CONFIRMED/REJECTED | no capability means no success |
+| Orchestration | cleanup | confirmed capture + IDLE + closed owner→successful run | retained/unknown state cannot become success |
+
+Generated wrappers/transitions and private aggregate APIs implement these boundaries. C/Rust compiler negatives and configured static checks reject direct state writes outside the aggregate transition implementation, different semantic counter comparison, domain→IO imports, and adapter-built complete results. Python cannot provide compile-time opacity; private capability checks and static rejection cover ordinary supported code, not deliberate reflection/monkey-patching.
+
+### Required refusal evidence (fixed before implementation)
+
+S01 different send/receive ordinal or clock types cannot be assigned/compared via public C/Rust API. S02 direct aggregate state assignment is rejected. S03 domain imports USB/filesystem/subprocess or a concrete plugin are rejected. S04 an adapter constructing complete=True or an unverified completion is rejected. S05 generated drift is rejected. R01 original StreamStatus identity defect is rejected using real WireMessage/Decoder and the aggregate. R02 short/missing observer boundaries stay incomplete. R03 five JSON files / missing or altered raw / missing manifest fail the actual offline CLI. G01 stale source receipt, changed artifact, absent approval fail offline pre-write checks before picotool. Positive controls must continue to pass. No unsafe operation is invoked to demonstrate a denial.
+
+The current duration P3 remains separately recorded; prevention does not claim that host tests prove device behavior or zero bugs.
