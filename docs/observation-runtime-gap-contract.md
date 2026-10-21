@@ -40,6 +40,7 @@
 
 ## R-04: 採取開始と品質を分離する
 
+- 採取区間の開始は一つという不変条件と、応答前後・異常終了を含む [境界状態遷移表](capture-boundary-state-contract.md) を適用する。区間内の追加beginはseqが異なっても品質エラーであり、正常な終了境界を足しても完全性へ復帰しない。オンライン/保存後解析は実beginを含む同じ状態機械を使う。
 - ON/OFFはenable状態の変更、実境界の予約、返信watermarkのsnapshotを短い同一のIRQ禁止区間で確定する。入れ子の既存producer/snapshot helperがIRQを復帰しても外側の禁止を維持する。返信の整形・enqueue・USB IOは外へ出す。ON復帰直後のIRQ事実はbeginより後のseqとして保存し、ON返信をbegin以外のseqへ進めない。OFF復帰後のproducerは無効状態を見て新しい事実を作らない。境界予約がfullなら従来どおりdrop/unknownを保持する。
 - 現在区間のbeginはON応答前後を通じて一度だけ受理する。同じboot/seqのbeginが再度来た場合、同じ内容でも品質エラーとし、causal_readyとcausal_completeをfalseにする。ON応答前の有界preludeを照合する際も重複を消さない。応答前の保存factを内部で再検査することと、実入力で二度届くことを区別する。別boot、違うseq、reorder、prelude overflowも従来のunknown/品質判定を維持する。
 - DTR立上りの既存統計snapshotは、同じexclusive ownerで読み終えてから採取区間を始める。snapshotは私有preludeとして保全する。開始待ちを、待機前に作った古いnowからの返信期限へ算入しない。
