@@ -1,0 +1,445 @@
+{
+  "recorded_at_utc": "2026-10-21T00:43:05.179584+00:00",
+  "design_commit": "1b39771caf855e10049613536e60046674f1f1b3",
+  "runtime_commit": "4563976f35d894359337bd75da8e600ae7d5240c",
+  "independent_review_sha256": "2829ea83151de442ed3d71a5bed0055d98f8aa0f0da953a6baa11d94277de51e",
+  "supersedes_runtime": "58b6d14a021985fd88b190b0d70a4133a70c29ea",
+  "corrected_findings": [
+    "P2 atomic ON/OFF enable-marker-watermark with formatting outside mask",
+    "P2 matching begin accepted once before/after ON reply; duplicate invalidates readiness/completeness"
+  ],
+  "tests": {
+    "host_PASS_lines": 175,
+    "collector_named_tests": 27,
+    "duplicate_fresh_PTY_cases": 6,
+    "direct_ack_fragmentation_cases": 10,
+    "causal_parser": 10,
+    "usb_tx_python": 28,
+    "contract": "passed",
+    "contract_ASan_UBSan": "passed; LSan disabled due ptrace",
+    "ARM_configurations": 4,
+    "final_failures": 0
+  },
+  "source_hashes": {
+    "firmware/src/usb_control.c": "b061b5c81b38e7d2a6edbc0a33d3496b89259a124feb87f85217c377cdee80a4",
+    "firmware/tests/event_collector_test.py": "1f9f49e1ffde7ade6877b50c141886d261bc707ac0935d19e2298ec5efe33307",
+    "firmware/tests/observation_boundary_irq_test.c": "66068eb8ddb87c54d6b7b69c53ad4868df2be377fc7e3ed8db4838f1cd8bac49",
+    "firmware/tests/observation_boundary_irq_test.py": "2afe36d894f8ce53c99169d0de04575e9f51bb3c203e227abaf3dc110832b5b0",
+    "firmware/tests/run_contract_tests.sh": "cd1005f8bb0671db49b3d2938062c589f60f339e80896c2c88c9ffa06157e27a",
+    "firmware/tools/event_stream.py": "8018b8bc87c67ff337dffa822832c5b00e48dd9f6c826ccacfc4db8261d6684d"
+  },
+  "unaffected_source_hashes_match": {
+    "firmware/src/main.c": true,
+    "firmware/src/net.c": true,
+    "firmware/src/net.h": true,
+    "firmware/src/observation.h": true,
+    "firmware/src/observation_transport.h": true,
+    "firmware/src/trace.c": true,
+    "firmware/src/tx_link_probe.c": true,
+    "firmware/src/tx_link_probe.h": true,
+    "firmware/tests/app_timing_test.c": true,
+    "firmware/tests/eink_app_test.c": true,
+    "firmware/tests/event_causality_test.py": true,
+    "firmware/tests/net_socks_test.c": true,
+    "firmware/tests/net_stubs/lwip/tcp.h": true,
+    "firmware/tests/observation_drain_test.c": true,
+    "firmware/tests/observation_net_test.c": true,
+    "firmware/tests/observation_transport_test.c": true,
+    "firmware/tests/tx_adapter_test.c": true,
+    "firmware/tools/event_causality.py": true,
+    "service/src/network_observation_tests.rs": true,
+    "service/src/observation.rs": true,
+    "service/src/protocol.rs": true,
+    "service/src/socket_progress.rs": true,
+    "service/src/transport.rs": true
+  },
+  "server_source_unchanged": true,
+  "server_tests": "previous fixed 297/all +273/default +1/bin inherited, not rerun for this firmware/collector-only correction",
+  "server_binary_sha256_inherited": "db81e9f7ec6f4c72f79b13d7db44bcf3d6a62626c8a1d4569ad8639d2fa7b2a0",
+  "firmware_snapshot_matches": true,
+  "log_evidence": {
+    "gap-p2-contract.log": {
+      "sha256": "522d60b19f377c98bb54e866411269f93a56f87fbc9e7d23034239022a0fc0c0",
+      "bytes": 2027
+    },
+    "gap-p2-contract-sanitized.log": {
+      "sha256": "8e793b46b07e460e847495b0647d6a3dea762a6c29d2ddae294da657dc7da8b7",
+      "bytes": 2027
+    },
+    "gap-p2-host.log": {
+      "sha256": "f348e90c2f66140efca2a39b035786b4ad845bd1541dc703d614fe82c1865274",
+      "bytes": 31718
+    },
+    "gap-p2-usb-tx.log": {
+      "sha256": "fe33deefbc43c3c33386bbf111fde408df934fae8d5830aa45d1072d34c4ab68",
+      "bytes": 1677
+    },
+    "gap-p2-causality.log": {
+      "sha256": "516f75532a3a991d36247f403d2b616b69d72d342cbb7e9485b6f9397a677b05",
+      "bytes": 109
+    },
+    "gap-p2-collector.log": {
+      "sha256": "3e29ddfac9c12ccc21710adc9d17b915562e7b64c962367abac72ff3628445e3",
+      "bytes": 126
+    },
+    "gap-p2-evidence/irq.log": {
+      "sha256": "bb2c2ff34fbf93c32b29f306909c86b1ca890dbd3af0e551a692a7ec1099bd6b",
+      "bytes": 258
+    },
+    "gap-p2-evidence/duplicate-recheck-fixed.log": {
+      "sha256": "78d9efb746e7e591d34f6eba2e49ae0b6c6006c51df99a2f789216fa66c18131",
+      "bytes": 2030
+    }
+  },
+  "saved_raw_evidence": {
+    "gap-p2-evidence/irq.events": {
+      "sha256": "f5de8a583eecf25d91910a067e612bf1518df2ea8443b3077cd7cac2cc22662b",
+      "bytes": 548
+    },
+    "gap-p2-evidence/duplicate-verified/device.jsonl": {
+      "sha256": "a08421632241e3c366d3db8c9a92248ecf65aacfd3e0ad93b52e9534d8aabfe1",
+      "bytes": 2202
+    },
+    "gap-p2-evidence/duplicate-verified/device.jsonl.summary.json": {
+      "sha256": "f5cbd080896bdcc85c650a4885872a73035d3ec710b958ba9b5d72053b2685dc",
+      "bytes": 1588
+    }
+  },
+  "builds": {
+    "PicoMado-lcd1": {
+      "uf2_sha256": "fd19ace94a80c0baf9ad97ed9e97255aca563045ee428efd1ac7aad52a2d8e3a",
+      "elf_sha256": "827f556716e32d4afbf78a78406ae3963d85a5ef07eb1c83c76983626af2edd8",
+      "memory": {
+        "static_main_ram": 251064,
+        "linker_heap_possible": 11080,
+        "stack_reservation": 4096
+      },
+      "memory_delta_vs_58b6d14": 0,
+      "private_config_preserved": true,
+      "flags": {
+        "PM_EVENT_STREAM": "ON",
+        "PM_STREAM_DIAGNOSTICS": "ON",
+        "PM_ACK_PATH_PROBE": "ON",
+        "PM_USB_BUTTON_SIM": "ON",
+        "PM_TX_LINK_PROBE": "ON",
+        "PM_CYW43_INNER_PROBE": "ON",
+        "PM_AWAY_EEX1": "ON",
+        "PM_EEX1_PORT": "48116",
+        "PM_DEVICE": "PicoMado-lcd1",
+        "PM_USE_SAMPLE": "OFF",
+        "PM_PREPARE_UNBOUND": "OFF",
+        "PM_PREPARE_UNBOUND_PANEL": "OFF",
+        "PICO_BOARD": "pico_w",
+        "CMAKE_BUILD_TYPE": "Release",
+        "PICO_SDK_SUBMODULE_AUTO_UPDATE": "OFF",
+        "PICO_SDK_FETCH_FROM_GIT": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "usb_control_function_stack": [
+        {
+          "function": "guard_run.part.0",
+          "bytes": 56,
+          "kind": "static"
+        },
+        {
+          "function": "response",
+          "bytes": 160,
+          "kind": "static"
+        },
+        {
+          "function": "command.constprop",
+          "bytes": 608,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_init",
+          "bytes": 24,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_sim_status",
+          "bytes": 0,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_input",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_poll",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_tick",
+          "bytes": 56,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_dispatched",
+          "bytes": 24,
+          "kind": "static"
+        }
+      ]
+    },
+    "E-ink_0": {
+      "uf2_sha256": "e35762cf007c9e2408e941049beeef9e625acc3bd074948fd50d46adf8338f35",
+      "elf_sha256": "5e23e6d926c861e4d8b02476afe7b50e355f9b28c901160f17c0e1093ee21b03",
+      "memory": {
+        "static_main_ram": 181208,
+        "linker_heap_possible": 80936,
+        "stack_reservation": 4096
+      },
+      "memory_delta_vs_58b6d14": 8,
+      "private_config_preserved": true,
+      "flags": {
+        "PM_EVENT_STREAM": "ON",
+        "PM_STREAM_DIAGNOSTICS": "ON",
+        "PM_ACK_PATH_PROBE": "ON",
+        "PM_USB_BUTTON_SIM": "ON",
+        "PM_TX_LINK_PROBE": "ON",
+        "PM_CYW43_INNER_PROBE": "ON",
+        "PM_AWAY_EEX1": "ON",
+        "PM_EEX1_PORT": "48116",
+        "PM_DEVICE": "E-ink_0",
+        "PM_USE_SAMPLE": "OFF",
+        "PM_PREPARE_UNBOUND": "OFF",
+        "PM_PREPARE_UNBOUND_PANEL": "OFF",
+        "PICO_BOARD": "pico_w",
+        "CMAKE_BUILD_TYPE": "Release",
+        "PICO_SDK_SUBMODULE_AUTO_UPDATE": "OFF",
+        "PICO_SDK_FETCH_FROM_GIT": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "usb_control_function_stack": [
+        {
+          "function": "guard_run.part.0",
+          "bytes": 56,
+          "kind": "static"
+        },
+        {
+          "function": "response",
+          "bytes": 160,
+          "kind": "static"
+        },
+        {
+          "function": "command.constprop",
+          "bytes": 608,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_init",
+          "bytes": 24,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_sim_status",
+          "bytes": 0,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_input",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_poll",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_tick",
+          "bytes": 56,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_dispatched",
+          "bytes": 24,
+          "kind": "static"
+        }
+      ]
+    },
+    "E-ink_1": {
+      "uf2_sha256": "dce2aed6f0909a0254ffbb16f3d80368193c8c79abe3653a61e90a2b077c5486",
+      "elf_sha256": "0057d138fa609997f90a0b8d0caf27da57f7a571abee195a4cfbf637f8f50758",
+      "memory": {
+        "static_main_ram": 180612,
+        "linker_heap_possible": 81532,
+        "stack_reservation": 4096
+      },
+      "memory_delta_vs_58b6d14": 0,
+      "private_config_preserved": true,
+      "flags": {
+        "PM_EVENT_STREAM": "OFF",
+        "PM_STREAM_DIAGNOSTICS": "ON",
+        "PM_ACK_PATH_PROBE": "ON",
+        "PM_USB_BUTTON_SIM": "ON",
+        "PM_TX_LINK_PROBE": "ON",
+        "PM_CYW43_INNER_PROBE": "ON",
+        "PM_AWAY_EEX1": "ON",
+        "PM_EEX1_PORT": "48116",
+        "PM_DEVICE": "E-ink_1",
+        "PM_USE_SAMPLE": "OFF",
+        "PM_PREPARE_UNBOUND": "OFF",
+        "PM_PREPARE_UNBOUND_PANEL": "OFF",
+        "PICO_BOARD": "pico_w",
+        "CMAKE_BUILD_TYPE": "Release",
+        "PICO_SDK_SUBMODULE_AUTO_UPDATE": "OFF",
+        "PICO_SDK_FETCH_FROM_GIT": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "usb_control_function_stack": [
+        {
+          "function": "guard_run.part.0",
+          "bytes": 56,
+          "kind": "static"
+        },
+        {
+          "function": "response",
+          "bytes": 160,
+          "kind": "static"
+        },
+        {
+          "function": "command.constprop",
+          "bytes": 592,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_init",
+          "bytes": 24,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_sim_status",
+          "bytes": 0,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_input",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_poll",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_tick",
+          "bytes": 56,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_dispatched",
+          "bytes": 24,
+          "kind": "static"
+        }
+      ]
+    },
+    "PicoMado-lcd1-off": {
+      "uf2_sha256": "3da9da4ad4c412fb29162af6f81569bc90f15e95a1bb485037eb06b6f3f413ce",
+      "elf_sha256": "5c83262c0a154c9b70a6e51e646576248cb7e98fe38640e1ef1b984506fcb664",
+      "memory": {
+        "static_main_ram": 250376,
+        "linker_heap_possible": 11768,
+        "stack_reservation": 4096
+      },
+      "memory_delta_vs_58b6d14": 0,
+      "private_config_preserved": true,
+      "flags": {
+        "PM_EVENT_STREAM": "OFF",
+        "PM_STREAM_DIAGNOSTICS": "ON",
+        "PM_ACK_PATH_PROBE": "ON",
+        "PM_USB_BUTTON_SIM": "ON",
+        "PM_TX_LINK_PROBE": "ON",
+        "PM_CYW43_INNER_PROBE": "ON",
+        "PM_AWAY_EEX1": "ON",
+        "PM_EEX1_PORT": "48116",
+        "PM_DEVICE": "PicoMado-lcd1",
+        "PM_USE_SAMPLE": "OFF",
+        "PM_PREPARE_UNBOUND": "OFF",
+        "PM_PREPARE_UNBOUND_PANEL": "OFF",
+        "PICO_BOARD": "pico_w",
+        "CMAKE_BUILD_TYPE": "Release",
+        "PICO_SDK_SUBMODULE_AUTO_UPDATE": "OFF",
+        "PICO_SDK_FETCH_FROM_GIT": "OFF",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      },
+      "usb_control_function_stack": [
+        {
+          "function": "guard_run.part.0",
+          "bytes": 56,
+          "kind": "static"
+        },
+        {
+          "function": "response",
+          "bytes": 160,
+          "kind": "static"
+        },
+        {
+          "function": "command.constprop",
+          "bytes": 592,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_init",
+          "bytes": 24,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_sim_status",
+          "bytes": 0,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_input",
+          "bytes": 8,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_poll",
+          "bytes": 16,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_tick",
+          "bytes": 56,
+          "kind": "static"
+        },
+        {
+          "function": "pm_usb_control_dispatched",
+          "bytes": 24,
+          "kind": "static"
+        }
+      ]
+    }
+  },
+  "fixture_setup_attempts": [
+    {
+      "action": "supplementary saved IRQ binary compile",
+      "reason": "relative output path typo",
+      "resolution": "absolute output path compile and saved IRQ/canonical tests passed"
+    },
+    {
+      "action": "saved independent duplicate reproduction",
+      "reason": "AF_UNIX IPC path too long; command sends=0",
+      "resolution": "short fresh /tmp IPC path and separate output directory; saved raw reproduction passed"
+    }
+  ],
+  "scope": {
+    "SSH": false,
+    "USB": false,
+    "hardware_updates": false,
+    "service_operations": false,
+    "push": false,
+    "SDK_modified": false,
+    "configuration_and_binding_preserved": true
+  },
+  "limits": [
+    "same-core IRQ fixture is not an actual hardware occurrence",
+    "static RAM and .su are not dynamic heap/stack/IRQ/RF measurements",
+    "physical delay effect not verified; root cause remains unidentified"
+  ],
+  "remaining_blockers": []
+}

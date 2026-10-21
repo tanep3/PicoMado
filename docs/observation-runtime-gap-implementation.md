@@ -4,6 +4,8 @@
 
 固定実装は `58b6d14a021985fd88b190b0d70a4133a70c29ea`。[検証checkpoint](checkpoints/20261021/observation-runtime-gap.json) にsource/log/artifact SHA、構成、資源量、完了件数を保存した。最終全feature/default/host/contract/collector/releaseの実行sessionは全てexit 0を確認済み。
 
+その後の独立レビューでON/OFF原子性・重複beginのP2 2件が見つかった。修正固定版 `4563976` と再検証結果は [P2修正報告](observation-runtime-gap-p2-verification.md) を参照する。以下は初回固定版の履歴であり、P2受入済みの記録ではない。
+
 ## 実装した境界
 
 EV1の76B body、CRC、通常API、送信bool、ACK、選択・設定・並び順は維持する。新catalogは3。Pico coverageは0x9f、serverはNetwork追加で0xef。parserはcatalog2も読めるが、旧sourceへ新しい境界の網羅性を付与しない。
