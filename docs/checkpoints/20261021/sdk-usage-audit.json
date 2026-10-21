@@ -1,0 +1,207 @@
+{
+  "environment": {
+    "sdk_path": "/home/tane/dev/PicoW/pico-sdk",
+    "sdk_commit": "079c6f39023649b154152db30f1d781e884879bc",
+    "sdk_version": "2.3.1",
+    "CYW43_commit": "c1075d4bc440422cf2b2fd12c64a1f53f77660ee",
+    "lwIP_commit": "0a0452b2c39bdd91e252aef045c115f88f6ca773",
+    "lwIP_version": "2.2.0",
+    "sdk_gitlinks": {
+      "CYW43": "055d64274b014dd7b1c2fc94d26e8a18face7124",
+      "lwIP": "77dcd25a72509eb83f72b033d219b1d40cd8eb95"
+    },
+    "selected_arch": "pico_cyw43_arch_lwip_threadsafe_background",
+    "poll_target_present_only_as_other_diagnostic_target": true,
+    "current_CMakeCache_reused_by_OFF_test": true,
+    "running_UF2_sha256": "fd19ace94a80c0baf9ad97ed9e97255aca563045ee428efd1ac7aad52a2d8e3a",
+    "original_CYW43_ll_sha256": "a4e6baa503b9332a0a445c8b22deb4bee62793c441dc74a200b0fe8065c397c7",
+    "private_CYW43_ll_sha256": "769485c707d80f7841a60f626a735d6001eef1948d8a1dfa425538764010746d",
+    "shared_SDK_source_edits": false,
+    "build_dir": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/gap-p2-build/firmware/build/PicoMado-lcd1",
+    "source_dir": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/gap-p2-build/firmware",
+    "provenance_limit": "SDK/submodule commits read from present checkout; pre-build commit snapshot not yet located; source hashes/TU dependencies and archived ELF will be cross-checked"
+  },
+  "git_history": {
+    "SDK": [
+      {
+        "commit": "079c6f39023649b154152db30f1d781e884879bc",
+        "selector": "HEAD@{2026-10-11T11:32:44+09:00}",
+        "action": "pull: Fast-forward"
+      },
+      {
+        "commit": "9a4113fbbae65ee82d8cd6537963bc3d3b14bcca",
+        "selector": "HEAD@{2025-07-21T19:13:01+09:00}",
+        "action": "clone (URL omitted)"
+      }
+    ],
+    "CYW43": [
+      {
+        "commit": "c1075d4bc440422cf2b2fd12c64a1f53f77660ee",
+        "selector": "HEAD@{2025-07-23T14:54:16+09:00}",
+        "action": "checkout: moving from main to c1075d4bc440422cf2b2fd12c64a1f53f77660ee"
+      },
+      {
+        "commit": "dd7568229f3bf7a37737b9e1ef250c26efe75b23",
+        "selector": "HEAD@{2025-07-23T14:53:29+09:00}",
+        "action": "clone (URL omitted)"
+      }
+    ],
+    "lwIP": [
+      {
+        "commit": "0a0452b2c39bdd91e252aef045c115f88f6ca773",
+        "selector": "HEAD@{2025-07-23T14:54:16+09:00}",
+        "action": "checkout: moving from master to 0a0452b2c39bdd91e252aef045c115f88f6ca773"
+      },
+      {
+        "commit": "b1edb7780f5f7192cb4a7751f89d4eb6a19ad67f",
+        "selector": "HEAD@{2025-07-23T14:53:33+09:00}",
+        "action": "clone (URL omitted)"
+      }
+    ],
+    "matching_prior_SDK_tag_gitlinks": [
+      {
+        "tag": "2.0.0",
+        "tree": "160000 commit faf36381bad1f668a30172b6336c9a970966ef4c\tlib/cyw43-driver\n160000 commit 0a0452b2c39bdd91e252aef045c115f88f6ca773\tlib/lwip\n"
+      },
+      {
+        "tag": "2.1.0",
+        "tree": "160000 commit cf924bb04c8984675ca0fc2178f082e404e048c3\tlib/cyw43-driver\n160000 commit 0a0452b2c39bdd91e252aef045c115f88f6ca773\tlib/lwip\n"
+      },
+      {
+        "tag": "2.1.0-correct-picotool",
+        "tree": "160000 commit cf924bb04c8984675ca0fc2178f082e404e048c3\tlib/cyw43-driver\n160000 commit 0a0452b2c39bdd91e252aef045c115f88f6ca773\tlib/lwip\n"
+      },
+      {
+        "tag": "2.1.1",
+        "tree": "160000 commit c1075d4bc440422cf2b2fd12c64a1f53f77660ee\tlib/cyw43-driver\n160000 commit 0a0452b2c39bdd91e252aef045c115f88f6ca773\tlib/lwip\n"
+      },
+      {
+        "tag": "2.1.1-correct-picotool",
+        "tree": "160000 commit c1075d4bc440422cf2b2fd12c64a1f53f77660ee\tlib/cyw43-driver\n160000 commit 0a0452b2c39bdd91e252aef045c115f88f6ca773\tlib/lwip\n"
+      }
+    ]
+  },
+  "pinned_diff_summary": {
+    "cyw43-driver": {
+      "local_only": 0,
+      "pinned_only": 15
+    },
+    "lwip": {
+      "local_only": 0,
+      "pinned_only": 94,
+      "src/core/tcp.c_unchanged": true,
+      "src/core/timeouts.c_unchanged": true
+    }
+  },
+  "effective_macros": {
+    "derived_from_current_compile_database": true,
+    "restored_only_EVENT_STREAM_ON_from_archived_build_record": true,
+    "macros": {
+      "PM_LCD_BLK_PIN": "22",
+      "CYW43_PIN_WL_CS": "CYW43_DEFAULT_PIN_WL_CS",
+      "PM_ACK_PATH_PROBE": "1",
+      "PM_EEX1_PORT": "48116",
+      "NDEBUG": "1",
+      "TCP_SND_QUEUELEN": "((4 * TCP_SND_BUF + TCP_MSS - 1) / TCP_MSS)",
+      "NO_SYS": "1",
+      "PM_TX_LINK_PROBE": "1",
+      "PM_TRACE_ENABLE": "1",
+      "PM_LCD_PIN_SCK": "18",
+      "CYW43_PIN_WL_DATA_IN": "CYW43_DEFAULT_PIN_WL_DATA_IN",
+      "PM_LCD_PIN_DC": "20",
+      "PM_LCD_PIN_RESET": "21",
+      "CYW43_ENABLE_BLUETOOTH": "(0)",
+      "PBUF_POOL_SIZE": "24",
+      "PM_LCD_PIN_CS": "17",
+      "LWIP_TCPIP_CORE_LOCKING": "1",
+      "TCP_SND_BUF": "(8 * TCP_MSS)",
+      "PM_TRACE_VERBOSE": "0",
+      "LWIP_NETCONN": "0",
+      "CYW43_PIN_WL_CLOCK": "CYW43_DEFAULT_PIN_WL_CLOCK",
+      "TCP_WND": "(16 * TCP_MSS)",
+      "LIB_PICO_ASYNC_CONTEXT_THREADSAFE_BACKGROUND": "1",
+      "MEM_SIZE": "16000",
+      "PM_CYW43_INNER_PROBE": "1",
+      "PM_EVENT_STREAM": "1",
+      "CYW43_SPI_PIO": "1",
+      "PM_LCD_PIN_MOSI": "19",
+      "CYW43_LWIP": "1",
+      "LWIP_NETIF_TX_SINGLE_PBUF": "1",
+      "CYW43_PIN_WL_HOST_WAKE": "CYW43_DEFAULT_PIN_WL_HOST_WAKE",
+      "PM_USB_BUTTON_SIM": "1",
+      "CYW43_PIN_WL_DATA_OUT": "CYW43_DEFAULT_PIN_WL_DATA_OUT",
+      "MEMP_NUM_TCP_SEG": "32",
+      "PM_AWAY_EEX1": "1",
+      "LWIP_STATS": "1",
+      "CYW43_USE_SPI": "1",
+      "PICO_CYW43_ARCH_THREADSAFE_BACKGROUND": "1",
+      "PM_TRACE_STATS": "1",
+      "MEM_LIBC_MALLOC": "0",
+      "TCP_MSS": "1460",
+      "MEM_ALIGNMENT": "4",
+      "LWIP_SOCKET": "0"
+    }
+  },
+  "source_files_verified": 78,
+  "SDK_source_after": {
+    "SDK": {
+      "commit": "079c6f39023649b154152db30f1d781e884879bc",
+      "tracked_source_diff": []
+    },
+    "CYW43": {
+      "commit": "c1075d4bc440422cf2b2fd12c64a1f53f77660ee",
+      "tracked_source_diff": []
+    },
+    "lwIP": {
+      "commit": "0a0452b2c39bdd91e252aef045c115f88f6ca773",
+      "tracked_source_diff": []
+    }
+  },
+  "tests": {
+    "SDK_driver_scenarios": 18,
+    "native_ASan_UBSan_ON_OFF_equal": true,
+    "RX_flow_host_test_passed": true,
+    "document_and_saved_page_checks": 234,
+    "saved_READ8_full_pages": 37
+  },
+  "findings": [
+    {
+      "id": "SDK-A01",
+      "classification": "suspected serialization gap",
+      "location": "main.c282-287 -> SDK cyw43_arch.c36-44 -> cyw43_lwip.c243-263",
+      "causal_link_to_delay": "unproven; no reconnect in captured heartbeat window"
+    },
+    {
+      "id": "SDK-A02",
+      "classification": "confirmed long-mask path; duration unmeasured",
+      "location": "main.c259-266,settings_message627-645/api_settings793-795",
+      "causal_link_to_delay": "unproven; no kind3 decoded in five captured input windows"
+    },
+    {
+      "id": "SDK-A03",
+      "classification": "failure policy tradeoff",
+      "location": "net.c263-321",
+      "detail": "ERR_MEM ends transport instead of preserving unqueued message and retrying; tcp_output result diagnostic while COPY enqueue bool is unchanged",
+      "causal_link_to_delay": "not observed in missing heartbeat"
+    }
+  ],
+  "artifact_root": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-usage-audit-20261021T030739Z",
+  "artifact_sha256": {
+    "environment-early.json": "2d5e4f7f9e801865cf3e1b7a28850dd2553bddcc9e1cdfe9be253bca14340b25",
+    "CYW43-vs-SDK-gitlink.stat.txt": "0e4da6d2b3cfefb838d9f26369422a159cd98db181c51476e6eed0db21bf97c6",
+    "source-evidence-manifest.json": "c30f28ce99b5941b20688d6f65f7e943fd26c017065afe4458ec9f5f16fc7e39",
+    "capacity-document-validation.json": "426773724c2e88ee18444d2c94a9aecb8853fff533b9a7352b761d659a3a9556",
+    "lwIP-vs-SDK-gitlink.diff": "0f4f49f69d99bafd86a30c09436d4a7e67aea78c51bd5137c6ed34f5fe2b261e",
+    "pinned-difference-summary.json": "b777cc1e39317a6a67d299c53900c0a4814611cb2779308010293d647c40dd7f",
+    "git-provenance-history.json": "9f7fc642cbb9ff35e01dda8a6e3342f2a633e4f936fa4fd7ac3f758934d027ef",
+    "lwIP-vs-SDK-gitlink.stat.txt": "f775be918a98d4b5dd90d140602bb959b531dfca0335638c8bcb851f2ad36f0c",
+    "archived-ELF-symbols.txt": "63e0a8fe074ead6817c1af04f679b9ea4228517a1df408c4669f455559e2c517",
+    "CYW43-vs-SDK-gitlink.diff": "a0007d2546ec44b9536a9c663bfecc37cd451320b8c24ee036dbc4f670d25f59",
+    "rx-flow-test": "dee11a0d21d7d1c63232ae085416e434e7bcec2d5e1b5887fea4aac077671415",
+    "effective-macros.json": "cccf4d0748522c21ca991887bebef3629d20179de6d7d40936735b7f2c9fc386",
+    "saved-runtime-stats.json": "d563e04f61e10848d89a7f4bb64932b16919b333670166dd556ae825b701633e"
+  },
+  "runtime_or_shared_SDK_modified": false,
+  "firmware_USB_service_operation": false,
+  "capacity_implementation_started": false
+}

@@ -21,16 +21,20 @@ SDK lock/IRQ内でdrainしない。必須順序は「26 offerを18.215ms中drain
 | class | arrival上限 | payload/wire上限 |
 | --- | --- | --- |
 | 観測O | 50＋600t records | 76B / 84B |
-| control C（SIM/AP2/OBS返信全部） | 10＋40t records | 143B / 151B |
+| control C（SIM/AP2/OBS返信全部） | 10＋80t records | 143B / 151B |
 | 通常text/timing T | 2＋20t records | 143B / 151B |
 
-AP2 READ8のheader＋8行＋end＝10行burstをCへ含め、SIM GET等も別腹にしない。DTR大量snapshotは観測OFFのpreludeへ保存。観測中text40行/s、control80行/s、AP2 burst11/17、O burst51/64/128も範囲外stressで試す。
+AP2 READ8はheader＋各recordのidentity/data 16行＋end＝**18行**（ack_probe.c:168–179）。元の25ms/行を保持し、AP2全返信の到着曲線をA(t)≤1＋40t、SIM/OBS/TX/CY等の他controlをU(t)≤9＋40tとする。C合算は10＋80t。READ8の18行を瞬時burst18にせず、0,25,…,425msの合法生成をfixtureに含める。18行の最短生成span425msは、page全体の最大待ちではない。
 
-実測518.362/sの84B化だけで43,542.411B/s＋他出力。検証範囲R600ではO50,400＋C6,040＋T3,020＝59,460B/s。最低物理排出能力を全class backlog時80,000B/s、最大連続USB zeroを10msとする。これは未測定の合格条件で、累積zero回数から導出した値ではない。
+生成してqueueへ投入した単一C frameの最終byteまで150ms条件を維持。AP2 poll間隔≤50msも追加の未実証gateに置き、command受理から各line offerまで最悪75ms、18行のend出力まで18×75＋150＝1500msをpage条件とする。既存4秒host timeoutを変えず、25ms pacingを削除/まとめ生成して合格させない。
+
+これらは許容負荷/試験曲線で、現実の無制限command spamが自動でこの上限に収まる主張ではない。SIM/OBS等をAP2に独立加算した上で検査し、C全体と各内訳の両方を満たすこと。DTR大量snapshotは観測OFFのpreludeへ保存。text40行/s、U control80行/s、C burst11/18瞬時、O burst51/64/128も範囲外stressで試す。
+
+実測518.362/sの84B化だけで43,542.411B/s＋他出力。検証範囲R600ではO50,400＋C12,080＋T3,020＝65,500B/s。最低物理排出能力を全class backlog時80,000B/s、最大連続USB zeroを10msとする。これは未測定の合格条件で、累積zero回数から導出した値ではない。
 
 SDK/描画/zero/packet化を全て含め、classごとにS_i(t)≥R_i×max(0,t−0.050) byteを要求。R_O=56,000、R_C=16,000、R_T=8,000 B/s。work-conserving DRR重み7:2:1、候補byte quanta1120/320/160、record境界だけで切替。deficitは持越すが2quantum＋最大frame以内。重み設定だけでserviceを証明せず、合法interleave全てで下限を検査する。
 
-drain1回の8write/1024B/500µs上限とzero時即戻りを維持。時間はwrite前予算判定で、割込みを含む絶対wall-time上限とは呼ばない。上のserviceからbacklog上限O80/C12/T3。必要容量候補O84（通常82＋begin/end専用2）、C16、T4。queue→最終byteの待ち条件は通常control150ms（50ms＋1510/16000＝144.375ms）、O130ms、T90ms。ON/OFF/FORMATはwatermark barrier込み400msを別上限とする。
+drain1回の8write/1024B/500µs上限とzero時即戻りを維持。時間はwrite前予算判定で、割込みを含む絶対wall-time上限とは呼ばない。上のserviceからbacklog上限O80/C14/T3。必要容量候補O84（通常82＋begin/end専用2）、C16、T4。Cはbacklog14に対し1枠をbusy/拒否の確定返信用へ予約し、残り1枠を保持余裕とする。予約済みC slotなしにmode/owner変更を適用しない。queue→最終byteの待ち条件は通常control150ms（50ms＋1510/16000＝144.375ms）、O130ms、T90ms。ON/OFF/FORMATはwatermark barrier込み400msを別上限とする。
 
 zero11/50/100ms、service79,999B/sなども試す。USB不通で有限wire応答を保証できない場合、アプリを待たせず既存host4秒timeoutでunknown/uncertainとし再送しない。性能条件違反と完全性を混同しない。事実が全保存できた場合の完全性は実証で判定し、loss/CRC/境界/返信不明は従来どおりincomplete。範囲外性能を合格に偽装しない。
 
@@ -46,13 +50,21 @@ parser buffer304B、readは残空き以内、1回scan/CRCは4候補まで。inva
 
 ON/OFFのenable・境界fact・watermarkは従来の同一短時間IRQ禁止区間で確定。専用begin/end2枠を維持。lifecycle返信は対象watermarkまでのO frameが全byte出力済みになるまで非blocking保留し、OFF ACKがend factより先に出る退行を防ぐ。global barrierは1件だけ。OFF後もqueue排出を継続し、アプリはUSBを待たない。400ms条件外で応答不明なら再実行しない。
 
+## AP2 / EV1 overlayと保持の追加条件
+
+[資源比較](observation-resource-reallocation.md)のAP2/EV1 ring排他overlayを推奨候補とする。AP2 ARM/PREPARED/RECORDING/FROZEN/READ中はAP2所有。FROZENは保存digest照合済みRELEASEまで保持し、READ18行生成中・C queue内・serializer partialのいずれかにそのrunの未完了frameがあれば、RELEASE/EV1移譲をbusy確定応答で拒否する。新ownerのために自動破棄しない。
+
+EV1 OFF後もend watermarkまでのO queue/partialとlifecycle ACKの出力完了まではEV1所有。AP2 ARMとEV1 ONは相互busyとし、拒否返信用C枠を確保してから判定を確定する。busyを単なる無応答/timeoutで代用せず、元nonce/runに対応付ける。USB不通は別途unknownで、state適用済みと推測しない。
+
+overlayではAP2とEV1を同時採取できない。上のO＋C最大値の合算65,500B/sは安全側のservice試験用上限で、同時実機採取可能性を示さない。AP2 modeではO=0、EV1 modeではAP2取得不可・拒否返信はUへ含める。別runのSDK観測とEV1事実を同じ操作の因果証拠として合成しない。共通条件の対照比較は別trialとしてboot/run・観測方式・限界を表示する。
+
 ## RAM・counterの実装前gate
 
 候補layoutはO native68B（17×32bit word、boot共有、64bit値は2wordでIRQ内copy）×84、C148B×16、T既存native160B×4＝8720B。旧32×160＝5120Bとの差3600B、新管理/format/barrier/検証counterを96B以下、総増分3696B。unaligned pointer参照/IRQ内formatを避け、mainでwire変換する。sizeof/static_assert/mapで実寸確認。
 
-現在static251064B/heap可能11080Bから計算上残7384Bで、要求heap8192Bへ808B不足する。このlayout候補はRAM gate不合格であり、設計未確定・実装禁止。最低808Bの追加回収または同じburstを覆う別の証明済みservice/格納方式が必要。stack予約4096Bは保持する。下限を勝手に下げず、レビューへ戻す。動的heap/stack使用の確認も必要で、linker値だけで保証しない。
+現在static251064B/heap可能11080Bから計算上残7384Bで、要求heap8192Bへ808B不足する。独立layoutはRAM gate不合格。overlay候補はAP2 record5376BとO ring5712Bをunion化し、C2368B/T640B/管理上限256Bを含め旧比1520B回収、heap計算上12600B。ただしsizeof/map・実heap/stack・80KB/s/50ms service・AP2 poll間隔は未実証gateであり、設計最終受入れ/実装は保留。stack予約4096Bは保持する。下限を勝手に下げず、レビューへ戻す。動的heap/stack使用の確認も必要で、linker値だけで保証しない。
 
-必要counterは最大input-poll間隔、observer IRQ禁止、USB zero連続span、format/write時間を既存pageへ有界・非再帰に追加し96Bへ含める。per-poll/per-byteログを増やさず、未計測値をhost mockから補わない。
+必要counterは最大input-poll間隔、observer IRQ禁止、USB zero連続span、format/write時間を既存pageへ有界・非再帰に追加し、overlay候補では全管理上限256Bへ含める。独立layout試算は96Bだった点を区別する。per-poll/per-byteログを増やさず、未計測値をhost mockから補わない。
 
 ## observer effect・受入条件
 

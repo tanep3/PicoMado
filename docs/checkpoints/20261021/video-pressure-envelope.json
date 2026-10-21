@@ -32,8 +32,20 @@
     },
     "C": {
       "burst": 10,
-      "rate": 40,
-      "wire": 151
+      "rate": 80,
+      "wire": 151,
+      "components": {
+        "AP2": {
+          "burst": 1,
+          "rate": 40,
+          "minimum_line_spacing_us": 25000,
+          "READ8_lines": 18
+        },
+        "other_SIM_OBS_TX_CY": {
+          "burst": 9,
+          "rate": 40
+        }
+      }
     },
     "T": {
       "burst": 2,
@@ -62,11 +74,41 @@
     "old_possible_heap": 11080,
     "new_possible_heap_lower_bound": 7384,
     "required_heap_floor": 8192,
-    "shortfall_to_required_floor": 808
+    "shortfall_to_required_floor": 808,
+    "overlay": {
+      "old_trace_and_AP2": 10496,
+      "union": 5712,
+      "control": 2368,
+      "text": 640,
+      "management_max": 256,
+      "total": 8976,
+      "saved": 1520,
+      "possible_heap": 12600,
+      "measured": false
+    }
   },
   "control_wait_ms": 150,
   "lifecycle_wait_ms": 400,
   "physical_measurements_unavailable": true,
   "design_resolved": false,
-  "implementation_blocker": "source B40 fails witnessed90offers/69.890ms; B50 requires at least808B additional RAM recovery to retain8KiB heap floor"
+  "implementation_blocker": "overlay chosen as recommended candidate; real sizeof/map/heap/stack, service80KBps/latency50ms/USBzero10ms, AP2 poll gap50ms, retention/busy/partial contracts remain unproven; implementation held",
+  "backlog_record_bounds": {
+    "O": 80,
+    "C": 14,
+    "T": 3
+  },
+  "combined_maximum_wire_rate": 65500,
+  "AP2_page": {
+    "records": 8,
+    "header_lines": 1,
+    "record_lines": 16,
+    "end_lines": 1,
+    "total_lines": 18,
+    "minimum_generation_span_us": 425000,
+    "required_max_producer_poll_gap_us": 50000,
+    "command_to_last_byte_gate_us": 1500000,
+    "actual_producer_poll_gap_measured": false
+  },
+  "mutually_exclusive_observation_modes": true,
+  "cross_run_causal_composition_allowed": false
 }
