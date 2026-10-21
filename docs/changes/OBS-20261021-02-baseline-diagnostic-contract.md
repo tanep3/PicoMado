@@ -12,6 +12,20 @@ The measurement blocker is narrower than the delay cause: a strict same-prefix c
 
 ## Diagnostic contract before implementation
 
+The first bounded hardware attempt exposed an adapter defect before host arm: `AP2 STATUS.gen=15` uses `%u` (decimal), while `AP2 LIVE.gen=f` uses `%x` (hexadecimal). Both mean connection generation 15. A string comparison rejected a valid binding, and the previous mock generation 1 concealed it. The introduction cause is the unseparated boundary between formatted wire strings and semantic values. The receive adapter must parse both into the same immutable `PicoConnectionGeneration` value before preparation decisions; callers must not compare or reinterpret raw `gen` strings. This also applies to the post-arm `AP2 LIVE` and ready manifest generation.
+
+| Field in this capture path | Wire representation | Meaning in preparation |
+| --- | --- | --- |
+| `AP2 STATUS.gen` / `AP2 LIVE.gen` | decimal `%u` / hex `%x` | one Pico connection generation, not host connection ID |
+| `TX1 STATUS.gen` / `CY1 STATUS.gen` | hex `%x` / hex `%x` | the same Pico connection generation in frozen quality evidence |
+| `AP2 STATUS.state`, `AP2 LIVE.state`, `active`, `EV1 on/sat` | decimal `%u` | state, booleans |
+| `AP2 LIVE.session`, `buttons`, `begin`, `trigger`; `AP2 TRIGGER.o/g/m/flags` | hex `%x`/`%llx` | Pico session, button counts, Pico microseconds, send-attempt ordinals, flags |
+| `EV1 seq`; Pico boot/run | hex `%llx` | source sequence and opaque identity |
+| host `status.connection/session/last_message` | JSON integers | accepted connection, session, processed ordinal; never compare connection to generation |
+| controller request/response bracket | monotonic nanoseconds | Pi-only interval; never subtract Pico microseconds or host probe microseconds |
+
+`AP2 STATUS`, `AP2 LIVE`, and `AP2 TRIGGER` keep their original wire format and immutable raw evidence. Small adapter snapshots expose parsed fields for decisions. Malformed or out-of-range values refuse preparation before host arm. A real `pico_fields` parse of the saved `15/f` replies and a fresh mock with generation 15 are required regression cases. No firmware or SDK change is needed.
+
 The host `status.last_message` is a processed ordinal, scoped to its accepted connection and session. The current firmware `AP2 LIVE` has no live message ordinal: `AP2 TRIGGER.o` remains the immutable ARM snapshot and `g` remains the gate-close snapshot. An additive read-only ordinal is a deferred proposal outside this change. A read has only its own endpoint's timing; controller monotonic times bracket the request/response and must not be subtracted from Pico or host clocks.
 
 On a host arm refusal, the preparation adapter saves the existing pre-arm host status, the Pico origin and live reading, the single arm request outcome, and a new post-refusal host status and Pico live reading where the owner remains trustworthy. Each sample carries controller monotonic request/response brackets. A status failure is recorded as unavailable, never translated into a baseline value. Existing freeze/save/release cleanup remains authoritative. No automatic retry or subtract-six adjustment is introduced.

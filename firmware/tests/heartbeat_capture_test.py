@@ -79,6 +79,13 @@ class Validation(unittest.TestCase):
     def test_exact_target(self):
         self.assertTrue(self.result(fixture())['measurement_complete'])
 
+    def test_generation_quality_compares_decoded_values(self):
+        f=fixture();f[0]['status']['gen']='01'
+        f[2]['tx_status']['gen']='01';f[2]['SDK_inner']['status']['gen']='01'
+        self.assertTrue(self.result(f)['measurement_complete'])
+        f[2]['SDK_inner']['status']['gen']='02'
+        self.assertFalse(self.result(f)['measurement_complete'])
+
     def test_origin_and_copy_fault_matrix(self):
         faults = [lambda f:f[2]['trigger'].update(g='8'),
                   lambda f:f[2]['trigger'].update(flags='1'),
@@ -164,7 +171,7 @@ class Validation(unittest.TestCase):
 class Prepare(unittest.TestCase):
     class USB:
         fd=7
-        def __init__(self):self.calls=[];self.old_caps=False;self.old_live=False;self.state='0';self.generation=1
+        def __init__(self):self.calls=[];self.old_caps=False;self.old_live=False;self.state='0';self.generation=1;self.live_generation=None
         def request(self,command,prefix):
             self.calls.append(command)
             if command=='AP2 CAPS':return ['ap2 caps v=3 hb=1 event=19' if not self.old_caps else 'ap2 caps v=2']
@@ -173,7 +180,7 @@ class Prepare(unittest.TestCase):
             if command.startswith('AP2 ARM_HB'):self.state='4'
             if prefix=='ap2 status ':return [f'ap2 status boot=1 run={"0" if self.state=="0" else "a"} state={self.state} gen={self.generation}']
             if command=='AP2 TRIGGER':return ['ap2 trigger b=1 r=a mode=1 o=7 g=7 m=0 flags=0']
-            if command=='AP2 LIVE':return [f'ap2 live boot=1 session=9 active=1 gen={self.generation:x} buttons=0 begin=0 state=4 trigger=0'+('' if self.old_live else ' message=7')]
+            if command=='AP2 LIVE':return [f'ap2 live boot=1 session=9 active=1 gen={self.generation if self.live_generation is None else self.live_generation:x} buttons=0 begin=0 state=4 trigger=0'+('' if self.old_live else ' message=7')]
             raise AssertionError(command)
     def host(self,log,bad=False):
         state=dict(phase='idle',boot='host',run='0',target='lcd',heartbeat_trigger=1,connection=431,session=9,last_message=7)
@@ -245,6 +252,16 @@ class Prepare(unittest.TestCase):
             self.assertEqual(ready['generation'],15)
             bracket=json.loads((Path(d)/'baseline-before-arm.json').read_text())
             self.assertEqual(bracket['pico_before']['value']['gen'],'f')
+    def test_distinct_generation_refuses_before_host_arm(self):
+        usb=self.USB();usb.generation=15;usb.live_generation=14;calls=[]
+        with tempfile.TemporaryDirectory()as d:
+            with self.assertRaisesRegex(ValueError,'Pico binding changed'):
+                hc.prepare(usb,self.host(calls),'lcd','a',Path(d))
+        self.assertFalse(any(q['op']=='arm' for q in calls))
+    def test_generation_wire_overflow_refused_by_receive_adapter(self):
+        status=hc.ap.pico_fields('ap2 status boot=1 run=0 state=0 gen=4294967296')
+        with self.assertRaisesRegex(ValueError,'wire overflow'):
+            hc.ap.pico_status_view(status)
     def test_observation_finite_and_finally_restores_DTR(self):
         for fail in [False,True]:
             log=[]

@@ -9,6 +9,9 @@ class IntegrityFacts:
     tx_digest: bool
     cy_schema: bool
     cy_digest: bool
+    pico_generation: bool
+    tx_generation: bool
+    cy_generation: bool
 
 def coverage_ok(headers):
     try:
@@ -48,7 +51,7 @@ def assess(pico, host, extra, ready, headers, integrity):
     ck(ps['boot'] == tr['b'] == ready['pico_boot'] and ps['run'] == tr['r'] == ready['run'], 'Pico identity')
     ck(tr['mode'] == '1' and int(tr['o'], 16) == int(tr['g'], 16) == baseline
        and int(tr['m'], 16) == target and int(tr['flags'], 16) == 0, 'gate/target provenance')
-    ck(ps['state'] == '3' and int(ps['over']) == 0 and int(ps['gen']) == ready['generation'], 'Pico quality/generation')
+    ck(ps['state'] == '3' and int(ps['over']) == 0 and integrity.pico_generation, 'Pico quality/generation')
     ck(integrity.pico_digest, 'Pico digest')
     ck(not any(pico[k] for k in ['prepared_input_detected', 'observation_usb_overlap_detected', 'post_freeze_buttons_detected']), 'USB/input quality')
     ck(not any(r['event'] in [1, 24] for r in rows), 'unexpected input')
@@ -85,11 +88,11 @@ def assess(pico, host, extra, ready, headers, integrity):
     ck(integrity.host_digest, 'host digest')
     ck(int(pico['window']['trigger'], 16) > 0 and int(pico['window']['freeze'], 16) - int(pico['window']['trigger'], 16) >= 20000000
        and hs['trigger_us'] > 0 and hs['freeze_us'] - hs['trigger_us'] >= 20000000, 'full separate20s windows')
-    ck(ts['b'] == ready['pico_boot'] and ts['r'] == ready['run'] and ts['gen'] == format(ready['generation'], 'x')
+    ck(ts['b'] == ready['pico_boot'] and ts['r'] == ready['run'] and integrity.tx_generation
        and ts['active'] == '0' and ts['ok'] == '1' and all(int(ts[k], 16) == 0 for k in ['over', 'bad', 'changed']), 'TX quality')
     ck(integrity.tx_digest, 'TX digest')
     ck(integrity.cy_schema and inner['status']['b'] == ready['pico_boot'] and inner['status']['r'] == ready['run']
-       and inner['status']['gen'] == format(ready['generation'], 'x') and inner['status']['active'] == '0', 'CY binding/schema')
+       and integrity.cy_generation and inner['status']['active'] == '0', 'CY binding/schema')
     ck(inner['no_diagnostic_loss'] and not any(int(inner['status'][k], 16) for k in ['over', 'inc', 'changed'])
        and not any(int(inner['quality'][k], 16) for k in ['sat', 'depth', 'reject']), 'CY loss')
     ck(integrity.cy_digest, 'CY digest')

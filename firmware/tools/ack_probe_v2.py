@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Explicit ACK probe control. Plan only unless --execute; no fixed device defaults."""
 import argparse,fcntl,hashlib,json,os,select,socket,struct,termios,time,tempfile
+from dataclasses import dataclass
 from pathlib import Path
 RECORD=struct.Struct('<QQQIIIIIIHHB3x')
 WINDOW_SECONDS=20.0
@@ -8,6 +9,84 @@ SETTLE_SECONDS=WINDOW_SECONDS+0.1
 
 def pico_fields(line):
     return dict(v.split('=',1) for v in line.split()[2:] if '=' in v)
+
+def _wire_uint(fields,key,base,bits):
+    """Decode one firmware-formatted unsigned field at the receive boundary."""
+    raw=fields.get(key)
+    digits='0123456789' if base==10 else '0123456789abcdefABCDEF'
+    if not isinstance(raw,str) or not raw or any(c not in digits for c in raw):
+        raise ValueError('invalid Pico '+key+' wire value')
+    value=int(raw,base)
+    if value >= 1<<bits:raise ValueError('Pico '+key+' wire overflow')
+    return value
+
+@dataclass(frozen=True)
+class PicoConnectionGeneration:
+    value: int
+
+    def __post_init__(self):
+        if type(self.value) is not int or not 0 <= self.value < 1<<32:
+            raise ValueError('invalid Pico connection generation')
+
+@dataclass(frozen=True)
+class PicoProbeStatus:
+    boot: str
+    run: str
+    state: int
+    generation: PicoConnectionGeneration
+
+@dataclass(frozen=True)
+class PicoProbeLive:
+    boot: str
+    session: int
+    active: bool
+    state: int
+    generation: PicoConnectionGeneration
+    buttons: int
+    begin: int
+    trigger_us: int
+
+@dataclass(frozen=True)
+class PicoProbeTrigger:
+    boot: str
+    run: str
+    mode: int
+    origin: int
+    gate: int
+    message: int
+    flags: int
+
+@dataclass(frozen=True)
+class PicoEv1Status:
+    boot: str
+    sequence: int
+    enabled: bool
+    saturated: bool
+
+def pico_status_view(fields):
+    return PicoProbeStatus(fields['boot'],fields['run'],_wire_uint(fields,'state',10,32),
+                           PicoConnectionGeneration(_wire_uint(fields,'gen',10,32)))
+
+def pico_live_view(fields):
+    active=_wire_uint(fields,'active',10,1)
+    return PicoProbeLive(fields['boot'],_wire_uint(fields,'session',16,64),bool(active),
+                         _wire_uint(fields,'state',10,32),
+                         PicoConnectionGeneration(_wire_uint(fields,'gen',16,32)),
+                         _wire_uint(fields,'buttons',16,32),_wire_uint(fields,'begin',16,32),
+                         _wire_uint(fields,'trigger',16,64))
+
+def pico_trigger_view(fields):
+    return PicoProbeTrigger(fields['b'],fields['r'],_wire_uint(fields,'mode',10,32),
+                            _wire_uint(fields,'o',16,32),_wire_uint(fields,'g',16,32),
+                            _wire_uint(fields,'m',16,32),_wire_uint(fields,'flags',16,32))
+
+def pico_ev1_view(fields):
+    return PicoEv1Status(fields['b'],_wire_uint(fields,'seq',16,64),
+                         bool(_wire_uint(fields,'on',10,1)),bool(_wire_uint(fields,'sat',10,1)))
+
+def pico_hex_generation_view(fields):
+    """TX1/CY1 use hexadecimal generation, unlike AP2 STATUS."""
+    return PicoConnectionGeneration(_wire_uint(fields,'gen',16,32))
 
 def fnv(rows):
     h=2166136261

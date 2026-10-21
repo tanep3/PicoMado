@@ -37,22 +37,26 @@ def prepare(usb, host, device, run, out):
     require(getattr(usb, 'fd', None) is not None, 'single USB owner required')
     require(one(usb, 'AP2 CAPS', 'ap2 caps ') == CAPS, 'heartbeat capability mismatch')
     cy.capabilities(usb)
-    ps = one(usb, 'AP2 STATUS', 'ap2 status ')
-    ev1 = one(usb, 'EV1 STATUS', 'ev1 status ')
-    require(ev1['b'] == ps['boot'] and ev1['on'] == ev1['sat'] == '0', 'EV1 must already be OFF')
+    ps_raw = one(usb, 'AP2 STATUS', 'ap2 status ')
+    ps = ap.pico_status_view(ps_raw)
+    ev1_raw = one(usb, 'EV1 STATUS', 'ev1 status ')
+    ev1 = ap.pico_ev1_view(ev1_raw)
+    require(ev1.boot == ps.boot and not ev1.enabled and not ev1.saturated, 'EV1 must already be OFF')
     hs = host({'op': 'status'})
-    require(ps['state'] == '0' and hs['phase'] == 'idle', 'retained run; no rearm')
+    require(ps.state == 0 and hs['phase'] == 'idle', 'retained run; no rearm')
     require(hs.get('heartbeat_trigger') == 1 and hs['target'] == device
             and hs['connection'] and hs['session'], 'host heartbeat binding unsupported')
-    ident = dict(pico_boot=ps['boot'], host_boot=hs['boot'], run=run,
+    ident = dict(pico_boot=ps.boot, host_boot=hs['boot'], run=run,
                  device=device, host_connection=hs['connection'], session=hs['session'])
     ap.persist(Path(out) / 'identity.json', ident)
-    armed = one(usb, f'AP2 ARM_HB {ps["boot"]} {run}', 'ap2 status ')
-    ap.require_status(armed, ps['boot'], run, 4)
-    origin = one(usb, 'AP2 TRIGGER', 'ap2 trigger ')
-    require(origin['b'] == ps['boot'] and origin['r'] == run and origin['mode'] == '1'
-            and origin['m'] == origin['flags'] == '0', 'Pico heartbeat arm provenance')
-    baseline = int(origin['o'], 16)
+    armed = ap.pico_status_view(one(usb, f'AP2 ARM_HB {ps.boot} {run}', 'ap2 status '))
+    require(armed.boot == ps.boot and armed.run == run and armed.state == 4
+            and armed.generation == ps.generation, 'Pico boot/run/state mismatch; no cue')
+    origin_raw = one(usb, 'AP2 TRIGGER', 'ap2 trigger ')
+    origin = ap.pico_trigger_view(origin_raw)
+    require(origin.boot == ps.boot and origin.run == run and origin.mode == 1
+            and origin.message == origin.flags == 0, 'Pico heartbeat arm provenance')
+    baseline = origin.origin
     require(baseline < 0xffffffff, 'ordinal overflow')
     # Save endpoint-scoped readings before the one-shot arm. The ARM snapshot
     # alone cannot show a send during PREPARED, and cleanup status is too late
@@ -61,19 +65,21 @@ def prepare(usb, host, device, run, out):
     pre_host = host({'op': 'status'})
     pre_host_end = time.monotonic_ns()
     pre_pico_start = time.monotonic_ns()
-    pre_pico = one(usb, 'AP2 LIVE', 'ap2 live ')
+    pre_pico_raw = one(usb, 'AP2 LIVE', 'ap2 live ')
+    pre_pico = ap.pico_live_view(pre_pico_raw)
     pre_pico_end = time.monotonic_ns()
-    bracket = dict(clock='CLOCK_MONOTONIC', origin=origin,
+    bracket = dict(clock='CLOCK_MONOTONIC', origin=origin_raw,
                    host_before=dict(value=pre_host, request_before_ns=pre_host_start,
                                     response_after_ns=pre_host_end),
-                   pico_before=dict(value=pre_pico, request_before_ns=pre_pico_start,
+                   pico_before=dict(value=pre_pico_raw, request_before_ns=pre_pico_start,
                                     response_after_ns=pre_pico_end))
     ap.persist(Path(out) / 'baseline-before-arm.json', bracket)
     require(pre_host['boot'] == hs['boot'] and pre_host['connection'] == hs['connection']
             and pre_host['session'] == hs['session'] and pre_host['phase'] == 'idle',
             'host binding changed before arm')
-    require(pre_pico['boot'] == ps['boot'] and int(pre_pico['gen'], 16) == int(ps['gen'], 10)
-            and pre_pico['state'] == '4', 'Pico binding changed before host arm')
+    require(pre_pico.boot == ps.boot and pre_pico.generation == ps.generation
+            and pre_pico.state == 4 and pre_pico.session == hs['session'],
+            'Pico binding changed before host arm')
     arm_start = time.monotonic_ns()
     try:
         got = host(dict(op='arm', boot=hs['boot'], run=run, trigger='heartbeat',
@@ -104,15 +110,16 @@ def prepare(usb, host, device, run, out):
             and got['connection'] == hs['connection'] and got['session'] == hs['session']
             and got['baseline_message'] == got['last_message'] == baseline
             and got['expected_message'] == baseline + 1, 'host origin arm mismatch')
-    live = one(usb, 'AP2 LIVE', 'ap2 live ')
-    ap.require_prepared(live, ps['boot'], hs['session'])
-    after = one(usb, 'AP2 TRIGGER', 'ap2 trigger ')
+    live_raw = one(usb, 'AP2 LIVE', 'ap2 live ')
+    live = ap.pico_live_view(live_raw)
+    ap.require_prepared(live_raw, ps.boot, hs['session'])
+    after = ap.pico_trigger_view(one(usb, 'AP2 TRIGGER', 'ap2 trigger '))
     require(after == origin, 'PREPARED heartbeat/input changed origin')
     final = host({'op': 'status'})
     require(all(final[k] == got[k] for k in ['boot', 'run', 'phase', 'connection',
                 'session', 'last_message', 'expected_message']), 'host preparation changed')
     ready = ident | dict(baseline=baseline, expected=baseline + 1,
-                         generation=int(live['gen'], 16), caps=CAPS, ev1_sequence=ev1['seq'])
+                         generation=live.generation.value, caps=CAPS, ev1_sequence=ev1_raw['seq'])
     ap.persist(Path(out) / 'ready.json', ready)
     return ready
 
@@ -228,9 +235,13 @@ def validate(pico, host, extra, ready, headers):
         canonical={k:row[k] for k in ['us','event','connection','message','session','frame','kind','a','b']}
         host_crc=zlib.crc32(json.dumps(canonical,separators=(',',':')).encode(),host_crc)
     inner=extra['SDK_inner']
+    generation=ap.PicoConnectionGeneration(ready['generation'])
     checks=IntegrityFacts(ap.fnv(pico['records'])==int(pico['status']['digest'],16),
         host_crc==host['status']['digest'],txlib.tx_digest(extra['tx_rows'])==int(extra['tx_status']['h'],16),
-        inner['caps']==cy.SCHEMA,cy.digest(inner['rows'])==int(inner['status']['h'],16))
+        inner['caps']==cy.SCHEMA,cy.digest(inner['rows'])==int(inner['status']['h'],16),
+        ap.pico_status_view(pico['status']).generation==generation,
+        ap.pico_hex_generation_view(extra['tx_status'])==generation,
+        ap.pico_hex_generation_view(inner['status'])==generation)
     return assess(pico,host,extra,ready,headers,checks)
 
 
