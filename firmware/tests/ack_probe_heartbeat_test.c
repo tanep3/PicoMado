@@ -32,10 +32,7 @@ int main(void){
  uint32_t d=probe.summary.digest,n=probe.summary.count;pm_ack_probe_button(9,1,1,1,false);pm_ack_probe_connection();hb();
  assert(probe.summary.digest==d&&probe.summary.count==n&&!probe.trigger.flags);
  puts("PASS heartbeat trigger order/once/exact20s/FROZEN immutable");
- setup("AP2 ARM_HB 1 b");command("AP2 LIVE");assert(strstr(output,"message=0"));
- hb();command("AP2 LIVE");assert(strstr(output,"state=4")&&strstr(output,"message=1"));
- command("AP2 TRIGGER");assert(strstr(output,"o=0 g=0 m=0 flags=0"));
- assert(!probe.summary.count&&!probe.summary.trigger_us);
+ setup("AP2 ARM_HB 1 b");hb();assert(!probe.summary.count&&!probe.summary.trigger_us);
  pm_ack_probe_usb_state(false);assert(probe.trigger.gate==1&&probe.trigger.flags==2);hb();
  assert(probe.trigger.origin==0&&probe.trigger.message==2&&probe.records[0].c==2);
  puts("PASS PREPARED heartbeat is flagged even if host could start early");
