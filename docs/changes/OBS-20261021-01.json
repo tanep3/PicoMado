@@ -20,8 +20,14 @@
       ]
     },
     "implementation": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-19/task-2/observation-prevention-20261021/fix-gate-evidence/check.json",
+          "SHA256": "72e30aa2233dbc0d7abfd12aa0351dd0753979ed99462a67527d56561555b032"
+        }
+      ]
     },
     "independent_verification": {
       "state": "not_started",
@@ -49,7 +55,6 @@
     "active-route adoption record"
   ],
   "unapplied": [
-    "implementation",
     "independent review",
     "canonical work-route integration",
     "external CI branch protection",
