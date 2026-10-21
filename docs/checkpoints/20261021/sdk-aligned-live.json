@@ -1,0 +1,600 @@
+{
+  "schema": 1,
+  "evidence_root": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-live-20261021T040833Z",
+  "prior_docs_commit": "d116dd171463c2171e196917d7302c8a53d3cb9e",
+  "candidate_SHA256": "11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485",
+  "rollback_UF2": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/gap-p2-build/artifacts/PicoMado-lcd1/PicoMado-lcd1.uf2",
+  "rollback_SHA256": "fd19ace94a80c0baf9ad97ed9e97255aca563045ee428efd1ac7aad52a2d8e3a",
+  "flash": {
+    "at": "2026-10-21T04:09:24.593114+00:00",
+    "exit": 0,
+    "attempts": 1,
+    "verify_100_percent": true,
+    "settings_sector_unwritten": true,
+    "expected_Flash_ID": "E661640843239D21",
+    "sha256": "11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485",
+    "Eink_flashed": false
+  },
+  "reconnect": {
+    "at": "2026-10-21T04:09:40.538398+00:00",
+    "serial_returned": true,
+    "serial_resolved": "/dev/ttyACM0",
+    "received": 1021493,
+    "rendered": 1021493,
+    "normal_server_PID": 1780574,
+    "normal_server_unchanged": true,
+    "collector_not_started": true,
+    "USB_port_not_opened": true
+  },
+  "trial": {
+    "metrics": {
+      "input_to_send_return_us": 1812,
+      "input_to_frame_start_us": 1422294,
+      "frame_start_to_CRC_us": 53291,
+      "input_to_draw_done_us": 1496540,
+      "draw_us": 19248,
+      "host_decode_to_process_done_us": 62119,
+      "host_decode_to_reply_queued_us": 62124,
+      "host_raw_poll_to_ready_us": 14,
+      "Pi_notification_to_prior_gap_fill_us": 1344373.226,
+      "Pi_gap_fill_to_ACK_advance_us": 49.241,
+      "CY_missing_TX_after_input_us": 17756104
+    },
+    "identity": {
+      "boot": "5ae570e360f434a5",
+      "run": "18e0701e35d08e10",
+      "session": 2299,
+      "frame": 1021500,
+      "SIM_job": 1
+    },
+    "joins": [
+      {
+        "TX": {
+          "i": 0,
+          "t": 179087215,
+          "s": 8262,
+          "e": 8333,
+          "a": 450817641,
+          "len": 71,
+          "ip": 46,
+          "dt": 581,
+          "rc": 0,
+          "nr": 4,
+          "f": 24,
+          "ref": 1
+        },
+        "CY_matches": 1,
+        "Pi_matches": 1,
+        "CY": {
+          "flags": 25,
+          "wait_us": 0,
+          "polls": 0,
+          "crc_before": 3701199909,
+          "crc_bus": 3701199909,
+          "covered": 129,
+          "domain": 129,
+          "original_key": {
+            "i": 0,
+            "p": 1,
+            "s": 8262,
+            "e": 8333,
+            "a": 450817641,
+            "ip": 46,
+            "len": 71,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_key": {
+            "i": 0,
+            "p": 2,
+            "s": 8262,
+            "e": 8333,
+            "a": 450817641,
+            "ip": 46,
+            "len": 71,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_result": 0
+        }
+      },
+      {
+        "TX": {
+          "i": 1,
+          "t": 180424076,
+          "s": 8333,
+          "e": 8432,
+          "a": 450817641,
+          "len": 99,
+          "ip": 47,
+          "dt": 530,
+          "rc": 0,
+          "nr": 4,
+          "f": 24,
+          "ref": 1
+        },
+        "CY_matches": 1,
+        "Pi_matches": 1,
+        "CY": {
+          "flags": 25,
+          "wait_us": 0,
+          "polls": 0,
+          "crc_before": 3286584721,
+          "crc_bus": 3286584721,
+          "covered": 157,
+          "domain": 157,
+          "original_key": {
+            "i": 1,
+            "p": 1,
+            "s": 8333,
+            "e": 8432,
+            "a": 450817641,
+            "ip": 47,
+            "len": 99,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_key": {
+            "i": 1,
+            "p": 2,
+            "s": 8333,
+            "e": 8432,
+            "a": 450817641,
+            "ip": 47,
+            "len": 99,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_result": 0
+        }
+      },
+      {
+        "TX": {
+          "i": 2,
+          "t": 180430595,
+          "s": 8064,
+          "e": 8163,
+          "a": 450817641,
+          "len": 99,
+          "ip": 48,
+          "dt": 397,
+          "rc": 0,
+          "nr": 5,
+          "f": 24,
+          "ref": 1
+        },
+        "CY_matches": 1,
+        "Pi_matches": 1,
+        "CY": {
+          "flags": 25,
+          "wait_us": 0,
+          "polls": 0,
+          "crc_before": 3513366763,
+          "crc_bus": 3513366763,
+          "covered": 157,
+          "domain": 157,
+          "original_key": {
+            "i": 2,
+            "p": 1,
+            "s": 8064,
+            "e": 8163,
+            "a": 450817641,
+            "ip": 48,
+            "len": 99,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_key": {
+            "i": 2,
+            "p": 2,
+            "s": 8064,
+            "e": 8163,
+            "a": 450817641,
+            "ip": 48,
+            "len": 99,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_result": 0
+        }
+      },
+      {
+        "TX": {
+          "i": 3,
+          "t": 180562632,
+          "s": 8432,
+          "e": 8615,
+          "a": 450844173,
+          "len": 183,
+          "ip": 61,
+          "dt": 573,
+          "rc": 0,
+          "nr": 0,
+          "f": 24,
+          "ref": 1
+        },
+        "CY_matches": 1,
+        "Pi_matches": 0,
+        "CY": {
+          "flags": 25,
+          "wait_us": 0,
+          "polls": 0,
+          "crc_before": 3817693979,
+          "crc_bus": 3817693979,
+          "covered": 241,
+          "domain": 241,
+          "original_key": {
+            "i": 3,
+            "p": 1,
+            "s": 8432,
+            "e": 8615,
+            "a": 450844173,
+            "ip": 61,
+            "len": 183,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_key": {
+            "i": 3,
+            "p": 2,
+            "s": 8432,
+            "e": 8615,
+            "a": 450844173,
+            "ip": 61,
+            "len": 183,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_result": 0
+        }
+      },
+      {
+        "TX": {
+          "i": 4,
+          "t": 180583709,
+          "s": 8615,
+          "e": 8799,
+          "a": 450844173,
+          "len": 184,
+          "ip": 62,
+          "dt": 488,
+          "rc": 0,
+          "nr": 0,
+          "f": 24,
+          "ref": 1
+        },
+        "CY_matches": 1,
+        "Pi_matches": 1,
+        "CY": {
+          "flags": 25,
+          "wait_us": 0,
+          "polls": 0,
+          "crc_before": 1910414416,
+          "crc_bus": 1910414416,
+          "covered": 242,
+          "domain": 242,
+          "original_key": {
+            "i": 4,
+            "p": 1,
+            "s": 8615,
+            "e": 8799,
+            "a": 450844173,
+            "ip": 62,
+            "len": 184,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_key": {
+            "i": 4,
+            "p": 2,
+            "s": 8615,
+            "e": 8799,
+            "a": 450844173,
+            "ip": 62,
+            "len": 184,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_result": 0
+        }
+      },
+      {
+        "TX": {
+          "i": 5,
+          "t": 181841306,
+          "s": 8432,
+          "e": 8615,
+          "a": 450844173,
+          "len": 183,
+          "ip": 63,
+          "dt": 551,
+          "rc": 0,
+          "nr": 1,
+          "f": 24,
+          "ref": 1
+        },
+        "CY_matches": 1,
+        "Pi_matches": 1,
+        "CY": {
+          "flags": 25,
+          "wait_us": 0,
+          "polls": 0,
+          "crc_before": 4093287630,
+          "crc_bus": 4093287630,
+          "covered": 241,
+          "domain": 241,
+          "original_key": {
+            "i": 5,
+            "p": 1,
+            "s": 8432,
+            "e": 8615,
+            "a": 450844173,
+            "ip": 63,
+            "len": 183,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_key": {
+            "i": 5,
+            "p": 2,
+            "s": 8432,
+            "e": 8615,
+            "a": 450844173,
+            "ip": 63,
+            "len": 183,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_result": 0
+        }
+      },
+      {
+        "TX": {
+          "i": 6,
+          "t": 181841925,
+          "s": 8615,
+          "e": 8799,
+          "a": 450844173,
+          "len": 184,
+          "ip": 64,
+          "dt": 293,
+          "rc": 0,
+          "nr": 1,
+          "f": 24,
+          "ref": 1
+        },
+        "CY_matches": 1,
+        "Pi_matches": 1,
+        "CY": {
+          "flags": 25,
+          "wait_us": 0,
+          "polls": 0,
+          "crc_before": 1015216354,
+          "crc_bus": 1015216354,
+          "covered": 242,
+          "domain": 242,
+          "original_key": {
+            "i": 6,
+            "p": 1,
+            "s": 8615,
+            "e": 8799,
+            "a": 450844173,
+            "ip": 64,
+            "len": 184,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_key": {
+            "i": 6,
+            "p": 2,
+            "s": 8615,
+            "e": 8799,
+            "a": 450844173,
+            "ip": 64,
+            "len": 184,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_result": 0
+        }
+      },
+      {
+        "TX": {
+          "i": 7,
+          "t": 195428047,
+          "s": 8799,
+          "e": 8898,
+          "a": 450844173,
+          "len": 99,
+          "ip": 65,
+          "dt": 540,
+          "rc": 0,
+          "nr": 0,
+          "f": 24,
+          "ref": 1
+        },
+        "CY_matches": 1,
+        "Pi_matches": 0,
+        "CY": {
+          "flags": 25,
+          "wait_us": 0,
+          "polls": 0,
+          "crc_before": 248841040,
+          "crc_bus": 248841040,
+          "covered": 157,
+          "domain": 157,
+          "original_key": {
+            "i": 7,
+            "p": 1,
+            "s": 8799,
+            "e": 8898,
+            "a": 450844173,
+            "ip": 65,
+            "len": 99,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_key": {
+            "i": 7,
+            "p": 2,
+            "s": 8799,
+            "e": 8898,
+            "a": 450844173,
+            "ip": 65,
+            "len": 99,
+            "et": 2048,
+            "f": 24,
+            "v": 1
+          },
+          "bus_result": 0
+        }
+      },
+      {
+        "TX": {
+          "i": 8,
+          "t": 196842221,
+          "s": 8799,
+          "e": 8898,
+          "a": 450844173,
+          "len": 99,
+          "ip": 66,
+          "dt": 327,
+          "rc": 0,
+          "nr": 1,
+          "f": 24,
+          "ref": 1
+        },
+        "CY_matches": 0,
+        "Pi_matches": 0
+      }
+    ],
+    "comparison": {
+      "old_AP2_CY_trials": 5,
+      "old_input_to_draw_us": [
+        163670,
+        140427,
+        140942,
+        170673,
+        162221
+      ],
+      "old_median_us": 162221,
+      "new_trials": 1,
+      "new_input_to_draw_us": [
+        1496540
+      ],
+      "new_fast_control_count": 0,
+      "interpretation": "recurred on aligned SDK; not proof of regression/cause or rate comparison; not paired/time/asset matched"
+    },
+    "quality": {
+      "Pico_AP2_complete": true,
+      "host_AP2_complete": true,
+      "header_complete": true,
+      "CYW43_full_window_complete": false,
+      "CYW43_capacity_lost": 1,
+      "available_rows_used_as_local_facts_only": true,
+      "no_quality_relaxation": true
+    },
+    "observed_mechanism": "notification TCP bytes observed at Pi, held behind prior sequence gap until retransmission fills it; earlier packet absence origin not captured",
+    "unobserved": [
+      "original pre-input transmission of SEQ8064..8163",
+      "chip RF TX/802.11 ACK/AP reception",
+      "CYW43 internals for final unmatched TX index8",
+      "same-SDK fast control and delay distribution"
+    ]
+  },
+  "analysis_checks": {
+    "passed": 21,
+    "failed": 0
+  },
+  "cleanup": {
+    "error": null,
+    "cleanup": {
+      "Pico_status": {
+        "boot": "5ae570e360f434a5",
+        "run": "0",
+        "state": "0",
+        "n": "0",
+        "over": "0",
+        "gen": "1",
+        "digest": "0",
+        "reason": "0"
+      },
+      "EV1_status": {
+        "cid": 14089833637515406031,
+        "boot": 6549765354966758565,
+        "sequence": 0,
+        "dropped": 0,
+        "first_lost": 0,
+        "last_lost": 0,
+        "on": 0,
+        "saturated": 0
+      },
+      "owner_closed": true,
+      "host_status": {
+        "armed_us": 8605364513,
+        "boot": "18e0684a9f4c8be0-1b2b5e",
+        "capacity": 512,
+        "clock": "host_monotonic_us_since_process_probe_init",
+        "connection": 431,
+        "contended": 0,
+        "count": 0,
+        "digest": 1922538790,
+        "freeze_us": 8643916981,
+        "hook_max_ns": 1222,
+        "hook_total_ns": 14149,
+        "hooks": 62,
+        "last_run": "18e0701e35d08e10",
+        "overwritten": 0,
+        "phase": "idle",
+        "pre_overwritten": 0,
+        "reason": "deadline",
+        "record_bytes": 64,
+        "run": "0",
+        "schema": 2,
+        "session": 2299,
+        "target": "PicoMado-lcd1",
+        "trigger_us": 8623908541,
+        "window_us": 20000000
+      },
+      "normal_server_unchanged": true
+    },
+    "results": 1
+  },
+  "changes": {
+    "firmware": "target LCD once only",
+    "server": false,
+    "Eink": false,
+    "ai_news": false,
+    "network_or_OS": false,
+    "SSH": false,
+    "push": false,
+    "capacity_WIP_in_candidate": false
+  },
+  "remaining": [
+    "CY8 row capacity prevents full diagnostic completeness; strict quality stop retained",
+    "new-SDK fast control and finite distribution not acquired",
+    "clock to YouTube not executed due first-trial quality stop",
+    "original pre-input packet and radio/AP path unobserved"
+  ],
+  "auto_review": {
+    "rejected_action": "8-trial controller with relaxed quality stop conditions",
+    "outcome": "not executed; USB owner log absent",
+    "reason": "must not remove TX/AP2/CYW diagnostic quality failures from stop conditions",
+    "safer_alternative": "original full quality stop list restored exactly; eight is only maximum, stop on first failed quality; retain freeze/save/release cleanup"
+  }
+}
