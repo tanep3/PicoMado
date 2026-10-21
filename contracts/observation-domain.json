@@ -15,10 +15,10 @@
       "initial": "IDLE",
       "states": [
         "IDLE",
-        "PREPARED",
         "ARMED",
         "RECORDING",
-        "FROZEN"
+        "FROZEN",
+        "PREPARED"
       ],
       "transitions": [
         [
@@ -155,5 +155,37 @@
       "VerifiedEvidence capability with same binding"
     ],
     "unverified": "Assessment may describe facts but cannot construct completed capture."
+  },
+  "outputs": {
+    "c": "firmware/src/observation_values.h",
+    "rust": "service/src/observation_values.rs",
+    "python": "firmware/tools/observation_values.py"
+  },
+  "rust_identity": {
+    "token": [
+      "ReceiptAck",
+      "RenderedAck",
+      "StreamStatus",
+      "FrameStart",
+      "FrameChunk"
+    ],
+    "session": [
+      "Welcome",
+      "Up",
+      "Down",
+      "Next",
+      "Power",
+      "EnterSub",
+      "Heartbeat"
+    ],
+    "sessionless": [
+      "Hello",
+      "Settings",
+      "SettingsStored",
+      "InputAccepted",
+      "Error",
+      "PluginPosition"
+    ],
+    "exhaustive": true
   }
 }
