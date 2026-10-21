@@ -61,6 +61,32 @@ int main(void){
     assert(refreshes==before);
     pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);remote_done();assert(refreshes==++before);
 
+    // A canceled intent while an old image is physically active can be
+    // requested again. Only the new request survives to one local refresh.
+    assert(pm_display_frame(pixels,sizeof pixels));poll_for(5);
+    pm_display_feedback(PM_DISPLAY_FEEDBACK_SHOW);poll_for(40);
+    pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
+    pm_display_feedback(PM_DISPLAY_FEEDBACK_SHOW);
+    // The driver deliberately waits for the application to consume a remote
+    // result before starting a local hint. Consume it as main would.
+    bool got_remote=false,remote_ok=false;
+    for(unsigned i=0;i<200&&!got_remote;i++){
+        poll_for(5);got_remote=pm_display_take_result(&remote_ok);
+    }
+    assert(got_remote&&remote_ok);poll_for(1000);assert(!pm_display_busy());
+    assert(refreshes==before+2&&!memcmp(output,hint_ram,sizeof output));before+=2;
+    no_remote_result();
+    // Preparation cancellation also allows a later request to start. A
+    // physically visible identical hint still needs no second refresh.
+    pm_display_feedback(PM_DISPLAY_FEEDBACK_RESTORE);poll_for(1000);assert(refreshes==++before);
+    pm_display_feedback(PM_DISPLAY_FEEDBACK_SHOW);reach_ram_write();
+    pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);assert(refreshes==before);
+    pm_display_feedback(PM_DISPLAY_FEEDBACK_SHOW);poll_for(1000);assert(refreshes==++before);
+    pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
+    pm_display_feedback(PM_DISPLAY_FEEDBACK_SHOW);poll_for(1000);assert(refreshes==before);
+    pm_display_feedback(PM_DISPLAY_FEEDBACK_RESTORE);poll_for(1000);assert(refreshes==++before);
+    no_remote_result();
+
     // Cancel during reset, then during RAM transfer. Neither preparation is a
     // visible update; the real frame starts its own full reset and refresh.
     pm_display_feedback(PM_DISPLAY_FEEDBACK_SHOW);poll_for(40);

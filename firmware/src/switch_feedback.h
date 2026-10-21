@@ -69,6 +69,16 @@ static inline bool pm_switch_due(const pm_switch_feedback *s,uint64_t now){
     return s->waiting && !s->hint_requested && !pm_switch_received(s) &&
         now>=s->started_us && now-s->started_us>=PM_SWITCH_DELAY_US;
 }
+/* This bit owns an outstanding adapter request, never physical visibility.
+ * Every image-driven REPLACE must consume this transition first. */
+static inline bool pm_switch_cancel_hint_for_image(pm_switch_feedback *s){
+    if(!pm_switch_received(s))return false;
+    s->hint_requested=false;return true;
+}
+static inline bool pm_switch_request_hint(pm_switch_feedback *s,uint64_t now){
+    if(!pm_switch_due(s,now))return false;
+    s->hint_requested=true;return true;
+}
 static inline bool pm_switch_complete(pm_switch_feedback *s,pm_token t){
     if(!s->waiting || !pm_switch_eligible(s,t))return false;
     pm_switch_cancel(s);return true;

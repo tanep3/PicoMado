@@ -86,7 +86,7 @@ for polarity in 1 0; do
     run "backlight-$polarity"
 done
 
-build switch-feedback tests/switch_feedback_test.c
+build switch-feedback tests/switch_feedback_test.c src/core.c
 run switch-feedback
 build input tests/input_test.c src/core.c
 run input
@@ -97,6 +97,11 @@ for device in E-ink_0 E-ink_1; do
         cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_TRACE_ENABLE=$trace \
             -I"devices/$device" -Isrc -Itests/stubs tests/eink_feedback_test.c src/display_eink.c -o "$work/eink-feedback-$device-$trace"
         run "eink-feedback-$device-$trace"
+        cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=$trace \
+            '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
+            -I"devices/$device" -Isrc -Itests/app_stubs tests/switch_feedback_cancel_test.c src/core.c src/video.c src/trace.c src/rx_stats.c \
+            -o "$work/switch-cancel-$device-$trace"
+        for route in 0 1 2; do run "switch-cancel-$device-$trace" "$route"; done
     done
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
         -I"devices/$device" -Isrc -Itests/stubs tests/eink_test.c src/display_eink.c \

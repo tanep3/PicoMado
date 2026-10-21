@@ -534,6 +534,12 @@ static bool send_button_input(uint8_t kind,const char *type,uint64_t accepted_us
     if(kind==7 || !ok)pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
     return ok;
 }
+/* Keep cancellation in the model and adapter on one path. The adapter alone
+ * knows whether identical text is already visible or preparation is pending. */
+static void prioritize_received_image(void){
+    if(pm_switch_cancel_hint_for_image(&switching))
+        pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
+}
 static uint64_t observed_parent(const char *j){
 #if PM_EVENT_STREAM
     uint64_t operation;
@@ -773,7 +779,7 @@ static pm_api_result receive_chunk(pm_token t,uint64_t offset,const uint8_t *byt
     pm_ack_probe_note(PM_AP_FRAME_CHECK,0,t.session_epoch,t.frame_id,0,0,0,0);
     if(!pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch))return PM_API_REJECTED;
     pm_switch_receive(&switching,t);
-    if(pm_switch_received(&switching))pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
+    prioritize_received_image();
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
     if(receiving_stream){
         pm_diag_frame_done();
@@ -850,7 +856,7 @@ static pm_api_result api_input_result(uint8_t kind,const char *j){
         }
         if(pm_switch_reply(&switching,epoch,has_epoch))
             pm_display_feedback(PM_DISPLAY_FEEDBACK_RESTORE);
-        if(pm_switch_received(&switching))pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
+        prioritize_received_image();
         if(has_epoch && epoch<display_epoch)return PM_API_REJECTED;
         // A matching reply may arrive after FrameStart or between its chunks.
         // Only a genuinely newer generation invalidates an assembly.
@@ -1033,15 +1039,13 @@ static void poll_switch_feedback(void){
             pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
         pm_switch_cancel(&switching);return;
     }
-    if(pm_switch_received(&switching))pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
+    prioritize_received_image();
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
     if(lcd_waiting_frame && pm_switch_eligible(&switching,lcd_waiting_token))
         (void)finish_lcd_image(lcd_waiting_token);
 #endif
-    if(pm_switch_due(&switching,time_us_64())){
-        switching.hint_requested=true;
+    if(pm_switch_request_hint(&switching,time_us_64()))
         pm_display_feedback(PM_DISPLAY_FEEDBACK_SHOW);
-    }
 }
 static void button_with_origin(unsigned i,bool long_press,unsigned origin){
 #if PM_DIAGNOSTIC_STAGE

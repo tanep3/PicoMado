@@ -4,7 +4,7 @@
   "status": "in_progress",
   "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
   "implementer": "local-switch-feedback worker",
-  "design_commit": "99aea78f3e2d3d3c77845a9ddd1656621ec4be2b",
+  "design_commit": "9624c17cedc6442c4c23f98bb23bc5d0afa47efd",
   "design_artifacts": [
     "docs/changes/LOCAL-SWITCH-FEEDBACK-20261022.md"
   ],
@@ -14,7 +14,7 @@
       "evidence": [
         {
           "kind": "commit",
-          "commit": "99aea78f3e2d3d3c77845a9ddd1656621ec4be2b"
+          "commit": "9624c17cedc6442c4c23f98bb23bc5d0afa47efd"
         }
       ]
     },
@@ -35,5 +35,8 @@
       "evidence": []
     }
   },
-  "implementation_commit": "2a5693e2aa3cde29c652717602f0e624c077bc50"
+  "implementation_commit": "2a5693e2aa3cde29c652717602f0e624c077bc50",
+  "review_findings": [
+    "P2-01: canceled hint request state; correction in progress"
+  ]
 }
