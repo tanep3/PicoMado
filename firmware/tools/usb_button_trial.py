@@ -93,6 +93,56 @@ def neighbor_reachability(candidate):
     state=candidate.get('state')
     return isinstance(state,list)and 'REACHABLE'in state
 
+def target_scope_decision(args,neighbors,route,target,*,expected_phase,prior=None):
+    """Pure header-capture scope rule; NUD freshness is a separate reported fact.
+
+    The adapters must have obtained the route, selected-PID owned TCP/control
+    socket and inet_diag cookie from the current kernel before calling this.
+    """
+    def refuse(reason,state=None):
+        return dict(scope_bound=False,recent_kernel_reachability=False,
+                    neighbor_state=state,refusal=reason)
+    try:
+        matches,error=neighbor_identity(args,neighbors)
+        if error:return refuse(error)
+        candidate=matches[0];state=candidate.get('state')
+        if not(isinstance(state,list)and len(state)==1 and state[0]in ('REACHABLE','STALE','DELAY')):
+            return refuse('neighbor state has no accepted cached mapping',state)
+        if sum(isinstance(row,dict)and row.get('dst')==candidate['dst'] for row in neighbors)!=1:
+            return refuse('peer IP neighbor mapping is ambiguous',state[0])
+        if candidate['dst']!=target['peer_ip']:
+            return refuse('known MAC mapping differs from selected peer socket',state[0])
+        if not(isinstance(route,list)and len(route)==1 and route[0].get('dev')==args.interface
+               and route[0].get('prefsrc')==args.local_ip
+               and route[0].get('dst')==candidate['dst'] and not route[0].get('gateway')):
+            return refuse('route/interface/local IP mismatch',state[0])
+        if not(target['interface']==args.interface and target['local_ip']==args.local_ip
+               and target['local_port']==args.port and target['pid']==args.host_pid
+               and target['known_device_mac'].lower()==args.known_mac.lower()
+               and target['peer_port']>0 and target['inode']>0 and target['fd']>=0
+               and target['process_start_ticks']>0 and target['socket_state']==1
+               and target['control_socket_owned'] is True and target['owned_socket_count']==1
+               and isinstance(target['cookie'],list)and len(target['cookie'])==2
+               and all(type(x)is int for x in target['cookie'])
+               and target['cookie']not in ([0,0],[0xffffffff,0xffffffff])):
+            return refuse('selected PID socket ownership/state/cookie mismatch',state[0])
+        binding=target['binding']
+        if not(binding['target']==args.device and binding['phase']==expected_phase
+               and binding['connection']>0 and binding['session']>0
+               and int(binding['boot'].rsplit('-',1)[1],16)==args.host_pid):
+            return refuse('host target/binding mismatch',state[0])
+        if prior is not None:
+            stable=('interface','local_ip','local_port','peer_ip','peer_port','inode',
+                    'pid','process_start_ticks','cookie','known_device_mac')
+            if not(all(target[k]==prior[k] for k in stable)
+                   and all(binding[k]==prior['binding'][k]
+                           for k in ('boot','connection','session','target'))):
+                return refuse('pre/post ARM target/socket binding changed',state[0])
+    except (KeyError,IndexError,TypeError,ValueError,AttributeError) as error:
+        return refuse('incomplete or malformed target scope facts: '+type(error).__name__)
+    return dict(scope_bound=True,recent_kernel_reachability=state[0]=='REACHABLE',
+                neighbor_state=state[0],refusal=None)
+
 def known_neighbor(args,evidence=None):
     """Record the identity result before applying the independent NUD gate."""
     row=dict(interface=args.interface,known_mac=args.known_mac.lower(),clock=time.monotonic_ns())
@@ -115,13 +165,35 @@ def known_neighbor(args,evidence=None):
     require('refusal'not in row,row.get('refusal',''))
     return row['matches'][0]['dst']
 
-def refresh_target(args,host,observer,*,expected_phase='armed',neighbor_evidence=None):
+def scoped_neighbor_candidate(args,evidence=None):
+    """Read the cached mapping without treating NUD freshness as identity."""
+    row=dict(interface=args.interface,known_mac=args.known_mac.lower(),clock=time.monotonic_ns())
+    try:
+        neighbors=json.loads(subprocess.check_output(['ip','-j','neigh','show','dev',args.interface],text=True,timeout=2))
+        matches,error=neighbor_identity(args,neighbors)
+        row.update(matches=matches,match_count=len(matches),
+                   identity_decision='refused'if error else'matched')
+        if error:row['refusal']=error
+        else:row['reachability_decision']='REACHABLE'if neighbor_reachability(matches[0])else'cached_not_REACHABLE'
+    except BaseException as error:
+        row['refusal']=f'neighbor read failed: {type(error).__name__}: {error}'[:240]
+        if evidence is not None:ap.persist(evidence,row)
+        raise
+    if evidence is not None:ap.persist(evidence,row)
+    require('refusal'not in row,row.get('refusal',''))
+    return row['matches'][0]['dst'],neighbors
+
+def refresh_target(args,host,observer,*,expected_phase='armed',neighbor_evidence=None,
+                   bound_cached_scope=False,prior=None):
     a=host({'op':'status'});require(a['target']==args.device and a['phase']==expected_phase and a['connection'] and a['session'],'host not ready')
     process=Path('/proc')/str(args.host_pid)
     require(process.stat().st_uid==os.getuid(),'server process owner mismatch')
     require(int(a['boot'].rsplit('-',1)[1],16)==args.host_pid,'server boot PID mismatch')
-    peer=known_neighbor(args,neighbor_evidence);route=json.loads(subprocess.check_output(['ip','-j','route','get',peer],text=True,timeout=2))
-    require(len(route)==1 and route[0]['dev']==args.interface and route[0].get('prefsrc')==args.local_ip,'route mismatch')
+    if bound_cached_scope:peer,neighbors=scoped_neighbor_candidate(args,neighbor_evidence)
+    else:peer=known_neighbor(args,neighbor_evidence)
+    route=json.loads(subprocess.check_output(['ip','-j','route','get',peer],text=True,timeout=2))
+    if not bound_cached_scope:
+        require(len(route)==1 and route[0]['dev']==args.interface and route[0].get('prefsrc')==args.local_ip,'route mismatch')
     owned={}
     for p in(process/'fd').iterdir():
         try:
@@ -129,7 +201,8 @@ def refresh_target(args,host,observer,*,expected_phase='armed',neighbor_evidence
             if link.startswith('socket:['):owned[link[8:-1]]=int(p.name)
         except OSError:pass
     unix=[x.split()for x in(process/'net/unix').read_text().splitlines()[1:]]
-    require(any(len(x)>=8 and x[7]==str(args.socket) and x[6]in owned for x in unix),'control socket not owned by selected server PID')
+    control_owned=any(len(x)>=8 and x[7]==str(args.socket) and x[6]in owned for x in unix)
+    require(control_owned,'control socket not owned by selected server PID')
     unpack=lambda v:(socket.inet_ntoa(struct.pack('<I',int(v.split(':')[0],16))),int(v.split(':')[1],16))
     rows=[]
     for line in(process/'net/tcp').read_text().splitlines()[1:]:
@@ -139,11 +212,19 @@ def refresh_target(args,host,observer,*,expected_phase='armed',neighbor_evidence
         if local==(args.local_ip,args.port) and remote[0]==peer:rows.append({'interface':args.interface,'local_ip':local[0],'local_port':local[1],'peer_ip':remote[0],'peer_port':remote[1],'inode':int(p[9]),'pid':args.host_pid,'fd':owned[p[9]],'process_start_ticks':int((process/'stat').read_text().rsplit(')',1)[1].split()[19])})
     require(len(rows)==1,'ambiguous server-owned peer socket');target=rows[0];diag=observer.Diag()
     try:
-        observed=diag.query(target);require(observed['inode']==target['inode'] and observed['state']==1,'owned socket state changed');target['cookie']=observed['cookie']
+        observed=diag.query(target);require(observed['inode']==target['inode'] and observed['state']==1,'owned socket state changed');target['cookie']=observed['cookie'];target['socket_state']=observed['state']
         again=host({'op':'status'});require(all(a[k]==again[k]for k in ['boot','run','phase','connection','session','target']),'host binding changed')
-        require(diag.query(target,target['cookie'])['inode']==target['inode'],'socket cookie changed')
+        confirmed=diag.query(target,target['cookie'])
+        require(confirmed['inode']==target['inode'] and confirmed['cookie']==target['cookie']
+                and confirmed['state']==1,'socket cookie changed')
     finally:diag.close()
-    target.update(metadata_monotonic_ns=time.monotonic_ns(),clock=observer.stamp(),known_device_mac=args.known_mac,binding={k:a[k]for k in ['boot','run','phase','connection','session','target']})
+    target.update(metadata_monotonic_ns=time.monotonic_ns(),clock=observer.stamp(),known_device_mac=args.known_mac,
+                  control_socket_owned=control_owned,owned_socket_count=len(rows),
+                  binding={k:a[k]for k in ['boot','run','phase','connection','session','target']})
+    if bound_cached_scope:
+        scope=target_scope_decision(args,neighbors,route,target,expected_phase=expected_phase,prior=prior)
+        require(scope['scope_bound'],scope['refusal'])
+        target['scope_decision']=scope
     observer.validate_target(target);return target
 
 def require_same_target(preflight,target):

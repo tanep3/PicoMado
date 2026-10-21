@@ -1,9 +1,50 @@
-import contextlib,io,json,tempfile,unittest,sys,types,hashlib
+import contextlib,io,json,tempfile,unittest,sys,types,hashlib,copy,os,socket
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 import usb_button_trial as m
 class Tests(unittest.TestCase):
+ def test_pure_scope_rule_separates_cached_mapping_from_reachability(self):
+  # Trial-09's actual MAC/route/pre-ARM socket and after-ARM STALE row.
+  # An after-ARM socket fact below is a counterfactual isolated input because
+  # the old resolver rejected NUD before it queried that socket.
+  args=types.SimpleNamespace(interface='eth0',known_mac='28:cd:c1:09:78:41',
+      local_ip='192.168.0.120',port=16153,host_pid=1928084,device='PicoMado-lcd1')
+  row=dict(dst='192.168.0.173',lladdr=args.known_mac,state=['STALE'])
+  route=[dict(dst=row['dst'],dev='eth0',prefsrc=args.local_ip)]
+  before=dict(interface='eth0',local_ip=args.local_ip,local_port=16153,peer_ip=row['dst'],
+      peer_port=61823,inode=13769022,pid=args.host_pid,fd=17,process_start_ticks=60873347,
+      cookie=[4217,0],known_device_mac=args.known_mac,socket_state=1,
+      control_socket_owned=True,owned_socket_count=1,
+      binding=dict(boot='18e0859a3ed1bab9-1d6b94',run='0',phase='idle',
+                   connection=69,session=2330,target=args.device))
+  after=copy.deepcopy(before);after['binding'].update(phase='armed',run='one-run')
+  decide=lambda rows=[row],via=route,target=after,prior=before:m.target_scope_decision(
+      args,rows,via,target,expected_phase='armed',prior=prior)
+  self.assertEqual(decide()['neighbor_state'],'STALE')
+  self.assertTrue(decide()['scope_bound']);self.assertFalse(decide()['recent_kernel_reachability'])
+  self.assertTrue(decide([row|{'state':['DELAY']}])['scope_bound'])
+  reachable=decide([row|{'state':['REACHABLE']}]);self.assertTrue(reachable['scope_bound'])
+  self.assertTrue(reachable['recent_kernel_reachability'])
+  for state in ('NONE','INCOMPLETE','PROBE','FAILED'):
+   with self.subTest(state=state):self.assertFalse(decide([row|{'state':[state]}])['scope_bound'])
+  counterexamples=[
+      dict(rows=[]),dict(rows=[row,row]),
+      dict(rows=[row,row|{'lladdr':'00:00:00:00:00:01'}]),
+      dict(rows=[row|{'dev':'wlan0'}]),
+      dict(rows=[row|{'dst':'192.168.0.174'}]),
+      dict(via=[route[0]|{'dev':'wlan0'}]),dict(via=[route[0]|{'gateway':'192.168.0.1'}]),
+      dict(target=after|{'peer_port':61824}),dict(target=after|{'socket_state':7}),
+      dict(target=after|{'pid':1928085}),dict(target=after|{'process_start_ticks':60873348}),
+      dict(target=after|{'control_socket_owned':False}),
+      dict(target=after|{'owned_socket_count':2}),
+      dict(target=after|{'cookie':[4218,0]}),
+      dict(target=after|{'inode':13769023}),
+      dict(target=after|{'binding':after['binding']|{'boot':'wrong-1d6b94'}}),
+      dict(target=after|{'binding':after['binding']|{'session':2331}}),
+  ]
+  for i,change in enumerate(counterexamples):
+   with self.subTest(counterexample=i):self.assertFalse(decide(**change)['scope_bound'])
  def test_known_neighbor_saved_identity_and_reachability_are_separate(self):
   # The MAC/interface are from the retained trial-02 config; DELAY was the
   # later read-only observation, not a guard-instant state from that trial.
@@ -30,6 +71,65 @@ class Tests(unittest.TestCase):
    with patch.object(m.subprocess,'check_output',side_effect=OSError('netlink blocked')):
     with self.assertRaisesRegex(OSError,'netlink blocked'):m.known_neighbor(args,Path(d)/'read-error.json')
    self.assertIn('neighbor read failed',json.loads((Path(d)/'read-error.json').read_text())['refusal'])
+ def test_cached_candidate_adapter_preserves_stale_without_claiming_reachability(self):
+  args=types.SimpleNamespace(interface='eth0',known_mac='28:cd:c1:09:78:41')
+  row=dict(dst='192.168.0.173',lladdr=args.known_mac,state=['STALE'])
+  with tempfile.TemporaryDirectory()as d,patch.object(m.subprocess,'check_output',return_value=json.dumps([row])):
+   peer,rows=m.scoped_neighbor_candidate(args,Path(d)/'neighbor.json')
+   self.assertEqual(peer,row['dst']);self.assertEqual(rows,[row])
+   saved=json.loads((Path(d)/'neighbor.json').read_text())
+   self.assertEqual(saved['identity_decision'],'matched')
+   self.assertEqual(saved['reachability_decision'],'cached_not_REACHABLE')
+ def test_cached_scope_adapter_binds_one_real_local_socket_across_arm(self):
+  try:listener=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+  except PermissionError:self.skipTest('loopback socket unavailable in this sandbox')
+  try:client=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+  except PermissionError:
+   listener.close();self.skipTest('loopback socket unavailable in this sandbox')
+  with tempfile.TemporaryDirectory()as d,\
+       socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)as control,\
+       listener,client:
+   path=str(Path(d)/'control.sock');control.bind(path);control.listen()
+   listener.bind(('127.0.0.1',0));listener.listen();port=listener.getsockname()[1]
+   client.connect(('127.0.0.1',port))
+   accepted,_=listener.accept()
+   try:
+    args=types.SimpleNamespace(interface='lo',known_mac='28:cd:c1:09:78:41',
+        local_ip='127.0.0.1',port=port,host_pid=os.getpid(),device='lcd',socket=Path(path))
+    state=dict(boot=f'test-{os.getpid():x}',run='0',phase='idle',connection=1,session=2,target='lcd')
+    row=dict(dst='127.0.0.1',lladdr=args.known_mac,state=['STALE'])
+    cookie_box=[[1234,0]]
+    changed_on_second_query=[False]
+    class Diag:
+     def query(self,target,cookie=None):
+      value=[1235,0]if cookie is not None and changed_on_second_query[0]else cookie_box[0]
+      return dict(inode=target['inode'],cookie=value,state=1)
+     def close(self):pass
+    observer=types.SimpleNamespace(Diag=Diag,stamp=lambda:{},validate_target=lambda target:None)
+    def output(command,**kwargs):
+     if 'neigh'in command:return json.dumps([row])
+     if 'route'in command:return json.dumps([dict(dst='127.0.0.1',dev='lo',prefsrc='127.0.0.1')])
+     raise AssertionError(command)
+    with patch.object(m.subprocess,'check_output',side_effect=output):
+     before=m.refresh_target(args,lambda _:state,observer,expected_phase='idle',
+                             bound_cached_scope=True)
+     self.assertTrue(before['scope_decision']['scope_bound'])
+     self.assertFalse(before['scope_decision']['recent_kernel_reachability'])
+     state.update(run='one',phase='armed');row['state']=['DELAY']
+     after=m.refresh_target(args,lambda _:state,observer,expected_phase='armed',
+                            bound_cached_scope=True,prior=before)
+     self.assertTrue(after['scope_decision']['scope_bound'])
+     self.assertEqual(after['scope_decision']['neighbor_state'],'DELAY')
+     changed_on_second_query[0]=True
+     with self.assertRaisesRegex(ValueError,'socket cookie changed'):
+      m.refresh_target(args,lambda _:state,observer,expected_phase='armed',
+                       bound_cached_scope=True,prior=before)
+     changed_on_second_query[0]=False
+     cookie_box[0]=[1235,0]
+     with self.assertRaisesRegex(ValueError,'pre/post ARM target/socket binding changed'):
+      m.refresh_target(args,lambda _:state,observer,expected_phase='armed',
+                       bound_cached_scope=True,prior=before)
+   finally:accepted.close()
  def test_preflight_socket_cookie_and_binding_must_survive_arm(self):
   target=dict(interface='eth0',local_ip='192.168.0.120',local_port=16153,
               peer_ip='192.168.0.173',peer_port=55555,inode=123,pid=456,

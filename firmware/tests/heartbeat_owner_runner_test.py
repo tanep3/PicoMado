@@ -232,9 +232,10 @@ class Tests(unittest.TestCase):
                 interface='eth0',known_mac='28:cd:c1:09:78:41',local_ip='192.168.0.120',port=16153)
             config=root/'config.json';config.write_text(json.dumps(cfg));out=root/'trial'
             with patch.object(sys,'argv',['heartbeat_capture_runner.py','--config',str(config),'--dir',str(out),'--execute']),\
-                 patch.object(run.hc.txlib,'refresh_target',side_effect=ValueError('neighbor not REACHABLE')),\
+                 patch.object(run.hc.txlib,'refresh_target',side_effect=ValueError('neighbor not REACHABLE')) as resolver,\
                  patch.object(run,'Owner',side_effect=AssertionError('USB opened')):
                 with self.assertRaisesRegex(ValueError,'neighbor not REACHABLE'):run.main()
+            self.assertTrue(resolver.call_args.kwargs['bound_cached_scope'])
             self.assertEqual(json.loads((out/'target-preflight-error.json').read_text())['USB_opened'],False)
             self.assertFalse((out/'owner.private.jsonl').exists())
     def scenario(self,name='normal',disk_failure=False,result_failure=False,sim=None,initial_clock=0):
