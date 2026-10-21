@@ -164,16 +164,16 @@ class Validation(unittest.TestCase):
 class Prepare(unittest.TestCase):
     class USB:
         fd=7
-        def __init__(self):self.calls=[];self.old_caps=False;self.old_live=False;self.state='0'
+        def __init__(self):self.calls=[];self.old_caps=False;self.old_live=False;self.state='0';self.generation=1
         def request(self,command,prefix):
             self.calls.append(command)
             if command=='AP2 CAPS':return ['ap2 caps v=3 hb=1 event=19' if not self.old_caps else 'ap2 caps v=2']
             if command=='CY1 CAPS':return ['cy1 caps '+ ' '.join(k+'='+v for k,v in hc.cy.SCHEMA.items())]
             if command=='EV1 STATUS':return ['ev1 status b=1 on=0 sat=0 seq=0']
             if command.startswith('AP2 ARM_HB'):self.state='4'
-            if prefix=='ap2 status ':return [f'ap2 status boot=1 run={"0" if self.state=="0" else "a"} state={self.state} gen=1']
+            if prefix=='ap2 status ':return [f'ap2 status boot=1 run={"0" if self.state=="0" else "a"} state={self.state} gen={self.generation}']
             if command=='AP2 TRIGGER':return ['ap2 trigger b=1 r=a mode=1 o=7 g=7 m=0 flags=0']
-            if command=='AP2 LIVE':return ['ap2 live boot=1 session=9 active=1 gen=1 buttons=0 begin=0 state=4 trigger=0'+('' if self.old_live else ' message=7')]
+            if command=='AP2 LIVE':return [f'ap2 live boot=1 session=9 active=1 gen={self.generation:x} buttons=0 begin=0 state=4 trigger=0'+('' if self.old_live else ' message=7')]
             raise AssertionError(command)
     def host(self,log,bad=False):
         state=dict(phase='idle',boot='host',run='0',target='lcd',heartbeat_trigger=1,connection=431,session=9,last_message=7)
@@ -238,6 +238,13 @@ class Prepare(unittest.TestCase):
             after=json.loads((Path(d)/'baseline-arm-refusal.json').read_text())
             self.assertNotIn('message',before['pico_before']['value'])
             self.assertIsNotNone(after['host_after'])
+    def test_status_decimal_live_hex_generation_is_one_binding(self):
+        usb=self.USB();usb.generation=15
+        with tempfile.TemporaryDirectory()as d:
+            ready=hc.prepare(usb,self.host([]),'lcd','a',Path(d))
+            self.assertEqual(ready['generation'],15)
+            bracket=json.loads((Path(d)/'baseline-before-arm.json').read_text())
+            self.assertEqual(bracket['pico_before']['value']['gen'],'f')
     def test_observation_finite_and_finally_restores_DTR(self):
         for fail in [False,True]:
             log=[]

@@ -72,7 +72,7 @@ def prepare(usb, host, device, run, out):
     require(pre_host['boot'] == hs['boot'] and pre_host['connection'] == hs['connection']
             and pre_host['session'] == hs['session'] and pre_host['phase'] == 'idle',
             'host binding changed before arm')
-    require(pre_pico['boot'] == ps['boot'] and pre_pico['gen'] == ps['gen']
+    require(pre_pico['boot'] == ps['boot'] and int(pre_pico['gen'], 16) == int(ps['gen'], 10)
             and pre_pico['state'] == '4', 'Pico binding changed before host arm')
     arm_start = time.monotonic_ns()
     try:
