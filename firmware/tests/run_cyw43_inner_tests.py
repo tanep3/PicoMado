@@ -10,6 +10,11 @@ rows=[]
 for variant,text in [('OFF',original),('ON',modified)]:
  d=a.out/variant;d.mkdir(exist_ok=True)
  chunks=[function(text,'static int sdpcm_process_rx_packet('),function(text,'static int cyw43_ll_sdpcm_poll_device(',True),function(text,'static int cyw43_sdpcm_send_common('),function(text,'int cyw43_ll_send_ethernet(')]
+ # The pinned SDK introduced a file-scope polarity constant used by the extracted SPI poll.
+ start=text.index('// Configure the active level of the host interrupt pin.')
+ end=text.index('\n#if CYW43_USE_STATS',start)
+ chunks.insert(0,text[start:end])
+ chunks.insert(0,'#define CYW43_PIN_WL_HOST_WAKE 1')
  (d/'generated_sdk_functions.inc').write_text('\n\n'.join(chunks))
  for sanitized in [False,True]:
   tag=variant+('-asan-ubsan'if sanitized else'-native');binary=a.out/tag

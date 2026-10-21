@@ -6,7 +6,7 @@
 #pragma GCC diagnostic pop
 #include <stdlib.h>
 #include "../src/cyw43_inner_probe.c"
-const char pm_cyw43_inner_translation_unit[]="cyw43-inner-v1:a4e6baa5";
+const char pm_cyw43_inner_translation_unit[]="cyw43-inner-v1:7f4c9375";
 void pm_net_cyw_status(pm_cyw_status*out){pm_cyw_probe_status(out);}
 bool pm_net_cyw_read(uint64_t b,uint64_t r,unsigned i,pm_cyw_row*out){return pm_cyw_probe_row(b,r,i,out);}
 static void fixture_command(const char*s){input(s);input("\n");drain();}

@@ -18,8 +18,12 @@ for device in sample-a E-ink_0 E-ink_1; do
 done
 buildrun tx-adapter -DPM_USE_SAMPLE_CONFIG=1 -DPM_TRACE_ENABLE=1 -DPM_ACK_PATH_PROBE=1 -DPM_TX_LINK_PROBE=1 -DPM_NET_TX_THREADS=1 -Idevices/sample-a -Itests/net_stubs -Itests/app_stubs -I. tests/tx_adapter_test.c src/ws_accept.c src/trace.c src/rx_stats.c src/tx_link_probe.c -pthread
 buildrun usb-multiplex -DPM_ACK_PATH_PROBE=1 -DPM_USB_BUTTON_SIM=1 -DPM_TRACE_ENABLE=1 -Idevices/sample-a -Itests/app_stubs tests/usb_multiplex_test.c src/ack_probe.c src/usb_control.c src/button_sim.c src/core.c src/trace.c src/rx_stats.c
+buildrun heartbeat-trigger -DPM_ACK_PATH_PROBE=1 -DPM_TRACE_ENABLE=1 -Idevices/sample-a -Itests/app_stubs tests/ack_probe_heartbeat_test.c src/core.c
+buildrun heartbeat-net -DPM_ACK_PATH_PROBE=1 -DPM_TX_LINK_PROBE=1 -DPM_CYW43_INNER_PROBE=1 -DPM_TRACE_ENABLE=1 -DPM_NET_TEST_OUTPUT_HOOK=1 -Idevices/sample-a -Itests/net_stubs -Itests/app_stubs -I. tests/heartbeat_net_test.c src/ack_probe.c src/cyw43_inner_probe.c src/tx_link_probe.c src/core.c src/ws_accept.c src/trace.c src/rx_stats.c
 # Existing AP2 export and strict host validation must survive shared-parser integration.
 cc "${base[@]}" -DPM_ACK_PATH_PROBE=1 -DPM_TRACE_ENABLE=1 -Idevices/sample-a -Itests/app_stubs tests/ack_probe_test.c src/core.c src/ack_probe.c src/trace.c src/rx_stats.c -o "$work/ack-probe"
 export PM_ACK_EXPORT_FIXTURE="$work/export.txt"
 "$work/ack-probe"
 python3 tests/ack_probe_v2_test.py
+
+python3 tests/heartbeat_capture_test.py

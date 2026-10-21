@@ -2,7 +2,7 @@
 import struct
 from pathlib import Path
 import ack_probe_v2 as ap
-SCHEMA={'v':'1','rows':'8','crc':'100','off':'e','depth':'4','row':'90','src':'cyw43-inner-v1:a4e6baa5'}
+SCHEMA={'v':'1','rows':'f','crc':'100','off':'e','depth':'4','row':'90','src':'cyw43-inner-v1:7f4c9375'}
 def require(ok,why):
  if not ok:raise ValueError(why)
 def one(usb,command,prefix):
@@ -46,7 +46,7 @@ def classify(parts,loss=False):
 def collect(usb,boot,run,out=None):
  caps=capabilities(usb);status=one(usb,'CY1 STATUS','cy1 status ')
  require(status['b']==boot and status['r']==run and status['active']=='0','CY1 capture binding/state mismatch')
- quality=one(usb,'CY1 QUALITY','cy1 quality ');n=int(status['n'],16);require(0<=n<=8,'CY1 count bound');rows=[]
+ quality=one(usb,'CY1 QUALITY','cy1 quality ');n=int(status['n'],16);require(0<=n<=15,'CY1 count bound');rows=[]
  if out is not None:
   root=Path(out)/'cyw43-parts';root.mkdir(exist_ok=False);ap.persist(root/'identity.json',{'caps':caps,'status':status,'quality':quality})
  for i in range(n):

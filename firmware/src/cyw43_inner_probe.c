@@ -13,9 +13,10 @@ static struct {
  bool active,changed,copy_valid;
  pm_cyw_row rows[PM_CYW_INNER_CAP];
 } probe;
+_Static_assert(PM_CYW_INNER_CAP<=15,"ticket slot is four bits, zero reserved");
 _Static_assert(sizeof(pm_cyw_key)==20,"explicit key layout");
 _Static_assert(sizeof(pm_cyw_row)<=144,"fixed row budget");
-_Static_assert(sizeof probe<=1536,"inner probe BSS budget");
+_Static_assert(sizeof probe<=2544,"inner probe BSS budget");
 static void inc(uint32_t *v){if(*v==UINT32_MAX)probe.saturated=1;else ++*v;}
 static void add(uint32_t *v,uint32_t n){if(n>UINT32_MAX-*v){*v=UINT32_MAX;probe.saturated=1;}else *v+=n;}
 static void inc16(uint16_t *v,pm_cyw_row *r){if(*v==UINT16_MAX){r->flags|=PM_CY_SAT;probe.saturated=1;}else ++*v;}

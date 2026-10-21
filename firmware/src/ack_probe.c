@@ -14,6 +14,7 @@ static struct {
  uint32_t sim_count,sim_step;
  bool live_active,usb_connected;
  uint32_t message,connection,buttons,head,prepared_crc,prepared_length,read_from,read_count,read_row;
+ struct {uint32_t origin,gate,message,flags;uint8_t mode;} trigger;
  uint8_t active_kind;
  bool reading,input_overflow;
  unsigned input_used;
@@ -55,6 +56,8 @@ void pm_ack_probe_usb_state(bool connected){
  if(connected && probe.summary.state==PM_AP_ARMED)probe.summary.state=PM_AP_PREPARED;
  if(!connected && probe.usb_connected && probe.summary.state==PM_AP_PREPARED){
   probe.summary.state=PM_AP_ARMED;probe.summary.gate_us=now;probe.summary.gate_buttons=probe.buttons;
+  probe.trigger.gate=probe.message;
+  if(probe.trigger.mode&&probe.trigger.gate!=probe.trigger.origin)probe.trigger.flags|=2u;
  }
  if(connected && probe.summary.state==PM_AP_RECORDING && !probe.summary.usb_overlap_us)probe.summary.usb_overlap_us=now?now:1;
  probe.usb_connected=connected;
@@ -65,13 +68,15 @@ void pm_ack_probe_context(uint64_t s,uint64_t f){probe.session=s;probe.frame=f;}
 void pm_ack_probe_note(pm_ack_probe_event e,uint8_t k,uint64_t s,uint64_t f,uint32_t a,uint32_t b,uint32_t c,uint32_t d){append(e,k,0,s,f,0,a,b,c,d);}
 void pm_ack_probe_button(uint64_t s,uint64_t display,uint64_t owner,unsigned b,bool long_press){
  uint64_t now=time_us_64();expire(now);probe.buttons++;
- if(probe.summary.state==PM_AP_ARMED){probe.summary.state=PM_AP_RECORDING;probe.summary.trigger_us=now;probe.next_sample=now;}
+ if(probe.trigger.mode&&probe.summary.state!=PM_AP_IDLE&&probe.summary.state!=PM_AP_FROZEN)probe.trigger.flags|=1u;
+  if(probe.summary.state==PM_AP_ARMED&&!probe.trigger.mode){probe.summary.state=PM_AP_RECORDING;probe.summary.trigger_us=now;probe.next_sample=now;}
  append(PM_AP_BUTTON,0,0,s,0,0,b,long_press,0,0);
  append(PM_AP_CONTEXT,0,0,s,0,0,(uint32_t)display,(uint32_t)(display>>32),(uint32_t)owner,(uint32_t)(owner>>32));
 }
 void pm_ack_probe_sim_button(uint64_t session,uint64_t display,uint64_t owner,unsigned b,bool long_press,uint64_t job,unsigned step){
  uint64_t now=time_us_64();expire(now);
- if(probe.summary.state==PM_AP_ARMED){probe.summary.state=PM_AP_RECORDING;probe.summary.trigger_us=now;probe.next_sample=now;}
+ if(probe.trigger.mode&&probe.summary.state!=PM_AP_IDLE&&probe.summary.state!=PM_AP_FROZEN)probe.trigger.flags|=1u;
+  if(probe.summary.state==PM_AP_ARMED&&!probe.trigger.mode){probe.summary.state=PM_AP_RECORDING;probe.summary.trigger_us=now;probe.next_sample=now;}
  if(probe.summary.state!=PM_AP_RECORDING)return;
  probe.sim_count++;probe.sim_job=job;probe.sim_step=step;
  append(PM_AP_SIM_BUTTON,0,0,session,0,0,(uint32_t)job,(uint32_t)(job>>32),step,(b&255u)|(long_press?256u:0));
@@ -84,17 +89,24 @@ bool pm_ack_probe_capture(uint64_t *boot,uint64_t *run,uint64_t *deadline,unsign
 }
 bool pm_ack_probe_usb_busy(void){return probe.reply[0]||probe.reading||probe.pending_length;}
 void pm_ack_probe_before_lock(uint8_t k,const char *json){
+ if(k==5 && probe.trigger.mode && probe.summary.state==PM_AP_ARMED && !probe.usb_connected && probe.live_active){
+  if(probe.message==UINT32_MAX){probe.trigger.flags|=8u;return;}
+  uint64_t now=time_us_64();probe.summary.state=PM_AP_RECORDING;probe.summary.trigger_us=now;probe.next_sample=now;
+  probe.trigger.message=probe.message+1;probe.session=probe.live_session;probe.frame=0;
+  append(PM_AP_PERIODIC_TRIGGER,5,probe.trigger.message,probe.live_session,0,0,probe.trigger.origin,probe.trigger.gate,probe.trigger.flags,probe.connection);
+ }
  probe.active_kind=0;probe.prepared_crc=probe.prepared_length=0;
  if(tracked(k)&&probe.summary.state==PM_AP_RECORDING){size_t n=strnlen(json,1025);if(n<=1024)probe.prepared_crc=pm_crc32((const uint8_t *)json,n);probe.prepared_length=(uint32_t)n;append(PM_AP_BEFORE_LOCK,k,probe.message+1,probe.session,probe.frame,0,probe.prepared_crc,probe.prepared_length,0,0);}
 }
 void pm_ack_probe_locked(uint8_t k){if(tracked(k))append(PM_AP_LOCKED,k,probe.message+1,probe.session,probe.frame,0,0,0,0,0);}
 void pm_ack_probe_encoded(uint8_t k,const char *json){
+ if(probe.trigger.mode&&probe.summary.state!=PM_AP_IDLE&&probe.summary.state!=PM_AP_FROZEN&&probe.message==UINT32_MAX)probe.trigger.flags|=8u;
  probe.message++;probe.active_kind=tracked(k)?k:0;(void)json;
  if(probe.active_kind)append(PM_AP_ENCODED,k,probe.message,probe.session,probe.frame,0,probe.prepared_crc,probe.prepared_length,0,0);
 }
 void pm_ack_probe_net(pm_ack_probe_event e,uint16_t flags,uint32_t a,uint32_t b,uint32_t c,uint32_t d){if(probe.active_kind)append(e,probe.active_kind,probe.message,probe.session,probe.frame,flags,a,b,c,d);}
 void pm_ack_probe_send_return(uint8_t k,bool ok){if(tracked(k))append(PM_AP_SEND_RETURN,k,probe.message,probe.session,probe.frame,0,ok,0,0,0);probe.active_kind=0;}
-void pm_ack_probe_connection(void){probe.message=0;probe.active_kind=0;probe.session=probe.frame=0;probe.connection++;if(probe.summary.state!=PM_AP_FROZEN)probe.summary.connections=probe.connection;append(PM_AP_CONNECTION,0,0,0,0,0,probe.connection,0,0,0);}
+void pm_ack_probe_connection(void){if(probe.trigger.mode&&probe.summary.state!=PM_AP_IDLE&&probe.summary.state!=PM_AP_FROZEN)probe.trigger.flags|=4u;probe.message=0;probe.active_kind=0;probe.session=probe.frame=0;probe.connection++;if(probe.summary.state!=PM_AP_FROZEN)probe.summary.connections=probe.connection;append(PM_AP_CONNECTION,0,0,0,0,0,probe.connection,0,0,0);}
 bool pm_ack_probe_sample_due(void){if(probe.summary.state!=PM_AP_RECORDING)return false;uint64_t now=time_us_64();expire(now);if(probe.summary.state!=PM_AP_RECORDING||now<probe.next_sample)return false;probe.next_sample=now+1000000;return true;}
 void pm_ack_probe_sample(uint16_t flags,uint32_t a,uint32_t b,uint32_t c,uint32_t d){append(PM_AP_TCP_SAMPLE,0,probe.message,0,0,flags,a,b,c,d);}
 size_t pm_ack_probe_ram_bytes(void){return sizeof probe;}
@@ -118,6 +130,8 @@ void pm_ack_probe_command(const char *line){
  if(probe.reply[0]||probe.reading||probe.pending_length)return;
  char copy[96];if(strlen(line)>=sizeof copy){response("ap2 error=length\n");return;}strcpy(copy,line);
  char *word[6],*save=NULL;unsigned n=0;for(char *p=strtok_r(copy," \r\n",&save);p;p=strtok_r(NULL," \r\n",&save)){if(n==6){response("ap2 error=syntax\n");return;}word[n++]=p;}
+ if(n==2&&!strcmp(word[0],"AP2")&&!strcmp(word[1],"CAPS")){response("ap2 caps v=3 hb=1 event=19\n");return;}
+ if(n==2&&!strcmp(word[0],"AP2")&&!strcmp(word[1],"TRIGGER")){response("ap2 trigger b=%llx r=%llx mode=%u o=%x g=%x m=%x flags=%x\n",(unsigned long long)probe.summary.boot,(unsigned long long)probe.summary.run,probe.trigger.mode,probe.trigger.origin,probe.trigger.gate,probe.trigger.message,probe.trigger.flags);return;}
  if(n==2&&!strcmp(word[0],"AP2")&&!strcmp(word[1],"SYNTH")){response("ap2 synth boot=%llx run=%llx n=%x job=%llx step=%x\n",(unsigned long long)probe.summary.boot,(unsigned long long)probe.summary.run,probe.sim_count,(unsigned long long)probe.sim_job,probe.sim_step);return;}
  if(n==2&&!strcmp(word[0],"AP2")&&!strcmp(word[1],"QUALITY")){response("ap2 quality boot=%llx run=%llx gate=%llx buttons=%x overlap=%llx\n",(unsigned long long)probe.summary.boot,(unsigned long long)probe.summary.run,(unsigned long long)probe.summary.gate_us,probe.summary.gate_buttons,(unsigned long long)probe.summary.usb_overlap_us);return;}
  if(n==2&&!strcmp(word[0],"AP2")&&!strcmp(word[1],"WINDOW")){response("ap2 window boot=%llx run=%llx trigger=%llx freeze=%llx begin=%x end=%x\n",(unsigned long long)probe.summary.boot,(unsigned long long)probe.summary.run,(unsigned long long)probe.summary.trigger_us,(unsigned long long)probe.summary.freeze_us,probe.summary.arm_buttons,probe.summary.freeze_buttons);return;}
@@ -127,9 +141,12 @@ void pm_ack_probe_command(const char *line){
  uint64_t boot,run,extra=0;
  if(n<4||strcmp(word[0],"AP2")||!hex64(word[2],&boot)||!hex64(word[3],&run)||!run){response("ap2 error=syntax\n");return;}
  if(boot!=probe.summary.boot){response("ap2 error=boot\n");return;}
- if(!strcmp(word[1],"ARM")&&n==4){
-  if(probe.summary.state!=PM_AP_IDLE){if(run==probe.summary.run)status();else response("ap2 error=retained\n");return;}
+ if((!strcmp(word[1],"ARM")||!strcmp(word[1],"ARM_HB"))&&n==4){
+  unsigned mode=!strcmp(word[1],"ARM_HB");
+  if(probe.summary.state!=PM_AP_IDLE){if(run==probe.summary.run&&mode==probe.trigger.mode)status();else response("ap2 error=retained\n");return;}
   if(run<=probe.summary.last_run){response("ap2 error=old_run\n");return;}
+  if(mode&&probe.message==UINT32_MAX){response("ap2 error=ordinal\n");return;}
+  memset(&probe.trigger,0,sizeof probe.trigger);probe.trigger.mode=(uint8_t)mode;probe.trigger.origin=probe.message;probe.trigger.gate=probe.message;
   probe.sim_count=probe.sim_step=0;probe.sim_job=0;probe.summary.last_run=run;probe.summary.connections=probe.connection;probe.summary.run=run;probe.summary.arm_buttons=probe.buttons;probe.summary.armed_us=time_us_64();probe.summary.state=probe.usb_connected?PM_AP_PREPARED:PM_AP_ARMED;probe.summary.gate_us=probe.usb_connected?0:time_us_64();probe.summary.gate_buttons=probe.buttons;status();return;
  }
  if(!strcmp(word[1],"RELEASE")&&n==5&&probe.summary.state==PM_AP_IDLE&&run==probe.summary.last_run&&hex64(word[4],&extra)&&extra==probe.summary.last_digest){status();return;}
@@ -143,7 +160,7 @@ void pm_ack_probe_command(const char *line){
  }
  if(!strcmp(word[1],"RELEASE")&&n==5&&hex64(word[4],&extra)){
   if(probe.summary.state!=PM_AP_FROZEN||extra!=probe.summary.digest){response("ap2 error=digest\n");return;}
-  uint64_t b=probe.summary.boot,last=probe.summary.last_run;uint32_t gen=probe.summary.connections,previous=probe.summary.digest;memset(&probe.summary,0,sizeof probe.summary);probe.summary.boot=b;probe.summary.last_run=last;probe.summary.last_digest=previous;probe.summary.connections=gen;probe.head=0;status();return;
+  uint64_t b=probe.summary.boot,last=probe.summary.last_run;uint32_t gen=probe.summary.connections,previous=probe.summary.digest;memset(&probe.summary,0,sizeof probe.summary);probe.summary.boot=b;probe.summary.last_run=last;probe.summary.last_digest=previous;probe.summary.connections=gen;probe.head=0;memset(&probe.trigger,0,sizeof probe.trigger);status();return;
  }
  response("ap2 error=syntax\n");
 }

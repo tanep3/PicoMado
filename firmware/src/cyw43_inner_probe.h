@@ -3,7 +3,7 @@
 #ifndef PM_CYW43_INNER_PROBE
 #define PM_CYW43_INNER_PROBE 0
 #endif
-#define PM_CYW_INNER_CAP 8u
+#define PM_CYW_INNER_CAP 15u
 #define PM_CYW_INNER_CRC_CAP 256u
 #define PM_CYW_INNER_OFFSET 14u /* BDC4 + Ethernet; exclude SDPCM12 + padding2. */
 #define PM_CYW_INNER_DEPTH 4u

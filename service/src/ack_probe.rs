@@ -75,6 +75,13 @@ struct State {
     bound: u64,
     session: u64,
     last_accept: u64,
+    last_message: u64,
+    hb_mode: bool,
+    baseline_message: u64,
+    expected_message: u64,
+    trigger_message: u64,
+    hb_connection: u64,
+    hb_session: u64,
     hooks: u64,
     total_ns: u64,
     max_ns: u64,
@@ -111,6 +118,13 @@ impl State {
             bound: 0,
             session: 0,
             last_accept: 0,
+            last_message: 0,
+            hb_mode: false,
+            baseline_message: 0,
+            expected_message: 0,
+            trigger_message: 0,
+            hb_connection: 0,
+            hb_session: 0,
             hooks: 0,
             total_ns: 0,
             max_ns: 0,
@@ -163,12 +177,22 @@ impl State {
         if !matches!(self.phase, Phase::Armed | Phase::Recording) {
             return false;
         }
-        if self.phase == Phase::Armed
-            && r.event == Event::Decoded
-            && matches!(r.kind, 6 | 7 | 14 | 15 | 16)
-        {
-            self.phase = Phase::Recording;
-            self.trigger = r.us;
+        let mut bad_origin = false;
+        if self.phase == Phase::Armed && r.event == Event::Decoded {
+            let starts = if self.hb_mode {
+                let good = r.message == self.expected_message && r.kind == 5
+                    && r.connection == self.hb_connection && r.session == self.hb_session;
+                bad_origin = !good;
+                good
+            } else { matches!(r.kind, 6 | 7 | 14 | 15 | 16) };
+            if starts {
+                self.phase = Phase::Recording;
+                self.trigger = r.us;
+                self.trigger_message = r.message;
+            }
+        } else if self.hb_mode && r.event == Event::Decoded
+            && (r.message <= self.expected_message || r.connection != self.hb_connection || r.session != self.hb_session) {
+            bad_origin = true;
         }
         let at = (self.head + self.count) % CAP;
         if self.count == CAP {
@@ -183,6 +207,7 @@ impl State {
             self.count += 1;
         }
         self.records[at] = r;
+        if bad_origin { self.freeze_reason(r.us, "heartbeat_origin"); }
         true
     }
     fn arm(&mut self, run: u64, now: u64) -> Result<(), &'static str> {
@@ -202,6 +227,12 @@ impl State {
         self.reason = "none";
         self.armed = now;
         self.trigger = 0;
+        self.hb_mode = false;
+        self.baseline_message = 0;
+        self.expected_message = 0;
+        self.trigger_message = 0;
+        self.hb_connection = self.bound;
+        self.hb_session = self.session;
         self.freeze = 0;
         self.head = 0;
         self.count = 0;
@@ -225,10 +256,19 @@ impl State {
         self.head = 0;
         Ok(())
     }
+    fn seen(&mut self, connection: u64, ordinal: u64) {
+        if self.bound == connection && self.phase != Phase::Frozen && ordinal > self.last_message {
+            self.last_message = ordinal;
+        }
+    }
     fn accept(&mut self, connection: u64, session: u64) -> bool {
         if connection <= self.last_accept {
             return false;
         }
+        if self.hb_mode && matches!(self.phase, Phase::Armed | Phase::Recording) {
+            self.freeze_reason(self.start.elapsed().as_micros() as u64, "heartbeat_connection");
+        }
+        self.last_message = 0;
         self.last_accept = connection;
         self.bound = connection;
         self.session = session;
@@ -321,6 +361,15 @@ pub fn bind_accepted(
     }
     true
 }
+// Target-only ordinal metadata, including IDLE. No CRC, allocation, IO or wait.
+// Frozen evidence is immutable; a later normal message refreshes IDLE metadata.
+pub fn message_seen(connection: u64, ordinal: u64) {
+    if connection == 0 || CONNECTION.load(Ordering::Relaxed) != connection { return; }
+    let Some(state) = STATE.get() else { return; };
+    if let Ok(mut s) = state.try_lock() {
+        s.seen(connection, ordinal);
+    } else { CONTENDED.fetch_add(1, Ordering::Relaxed); }
+}
 pub fn unbind(connection: u64) {
     // Called after normal reader End. An old close cannot clear a newer binding.
     let _ = CONNECTION.compare_exchange(connection, 0, Ordering::Relaxed, Ordering::Relaxed);
@@ -377,9 +426,12 @@ struct Request {
     start: Option<usize>,
     limit: Option<usize>,
     digest: Option<u32>,
+    trigger: Option<String>,
+    baseline: Option<u64>,
+    expected_message: Option<u64>,
 }
 fn status(s: &State) -> serde_json::Value {
-    serde_json::json!({"schema":2,"boot":s.boot,"run":format!("{:x}",s.run),"last_run":format!("{:x}",s.last_run),"target":s.target,"phase":s.phase,"reason":s.reason,"connection":s.bound,"session":s.session,"clock":"host_monotonic_us_since_process_probe_init","armed_us":s.armed,"trigger_us":s.trigger,"freeze_us":s.freeze,"window_us":WINDOW_US,"count":s.count,"capacity":CAP,"pre_overwritten":s.pre_overwritten,"overwritten":s.overwritten,"contended":if s.phase==Phase::Frozen{s.contended_frozen}else{CONTENDED.load(Ordering::Relaxed)},"digest":s.digest,"record_bytes":std::mem::size_of::<Record>(),"hooks":s.hooks,"hook_total_ns":s.total_ns,"hook_max_ns":s.max_ns})
+    serde_json::json!({"schema":2,"heartbeat_trigger":1,"trigger_mode":if s.hb_mode{"heartbeat"}else{"input"},"baseline_message":s.baseline_message,"expected_message":s.expected_message,"trigger_message":s.trigger_message,"last_message":s.last_message,"hb_connection":s.hb_connection,"hb_session":s.hb_session,"boot":s.boot,"run":format!("{:x}",s.run),"last_run":format!("{:x}",s.last_run),"target":s.target,"phase":s.phase,"reason":s.reason,"connection":s.bound,"session":s.session,"clock":"host_monotonic_us_since_process_probe_init","armed_us":s.armed,"trigger_us":s.trigger,"freeze_us":s.freeze,"window_us":WINDOW_US,"count":s.count,"capacity":CAP,"pre_overwritten":s.pre_overwritten,"overwritten":s.overwritten,"contended":if s.phase==Phase::Frozen{s.contended_frozen}else{CONTENDED.load(Ordering::Relaxed)},"digest":s.digest,"record_bytes":std::mem::size_of::<Record>(),"hooks":s.hooks,"hook_total_ns":s.total_ns,"hook_max_ns":s.max_ns})
 }
 fn control(s: &mut State, r: Request, now: u64) -> Result<serde_json::Value, &'static str> {
     s.expire(now);
@@ -400,8 +452,28 @@ fn control(s: &mut State, r: Request, now: u64) -> Result<serde_json::Value, &'s
     }
     if r.op == "arm" {
         let fresh = s.phase == Phase::Idle;
+        let hb = match r.trigger.as_deref().unwrap_or("input") {
+            "input" => false, "heartbeat" => true, _ => return Err("trigger"),
+        };
+        let (baseline, expected) = if hb {
+            let baseline = r.baseline.ok_or("baseline")?;
+            let expected = r.expected_message.ok_or("expected_message")?;
+            if s.bound == 0 || s.session == 0 || baseline >= u32::MAX as u64
+                || expected != baseline + 1 { return Err("baseline"); }
+            if fresh && s.last_message != baseline { return Err("baseline"); }
+            (baseline, expected)
+        } else {
+            if r.baseline.is_some() || r.expected_message.is_some() { return Err("trigger"); }
+            (0, 0)
+        };
+        if !fresh && (s.hb_mode != hb || (hb && (s.baseline_message != baseline || s.expected_message != expected))) {
+            return Err("trigger");
+        }
         s.arm(run, now)?;
         if fresh {
+            s.hb_mode = hb;
+            s.baseline_message = baseline;
+            s.expected_message = expected;
             CONTENDED.store(0, Ordering::Relaxed);
             if s.bound != 0 {
                 s.push(Record {
@@ -633,7 +705,60 @@ mod tests {
             start: None,
             limit: None,
             digest: None,
+            trigger: None,
+            baseline: None,
+            expected_message: None,
         }
+    }
+    fn hb_arm(s: &mut State, baseline: u64) -> Result<serde_json::Value, &'static str> {
+        let mut q=request("arm",s,1);
+        q.trigger=Some("heartbeat".into());q.baseline=Some(baseline);q.expected_message=Some(baseline+1);
+        control(s,q,100)
+    }
+    fn hb_row(us:u64,message:u64,kind:u8)->Record {
+        Record{us,event:Event::Decoded,connection:2,session:9,message,kind,..Record::default()}
+    }
+    #[test]
+    fn heartbeat_watermark_rejects_old_reader_and_preserves_frozen_state() {
+        let mut s=State::new("lcd".into());s.accept(2,9);s.seen(2,7);s.seen(1,999);
+        assert_eq!(s.last_message,7);
+        s.accept(3,10);assert_eq!(s.last_message,0);s.seen(2,999);assert_eq!(s.last_message,0);
+        s.seen(3,1);s.seen(3,0);assert_eq!(s.last_message,1);
+        s.arm(1,1).unwrap();s.freeze(2);s.seen(3,2);assert_eq!(s.last_message,1);
+    }
+    #[test]
+    fn heartbeat_origin_requires_baseline_and_exact_ordinal() {
+        let mut s=State::new("lcd".into());s.accept(2,9);s.last_message=7;
+        assert_eq!(hb_arm(&mut s,6).unwrap_err(),"baseline");assert_eq!(s.phase,Phase::Idle);
+        hb_arm(&mut s,7).unwrap();s.push(hb_row(200,8,5));
+        assert_eq!(s.phase,Phase::Recording);assert_eq!(s.trigger_message,8);
+        s.push(hb_row(15_000_200,9,5));assert_eq!(s.trigger,200);
+        s.expire(20_000_200);assert_eq!(s.phase,Phase::Frozen);
+    }
+    #[test]
+    fn heartbeat_old_wrong_future_and_duplicate_stop_with_evidence() {
+        for (ordinal,kind) in [(7,5),(8,15),(9,5)] {
+            let mut s=State::new("lcd".into());s.accept(2,9);s.last_message=7;hb_arm(&mut s,7).unwrap();
+            s.push(hb_row(200,ordinal,kind));assert_eq!(s.phase,Phase::Frozen);
+            assert_eq!(s.reason,"heartbeat_origin");assert_eq!(s.records[s.head+s.count-1].message,ordinal);
+        }
+        let mut s=State::new("lcd".into());s.accept(2,9);s.last_message=7;hb_arm(&mut s,7).unwrap();
+        s.push(hb_row(200,8,5));s.push(hb_row(201,8,5));assert_eq!(s.reason,"heartbeat_origin");
+    }
+    #[test]
+    fn heartbeat_late_no_arrival_and_reconnect_are_not_forged() {
+        let mut s=State::new("lcd".into());s.accept(2,9);s.last_message=7;hb_arm(&mut s,7).unwrap();
+        s.expire(100_000_000);assert_eq!(s.phase,Phase::Armed);assert_eq!(s.trigger,0);
+        s.push(hb_row(100_000_001,8,5));assert_eq!(s.trigger,100_000_001);
+        s.accept(3,10);assert_eq!(s.phase,Phase::Frozen);assert_eq!(s.reason,"heartbeat_connection");
+        assert_eq!(s.last_message,0);assert_eq!(s.hb_connection,2);
+    }
+    #[test]
+    fn heartbeat_mode_idempotence_and_input_default() {
+        let mut s=State::new("lcd".into());s.accept(2,9);s.last_message=7;hb_arm(&mut s,7).unwrap();
+        hb_arm(&mut s,7).unwrap();let q=request("arm",&s,1);assert_eq!(control(&mut s,q,200).unwrap_err(),"trigger");
+        let mut legacy=State::new("lcd".into());legacy.arm(2,1).unwrap();legacy.push(hb_row(2,1,5));
+        assert_eq!(legacy.phase,Phase::Armed);legacy.push(hb_row(3,2,15));assert_eq!(legacy.phase,Phase::Recording);
     }
     #[test]
     fn ack_probe_wait_and_first_input_deadline() {

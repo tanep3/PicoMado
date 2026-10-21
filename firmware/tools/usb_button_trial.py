@@ -50,8 +50,8 @@ class Serial(ap.Serial):
                 require(self.bytes<=524288 and len(self.pending)<=8192,'USB byte/line bound')
             while b'\n' in self.pending:
                 line,self.pending=self.pending.split(b'\n',1);line=line.decode('ascii','replace').strip()
-                if any(line.startswith(x+' error=')for x in ['usb','ap2','sim','tx1','cy1']):raise ValueError(line)
-                if line.startswith(('ap2 ','sim ','tx1 ','cy1 ')):lines.append(line)
+                if any(line.startswith(x+' error=')for x in ['usb','ap2','sim','tx1','cy1','ev1']):raise ValueError(line)
+                if line.startswith(('ap2 ','sim ','tx1 ','cy1 ','ev1 ')):lines.append(line)
                 if line.startswith(end):return lines
         raise TimeoutError('USB command deadline; accepted state may be uncertain; no retry')
 

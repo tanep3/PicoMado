@@ -2,7 +2,7 @@
 """Generate a diagnostic-only LL translation unit. Never edits the shared SDK."""
 from pathlib import Path
 import argparse,hashlib,json,difflib
-EXPECTED='a4e6baa503b9332a0a445c8b22deb4bee62793c441dc74a200b0fe8065c397c7'
+EXPECTED='7f4c93755b2ab911d18606652497b2f3cd08085ce63b3b1836171d375f806b10'
 def generate(source):
  if hashlib.sha256(source.encode()).hexdigest()!=EXPECTED:raise ValueError('installed cyw43_ll.c differs from reviewed source; refusing instrumentation')
  text=source
@@ -10,7 +10,7 @@ def generate(source):
   nonlocal text
   if text.count(before)!=1:raise ValueError('ambiguous SDK insertion: '+before[:70])
   text=text.replace(before,after)
- text='#include "cyw43_inner_probe.h"\nconst char pm_cyw43_inner_translation_unit[] = "cyw43-inner-v1:a4e6baa5";\n'+text
+ text='#include "cyw43_inner_probe.h"\nconst char pm_cyw43_inner_translation_unit[] = "cyw43-inner-v1:7f4c9375";\n'+text
  one('''        return CYW43_FAIL_FAST_CHECK(-CYW43_EINVAL);
     }
 

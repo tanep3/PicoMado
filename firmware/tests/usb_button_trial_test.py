@@ -54,7 +54,7 @@ class Tests(unittest.TestCase):
     elif command=='AP2 STATUS':line='ap2 status boot=b state=0'
     elif command=='SIM CAPS':line='sim caps b=b keys=4 s=3 state=3'
     elif command.startswith('SIM BIND'):line=f'sim bind b=b rb=b r={hs["run"]} s=3 j={owner.job:x} state=3'
-    elif command=='CY1 CAPS':line='cy1 caps v=1 rows=8 crc=100 off=e depth=4 row=90 src=cyw43-inner-v1:a4e6baa5'
+    elif command=='CY1 CAPS':line='cy1 caps v=1 rows=f crc=100 off=e depth=4 row=90 src=cyw43-inner-v1:7f4c9375'
     elif command.startswith('AP2 ARM'):line='ap2 status boot=b run='+hs['run']+' state=4'
     elif command=='AP2 LIVE':line='ap2 live boot=b session=3 active=1 gen=1 state=4 trigger=0 buttons=0 begin=0'
     elif command.startswith('AP2 FREEZE'):line='ap2 status boot=b run='+hs['run']+' state=3'

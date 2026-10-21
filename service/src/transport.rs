@@ -1177,6 +1177,8 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
                     #[cfg(feature="ack-path-probe")]
                     {if was_unbound {probe_bind_pending=true;}if probe_bind_pending {if let Some(token)=&current {probe_bind_pending=!crate::ack_probe::bind_accepted(&app,token,accept_order.get());}}}
                     #[cfg(feature="ack-path-probe")]
+                    crate::ack_probe::message_seen(accept_order.get(),rx_messages);
+                    #[cfg(feature="ack-path-probe")]
                     crate::ack_probe::record(crate::ack_probe::Event::ProcessDone,accept_order.get(),rx_messages,probe_identity.0,probe_identity.1,probe_identity.2,probe_process_started.as_ref().map_or(0,|started|started.elapsed().as_micros()as u64),1);
                     let binding=if was_unbound {current.clone()}else{None};
                     if let Some(reply) = reply {
