@@ -146,3 +146,7 @@ The model explicitly classifies every Rust WireMessage variant by token-session,
 ### Review-correction contract
 
 [Three scoped corrections](changes/OBS-20261021-01-review-fix-contract.md) fix non-circular workflow evidence, immutable completion and actual build lineage before implementation. They do not replace the existing aggregate, generated model or adapters.
+
+### P2-04 scoped application proof
+
+[Application/effectiveness evidence](changes/OBS-20261021-01-application-evidence-contract.md) replaces assertion-only admission with actual active-root/source and controlled execution/log evidence. This is the sole correction after the three accepted process fixes.

@@ -20,14 +20,8 @@
       ]
     },
     "implementation": {
-      "state": "verified",
-      "evidence": [
-        {
-          "kind": "check",
-          "path": "/home/tane/Documents/Codex/2026-10-19/task-2/observation-prevention-20261021/fix-gate-evidence/check.json",
-          "SHA256": "72e30aa2233dbc0d7abfd12aa0351dd0753979ed99462a67527d56561555b032"
-        }
-      ]
+      "state": "in_progress",
+      "evidence": []
     },
     "independent_verification": {
       "state": "not_started",
@@ -74,11 +68,14 @@
     "docs/contracts-observation-design.md",
     "docs/development-process.md",
     "contracts/observation-domain.json",
-    "docs/changes/OBS-20261021-01-review-fix-contract.md"
+    "docs/changes/OBS-20261021-01-review-fix-contract.md",
+    "docs/changes/OBS-20261021-01-application-evidence-contract.md"
   ],
   "review_corrections": [
     "P2-01 workflow and evidence binding",
     "P2-02 immutable verified completion",
     "P2-03 actual build lineage"
-  ]
+  ],
+  "revision": 2,
+  "supersedes_local_implementation": "fe47acd424ae74018374d63ec874d42b3ed0b3ea"
 }
