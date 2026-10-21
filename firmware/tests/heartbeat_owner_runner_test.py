@@ -237,14 +237,14 @@ class Tests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'neighbor not REACHABLE'):run.main()
             self.assertEqual(json.loads((out/'target-preflight-error.json').read_text())['USB_opened'],False)
             self.assertFalse((out/'owner.private.jsonl').exists())
-    def scenario(self,name='normal',disk_failure=False,result_failure=False,sim=None):
+    def scenario(self,name='normal',disk_failure=False,result_failure=False,sim=None,initial_clock=0):
         m=Model(name);ports=[]
         def port(path):
             self.assertEqual(path,m.path);p=run.ev.SerialPort(path,dtr=False);ports.append(p);return p
         try:
             with tempfile.TemporaryDirectory()as directory:
                 root=Path(directory);owner=run.Owner(m.path,root/'owner.private.jsonl',port_factory=port,ioctl=m.ioctl,quiet_seconds=0,request_seconds=.2)
-                clock=Clock(m);m.clock=clock
+                clock=Clock(m);clock.value=initial_clock;m.clock=clock
                 def target(ready):return dict(binding=dict(boot='host',run='a',connection=431,session=9,target='lcd'))
                 runner=run.Runner(owner,m.host,target,lambda t:Observer(t,m),root,clock=clock.now,wait=clock.sleep,clock_ns=clock.now_ns,sim=sim)
                 if disk_failure or result_failure:
@@ -282,6 +282,22 @@ class Tests(unittest.TestCase):
         self.assertFalse(stopped['complete']);self.assertEqual((lo,hi),(0,0))
         self.assertEqual(sum(c.startswith('SIM STOP')for c in commands),1)
         self.assertTrue(stopped['pico_idle']and stopped['host_idle'])
+    def test_same_session_monotonic_plan_is_bounded_and_saved_before_step(self):
+        plan=dict(key=1,hold_ms=150,anchor_ns=1000000000,anchor_session=9,
+                  anchor_boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip().replace('-',''),
+                  step_to_gate_ms=68,input_offset_ms=548,margin_ms=200)
+        self.assertEqual(run.next_heartbeat_sim_delay(plan,1600000000)['chosen_delay_ms'],13984)
+        with self.assertRaisesRegex(ValueError,'outside one finite job'):
+            run.next_heartbeat_sim_delay(plan,900000000)
+        good,commands,_,lo,hi=self.scenario('mixed_after',sim=plan,initial_clock=1.6)
+        self.assertTrue(good['complete'],good)
+        step=next(c for c in commands if c.startswith('SIM STEP'))
+        self.assertEqual(int(step.split()[6],16),13984)
+        self.assertEqual((lo,hi),(1,1))
+        bad,commands,_,lo,hi=self.scenario('mixed_after',sim=plan,initial_clock=.9)
+        self.assertFalse(bad['complete']);self.assertEqual((lo,hi),(0,0))
+        self.assertTrue(any(c.startswith('SIM STOP') for c in commands))
+        self.assertFalse(any(c.startswith('SIM COMMIT') for c in commands))
     def test_origin_race_and_pre_gate_change_are_quality_stops(self):
         for name in ['prepared_race','gate_race','pending_hb','copy_failure','no_hb']:
             with self.subTest(name=name):

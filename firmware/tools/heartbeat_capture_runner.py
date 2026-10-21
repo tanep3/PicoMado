@@ -27,6 +27,21 @@ class DTRFailure(RuntimeError):
     pass
 
 
+def next_heartbeat_sim_delay(sim, now_ns):
+    """One bounded reservation from a same-session journal monotonic anchor."""
+    target_ns=sim['anchor_ns']+15000000000
+    hc.require(target_ns-now_ns>250000000,'predicted next heartbeat already too near/past')
+    offset_ns=(sim['step_to_gate_ms']+sim['input_offset_ms'])*1000000
+    delay_ms=round((target_ns+sim['margin_ms']*1000000-now_ns-offset_ns)/1000000)
+    hc.require(0<=delay_ms<=14000 and delay_ms+sim['hold_ms']+70<15000,
+               'predicted SIM delay outside one finite job')
+    return dict(mode='same_session_journal',anchor_ns=sim['anchor_ns'],
+                measured_at_ns=now_ns,predicted_next_HB_ns=target_ns,
+                step_to_gate_ms=sim['step_to_gate_ms'],input_offset_ms=sim['input_offset_ms'],
+                margin_ms=sim['margin_ms'],chosen_delay_ms=delay_ms,
+                prediction_guaranteed=False)
+
+
 class Owner:
     """Same SerialPort/Commands as the persistent collector; exactly one open."""
     def __init__(self,path,logpath,*,port_factory=ev.SerialPort,ioctl=fcntl.ioctl,
@@ -176,11 +191,19 @@ class Runner:
         self.identity=None;self.headers=None;self.safe_deadline=None;self.high_attempted=False
         self.interval=None;self.pico=None;self.server=None;self.saved=False
         self.observer_finished=True
-        hc.require(sim is None or (type(sim) is dict and set(sim)=={'key','delay_ms','hold_ms'}
-            and all(type(v)is int for v in sim.values()) and sim['key']==1
-            and 0<=sim['delay_ms']<=14000 and 80<=sim['hold_ms']<=300
-            and sim['delay_ms']+sim['hold_ms']+70<15000), 'bounded one-step SIM plan')
-        self.sim=sim;self.sim_job=None;self.sim_cid=None;self.sim_sent=False
+        fixed={'key','delay_ms','hold_ms'}
+        anchored={'key','hold_ms','anchor_ns','anchor_session','anchor_boot',
+                  'step_to_gate_ms','input_offset_ms','margin_ms'}
+        hc.require(sim is None or(type(sim)is dict and set(sim)in(fixed,anchored)
+            and sim['key']==1 and type(sim['hold_ms'])is int and 80<=sim['hold_ms']<=300
+            and ((set(sim)==fixed and type(sim['delay_ms'])is int
+                  and 0<=sim['delay_ms']<=14000 and sim['delay_ms']+sim['hold_ms']+70<15000)
+                 or (set(sim)==anchored and all(type(sim[k])is int for k in anchored-{'key','anchor_boot'})
+                     and type(sim['anchor_boot'])is str and len(sim['anchor_boot'])==32
+                     and sim['anchor_ns']>0 and sim['anchor_session']>0
+                     and 0<sim['step_to_gate_ms']<=250 and 500<=sim['input_offset_ms']<=750
+                     and 100<=sim['margin_ms']<=500))), 'bounded one-step SIM plan')
+        self.sim=sim;self.sim_job=None;self.sim_cid=None;self.sim_sent=False;self.sim_timing=None
         if sim is not None:self.owner.sim_enabled=True
 
     def sim_ack(self,verb,args,expected):
@@ -201,7 +224,14 @@ class Runner:
                    'SIM capability/session/state')
         self.sim_job=self.ready['sim_job'];self.sim_cid=self.sim_job
         self.sim_ack('BEGIN',f'1 {self.ready["session"]:x} {int(caps["state"]):x}','staging')
-        self.sim_ack('STEP',f'0 {self.sim["delay_ms"]:x} {self.sim["key"]:x} {self.sim["hold_ms"]:x}','staged')
+        if 'anchor_ns' in self.sim:
+            hc.require(self.sim['anchor_session']==self.ready['session'] and
+                       self.sim['anchor_boot']==Path('/proc/sys/kernel/random/boot_id').read_text().strip().replace('-',''),
+                       'journal boot/session no longer matches prepared target')
+            self.sim_timing=next_heartbeat_sim_delay(self.sim,self.ns())
+        else:self.sim_timing=dict(mode='fixed',chosen_delay_ms=self.sim['delay_ms'])
+        self.persist(self.root/'sim-timing.json',self.sim_timing)
+        self.sim_ack('STEP',f'0 {self.sim_timing["chosen_delay_ms"]:x} {self.sim["key"]:x} {self.sim["hold_ms"]:x}','staged')
 
     def stop_sim_if_active(self):
         if self.sim_job is None or not self.owner.trustworthy:return
@@ -285,7 +315,7 @@ class Runner:
             sim_status=hc.one(self.owner,f'SIM STATUS {i["pico_boot"]}','sim status ')
             sim=dict(status=sim_status,
                      bind=hc.one(self.owner,f'SIM BIND {i["pico_boot"]}','sim bind '),
-                     synth=hc.one(self.owner,'AP2 SYNTH','ap2 synth '))
+                     synth=hc.one(self.owner,'AP2 SYNTH','ap2 synth '),timing=self.sim_timing)
             if self.sim_job is not None and int(sim_status['j'],16)==self.sim_job and sim_status['n']=='1':
                 sim['step']=hc.one(self.owner,f'SIM GET {i["pico_boot"]} {self.sim_job:x} 0','sim step ')
             extra['SIM']=sim
@@ -366,6 +396,9 @@ class Runner:
                 and status['run']==run_id and status['last_message']==self.ready['baseline']
                 and status['connection']==self.ready['host_connection'],'origin changed before DTR gate')
             if self.sim is not None:self.sim_ack('COMMIT','','accepted')
+            if self.sim_timing and self.sim_timing['mode']=='same_session_journal':
+                hc.require(self.ns()+100000000<self.sim_timing['predicted_next_HB_ns'],
+                           'predicted heartbeat reached before DTR gate')
             self.coverage['DTR_low_before_ns']=self.ns()
             self.safe_deadline=self.coverage['DTR_low_before_ns']+36100000000
             self.coverage['required_end_ns']=self.safe_deadline
@@ -413,6 +446,9 @@ def main():
     parser.add_argument('--execute',action='store_true');args=parser.parse_args()
     cfg=json.loads(args.config.read_text())
     sim=cfg.get('sim')
+    if sim is not None and 'anchor_ns' in sim:
+        hc.require(sim['anchor_boot']==Path('/proc/sys/kernel/random/boot_id').read_text().strip().replace('-',''),
+                   'journal monotonic boot changed before preflight')
     if not args.execute:
         print(json.dumps(dict(plan_only=True,device=cfg['device'],expected_Flash_ID=cfg['expected_flash_id'],
               single_owner=True,SIM=sim,window_seconds=36.1,firmware_write=False,service_operation=False)));return

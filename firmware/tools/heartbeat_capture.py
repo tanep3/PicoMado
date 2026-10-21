@@ -124,7 +124,10 @@ def prepare(usb, host, device, run, out, *, observation_kind='natural_heartbeat'
                          generation=live.generation.value, caps=CAPS, ev1_sequence=ev1_raw['seq'])
     if sim is not None:
         ready.update(observation_kind=observation_kind, sim_job=int(run, 16),
-                     sim_key=sim['key'], sim_delay_ms=sim['delay_ms'], sim_hold_ms=sim['hold_ms'])
+                     sim_key=sim['key'], sim_delay_ms=sim.get('delay_ms'), sim_hold_ms=sim['hold_ms'])
+        if 'anchor_ns' in sim:
+            ready.update(sim_anchor_ns=sim['anchor_ns'],sim_anchor_session=sim['anchor_session'],
+                         sim_anchor_boot=sim['anchor_boot'])
     ap.persist(Path(out) / 'ready.json', ready)
     return ready
 
