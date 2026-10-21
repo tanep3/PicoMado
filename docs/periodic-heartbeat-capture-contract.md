@@ -1,5 +1,7 @@
 # 自然heartbeat開始の診断契約案
 
+P2補正を文書先行07f5c06で固定した。[隔離実装・検証結果](periodic-heartbeat-capture-results-20261021.md)に固定source/ARM候補と未成立の実機gateを記録した。以下の状態・試験条件は実装前の契約である。
+
 ## 現行ファームでできないこと
 
 対象は書込み済みSDK整合LCD UF2 SHA `11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485`。[先行TCP hole解析](sdk-aligned-sequence-followup-20261021.md)で必要になった「入力前heartbeat初回COPY/TX/CY」を、現行USB機能だけで一式採取することはできない。以下は候補の固定source `SDK-align-20261021T032923Z/source/firmware` で確認した。

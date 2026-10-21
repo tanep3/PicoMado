@@ -1,0 +1,107 @@
+{
+  "source_commit": "660583b52f6d42d86289e663fade3472e347d10a",
+  "design_first_commit": "07f5c062523e3d3396d380082bf158dc8c6bb241",
+  "branch": "diag/heartbeat-capture",
+  "SDK_commit": "079c6f39023649b154152db30f1d781e884879bc",
+  "submodules": {
+    "lib/cyw43-driver": "055d64274b014dd7b1c2fc94d26e8a18face7124",
+    "lib/lwip": "77dcd25a72509eb83f72b033d219b1d40cd8eb95",
+    "lib/btstack": "eb0bb8b5ea6d234ccb940313b47f7a5c3b4e20ec",
+    "lib/mbedtls": "0bebf8b8c7f07abe3571ded48a11aa907a1ffb20",
+    "lib/mbedtls/framework": "dff9da04438d712f7647fd995bc90fadd0c0e2ce",
+    "lib/tinyusb": "86ad6e56c1700e85f1c5678607a762cfe3aa2f47"
+  },
+  "flags": {
+    "PM_EVENT_STREAM": "ON",
+    "PM_STREAM_DIAGNOSTICS": "ON",
+    "PM_ACK_PATH_PROBE": "ON",
+    "PM_USB_BUTTON_SIM": "ON",
+    "PM_TX_LINK_PROBE": "ON",
+    "PM_CYW43_INNER_PROBE": "ON",
+    "PM_AWAY_EEX1": "ON",
+    "PM_EEX1_PORT": "48116",
+    "PM_DEVICE": "PicoMado-lcd1",
+    "PM_USE_SAMPLE": "OFF",
+    "PM_PREPARE_UNBOUND": "OFF",
+    "PM_PREPARE_UNBOUND_PANEL": "OFF",
+    "PICO_BOARD": "pico_w",
+    "CMAKE_BUILD_TYPE": "Release",
+    "PICO_SDK_SUBMODULE_AUTO_UPDATE": "OFF",
+    "PICO_SDK_FETCH_FROM_GIT": "OFF",
+    "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+    "PICO_SDK_PATH": "/home/tane/dev/PicoW/pico-sdk"
+  },
+  "artifacts": {
+    "PicoMado-lcd1.uf2": {
+      "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/PicoMado-lcd1.uf2",
+      "SHA256": "9d4f66d1b71e07ef5c6e85b802201d0b6712b6290cd1c9133b40bdbf36479687"
+    },
+    "picomado_lcd.elf": {
+      "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/picomado_lcd.elf",
+      "SHA256": "bce25a981c62c6be149b82b4a55cc8f309bd9f774a9916fb01627e60fa21bd1b"
+    },
+    "picomado_lcd.elf.map": {
+      "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/picomado_lcd.elf.map",
+      "SHA256": "e1b3884b93cfd65d870413a9995586d7be1a4fa0b72be911e0a8802b9b64397d"
+    }
+  },
+  "memory": {
+    "static_main_RAM": 252072,
+    "heap_possible": 10072,
+    "stack_reserved": 4096
+  },
+  "object_storage": {
+    "ack_probe.c.o": {
+      "before": 5976,
+      "after": 5992,
+      "delta": 16
+    },
+    "cyw43_inner_probe.c.o": {
+      "before": 1288,
+      "after": 2296,
+      "delta": 1008
+    }
+  },
+  "settings_hashes": {
+    "board-id.txt": "9ad7dace15c469d67fc1ffdc3a7190dd6270060dd682ab1ee8adc513cb3bbea5",
+    "config.h": "8efebce22a7a54bae523e7141a6150bfa07261370fd3cb757c19bd43e490c729"
+  },
+  "expected_Flash_ID": "E661640843239D21",
+  "UF2_address_range": [
+    268435456,
+    268876288
+  ],
+  "settings_sector_unwritten": true,
+  "rollback": {
+    "uf2": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z/artifacts/aligned-observed/PicoMado-lcd1.uf2",
+    "SHA256": "11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485"
+  },
+  "capacity_full20s_guaranteed": false,
+  "observer_effect_measured": false,
+  "live_authorized": false,
+  "USB_open": false,
+  "firmware_write": false,
+  "service_operations": false,
+  "SSH": false,
+  "push": false,
+  "tests": {
+    "host_Rust": 286,
+    "firmware_host_PASS_lines": 175,
+    "USB_TX_PASS_lines": 20,
+    "new_Python": 22,
+    "CY_collector": 13,
+    "USB_compatibility_Python": 16,
+    "SDK_wire_scenarios": 18
+  },
+  "limitations": [
+    "20s CY15 full-capacity bound not proven;16th row signals loss",
+    "dynamic stack/heap and live observer effect not measured",
+    "owner primitives only;offline CLI cannot open USB; integration requires reviewed existing owner/observer callbacks",
+    "raw headers+RecvQ must be saved and verified before release",
+    "future firmware update targets LCD only;not performed; host candidate source tested, release server binary not built"
+  ],
+  "evidence_root": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021",
+  "validation_SHA256": "a17d54fe924b76bbad22aea513d20b5fd321f21693adfeb3e9e53e655d32f4cb",
+  "implementation_review": "pending; no new live operations",
+  "server_release_binary": "not built in this stage"
+}
