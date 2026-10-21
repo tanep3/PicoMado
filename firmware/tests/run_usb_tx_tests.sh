@@ -27,3 +27,5 @@ export PM_ACK_EXPORT_FIXTURE="$work/export.txt"
 python3 tests/ack_probe_v2_test.py
 
 python3 tests/heartbeat_capture_test.py
+python3 tests/heartbeat_evidence_contract_test.py
+python3 tests/heartbeat_owner_runner_test.py
