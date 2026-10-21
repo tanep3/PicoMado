@@ -1,0 +1,159 @@
+{
+  "schema": 1,
+  "change": "OBS-20261021-01",
+  "version": 1,
+  "values": {
+    "PicoSendAttemptOrdinal": "u32",
+    "HostDecodedOrdinal": "u64",
+    "HostProcessedOrdinal": "u64",
+    "PicoMicros": "u64",
+    "HostProbeMicros": "u64",
+    "PiMonotonicNs": "u64"
+  },
+  "states": {
+    "pico": {
+      "initial": "IDLE",
+      "states": [
+        "IDLE",
+        "PREPARED",
+        "ARMED",
+        "RECORDING",
+        "FROZEN"
+      ],
+      "transitions": [
+        [
+          "IDLE",
+          "ARM_CONNECTED",
+          "PREPARED"
+        ],
+        [
+          "IDLE",
+          "ARM_DETACHED",
+          "ARMED"
+        ],
+        [
+          "PREPARED",
+          "CLOSE_GATE",
+          "ARMED"
+        ],
+        [
+          "ARMED",
+          "OPEN_GATE",
+          "PREPARED"
+        ],
+        [
+          "ARMED",
+          "START",
+          "RECORDING"
+        ],
+        [
+          "PREPARED",
+          "FREEZE",
+          "FROZEN"
+        ],
+        [
+          "ARMED",
+          "FREEZE",
+          "FROZEN"
+        ],
+        [
+          "RECORDING",
+          "FREEZE",
+          "FROZEN"
+        ],
+        [
+          "FROZEN",
+          "RELEASE",
+          "IDLE"
+        ]
+      ]
+    },
+    "host": {
+      "initial": "Idle",
+      "states": [
+        "Idle",
+        "Armed",
+        "Recording",
+        "Frozen"
+      ],
+      "transitions": [
+        [
+          "Idle",
+          "Arm",
+          "Armed"
+        ],
+        [
+          "Armed",
+          "Start",
+          "Recording"
+        ],
+        [
+          "Armed",
+          "Freeze",
+          "Frozen"
+        ],
+        [
+          "Recording",
+          "Freeze",
+          "Frozen"
+        ],
+        [
+          "Frozen",
+          "Release",
+          "Idle"
+        ]
+      ]
+    },
+    "evidence": {
+      "initial": "Draft",
+      "states": [
+        "Draft",
+        "Assessed",
+        "Confirmed",
+        "Rejected"
+      ],
+      "transitions": [
+        [
+          "Draft",
+          "Assess",
+          "Assessed"
+        ],
+        [
+          "Assessed",
+          "Confirm",
+          "Confirmed"
+        ],
+        [
+          "Assessed",
+          "Reject",
+          "Rejected"
+        ]
+      ]
+    }
+  },
+  "prefix_relation": {
+    "name": "prove_same_processed_prefix",
+    "requires": [
+      "same admitted connection/session",
+      "same ordered app-message prefix",
+      "no wrap/reset ambiguity",
+      "no failed COPY in the prefix",
+      "no earlier message unprocessed",
+      "no PREPARED send crossing origin-to-gate"
+    ],
+    "not_proven_by": [
+      "TCP ACK alone",
+      "unchanged AP2 TRIGGER snapshot before DTR",
+      "cleanup watermark as rejection-time watermark"
+    ],
+    "operation": "Explicit checked relation; raw heterogeneous counter equality is forbidden outside this operation."
+  },
+  "evidence_completion": {
+    "sole_owner": "CaptureWindow",
+    "requires": [
+      "MeasurementAssessment",
+      "VerifiedEvidence capability with same binding"
+    ],
+    "unverified": "Assessment may describe facts but cannot construct completed capture."
+  }
+}
