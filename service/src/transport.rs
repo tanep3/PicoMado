@@ -806,6 +806,7 @@ async fn writer_loop_with_progress<S>(
     > = None;
     let mut video_active: Option<crate::lcd_stream::VideoTransfer> = None;
     let mut video_pending = false;
+    let mut last_video_started: Option<crate::FrameToken> = None;
     let mut refresh = false;
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let end_reason = loop {
@@ -815,11 +816,11 @@ async fn writer_loop_with_progress<S>(
                 #[cfg(test)]
                 Some(WriterCommand::Bind(token))=>{
                     video_rx=crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).ok().and_then(|a|a.published_video_receiver(&token));
-                    current=Some(token);refresh=true;video_pending=true;
+                    current=Some(token);refresh=true;video_pending=true;last_video_started=None;
                 },
                 Some(WriterCommand::BoundReply(token,reply))=>{
                     video_rx=crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).ok().and_then(|a|a.published_video_receiver(&token));
-                    current=Some(token);refresh=true;video_pending=true;
+                    current=Some(token);refresh=true;video_pending=true;last_video_started=None;
                     // This internal reply is ready before every refresh branch,
                     // independent of when the producer next gets scheduled.
                     pending_command=Some(WriterCommand::Reply(reply));
@@ -864,6 +865,9 @@ async fn writer_loop_with_progress<S>(
             result=changes.changed()=>{
                 if result.is_err(){break "application_unavailable";}
                 refresh=true;
+                // A slot can wake us before the new display epoch is in the
+                // published App. Recheck that same image after publication.
+                video_pending |= video_rx.is_some();
             },
             _=tick.tick()=>{
                 refresh=true;
@@ -896,11 +900,13 @@ async fn writer_loop_with_progress<S>(
                 video_pending=false;
                 let latest=video_rx.as_mut().and_then(|r|r.borrow_and_update().clone());
                 if let Some(frame)=latest {
+                    if last_video_started.as_ref()==Some(&frame.token) { continue; }
                     if crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).is_ok_and(|a|a.lcd_video_is_current(&frame)) {
                         if frame.delivery == crate::lcd_stream::DeliveryKind::Ordinary
                             && !crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer)
                                 .is_ok_and(|a| a.start_lcd_latest_send(&frame))
                         { continue; }
+                        last_video_started=Some(frame.token.clone());
                         // A new video supersedes the initial static placeholder;
                         // no application ACK may hold streaming or its connection.
                         awaiting_render=None;
@@ -2854,6 +2860,50 @@ mod tests {
         fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), ()>> {
             Poll::Ready(Ok(()))
         }
+    }
+
+    #[tokio::test]
+    async fn latest_image_retries_after_display_publication_without_duplicate_send() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = Arc::new(crate::shared::Application::new(app_at_fixture_date(
+            &temp.path().join("state.db"),
+        )));
+        let token = app.lock().unwrap().hello(
+            "desk",
+            ["lcd", crate::protocol::FRAME_BYTES_CAPABILITY, crate::protocol::LCD_PUSH_CAPABILITY]
+                .into_iter().map(str::to_owned).collect(),
+            1,
+        ).unwrap();
+        let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        let task = tokio::spawn(writer_loop(
+            MockSink { count: Arc::new(AtomicUsize::new(0)), limit: usize::MAX,
+                recorded: Some(recorded.clone()) },
+            rx, app.clone(),
+        ));
+        tx.send(WriterCommand::Bind(token.clone())).await.unwrap();
+        let mut guard = app.lock().unwrap();
+        guard.button(&token, ButtonAction::Next).unwrap();
+        let plugin = guard.selection_for(&token).unwrap().0.unwrap();
+        let frame = guard.queue_lcd_frame(&token, &plugin,
+            vec![7; crate::protocol::LCD_FRAME_BYTES]).unwrap();
+        let latest = guard.published_video_receiver(&token).unwrap();
+        assert!(latest.borrow().is_none(), "unpublished display must not leak a slot image");
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        drop(guard);
+        let sent = || recorded.lock().unwrap().iter().filter(|message| {
+            let Message::Binary(bytes) = message else { return false; };
+            matches!(Decoder::default().push(bytes).unwrap().remove(0),
+                WireMessage::FrameStart { token, .. } if token == frame)
+        }).count();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while sent() == 0 { tokio::time::sleep(Duration::from_millis(5)).await; }
+        }).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert_eq!(sent(), 1);
+        drop(tx);
+        task.abort();
+        let _ = task.await;
     }
 
     #[tokio::test]

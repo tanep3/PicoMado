@@ -298,8 +298,11 @@ impl Lease<'_> {
         let app = self.app.as_mut().expect("application lease");
         app.merge_transient_since(&self.base, &published)?;
         app.begin_maintenance_scope(plugin)?;
+        app.reconcile_video_slots();
+        let latest = app.take_latest_publications();
         let snapshot = Arc::new(app.published_snapshot());
         *published = snapshot.clone();
+        for (slot, frame) in latest { slot.lock().expect("latest slot").publish(frame); }
         self.base = snapshot;
         self.modified = true;
         Ok(())
@@ -316,8 +319,10 @@ impl Lease<'_> {
             let app = self.app.as_mut().expect("application lease");
             app.merge_transient_since(&self.base, &published)?;
             app.reconcile_video_slots();
+            let latest = app.take_latest_publications();
             let snapshot = Arc::new(app.published_snapshot());
             *published = snapshot.clone();
+            for (slot, frame) in latest { slot.lock().expect("latest slot").publish(frame); }
             self.base = snapshot;
             self.modified = false;
             Ok(())
@@ -325,7 +330,7 @@ impl Lease<'_> {
         if result.is_err() {
             self.owner.poisoned.store(true, Ordering::Release);
         } else {
-            let app = self.app.as_ref().expect("application lease");
+            let app = self.app.as_mut().expect("application lease");
             app.resume_publication_signals();
             app.defer_publication_signals();
         }
@@ -364,8 +369,10 @@ impl Drop for Lease<'_> {
                 if let Ok(mut published) = self.owner.published.write() {
                     if app.merge_transient_since(&self.base, &published).is_ok() {
                         app.reconcile_video_slots();
+                        let latest = app.take_latest_publications();
                         if self.modified {
                             *published = Arc::new(app.published_snapshot());
+                            for (slot, frame) in latest { slot.lock().expect("latest slot").publish(frame); }
                         }
                     } else {
                         self.owner.poisoned.store(true, Ordering::Release);
@@ -434,8 +441,10 @@ impl Drop for TransientLease<'_> {
             return;
         }
         if self.modified && app.transient_was_changed() {
+            let latest = app.take_latest_publications();
             app.finish_transient_snapshot(&self.published);
             *self.published = Arc::new(app);
+            for (slot, frame) in latest { slot.lock().expect("latest slot").publish(frame); }
             self.published.notify_published();
         }
     }

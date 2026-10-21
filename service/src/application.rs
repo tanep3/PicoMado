@@ -368,6 +368,7 @@ pub struct App {
     effect_counter: Arc<std::sync::Mutex<u64>>,
     transient_only: bool,
     transient_changed: bool,
+    defer_latest_publication: bool,
     input_fences: BTreeMap<String,u64>,
     #[cfg(test)] persistence_hook:Arc<std::sync::Mutex<Option<PersistenceHook>>>,
     plugin_catalog: Vec<String>,
@@ -383,6 +384,7 @@ pub struct App {
     /// Completed LCD pixels are transient; only validated handles enter the sender.
     frame_assets: BTreeMap<String, Arc<Vec<u8>>>,
     video_slots: BTreeMap<String, Arc<std::sync::Mutex<crate::lcd_stream::VideoSlot>>>,
+    pending_latest: BTreeMap<String, crate::lcd_stream::VideoFrame>,
     contents: BTreeMap<String, Box<dyn ContentPlugin>>,
     timed_frames: BTreeMap<String, (crate::DisplayToken, i64)>,
     // Latest content must still be shown after the preceding physical draw.
@@ -512,6 +514,7 @@ impl App {
             effect_counter,
             transient_only:false,
             transient_changed:false,
+            defer_latest_publication:false,
             input_fences:BTreeMap::new(),
             #[cfg(test)] persistence_hook:Arc::new(std::sync::Mutex::new(None)),
             plugin_catalog: plugins.order,
@@ -526,6 +529,7 @@ impl App {
             clock,
             frame_assets: BTreeMap::new(),
             video_slots: BTreeMap::new(),
+            pending_latest: BTreeMap::new(),
             contents,
             timed_frames: BTreeMap::new(),
             content_refresh_debt: BTreeMap::new(),
@@ -550,6 +554,7 @@ impl App {
             effect_counter:self.effect_counter.clone(),
             transient_only:self.transient_only,
             transient_changed:false,
+            defer_latest_publication:false,
             input_fences:self.input_fences.clone(),
             #[cfg(test)] persistence_hook:self.persistence_hook.clone(),
             plugin_catalog:self.plugin_catalog.clone(),
@@ -560,6 +565,7 @@ impl App {
             clock:self.clock.clone(),
             frame_assets:self.frame_assets.clone(),
             video_slots:self.video_slots.clone(),
+            pending_latest:BTreeMap::new(),
             contents:self.contents.clone(),
             timed_frames:self.timed_frames.clone(),
             content_refresh_debt:self.content_refresh_debt.clone(),
@@ -575,8 +581,15 @@ impl App {
             maintenance_plugin:self.maintenance_plugin.clone(),
         }
     }
-    pub(crate) fn defer_publication_signals(&self){self.dispatch.defer();self.work_signal.defer();}
+    pub(crate) fn defer_publication_signals(&mut self){self.defer_latest_publication=true;self.dispatch.defer();self.work_signal.defer();}
     pub(crate) fn resume_publication_signals(&self){self.dispatch.resume();self.work_signal.resume();}
+    pub(crate) fn take_latest_publications(&mut self)->Vec<(Arc<std::sync::Mutex<crate::lcd_stream::VideoSlot>>,crate::lcd_stream::VideoFrame)>{
+        std::mem::take(&mut self.pending_latest).into_iter().filter_map(|(id,frame)|{
+            let device=self.runtime.world.devices.get(&id)?;
+            if !crate::frame_current(device,&frame.token){return None;}
+            self.video_slots.get(&id).map(|slot|(slot.clone(),frame))
+        }).collect()
+    }
     pub(crate) fn reconcile_video_slots(&self){
         for (id,slot) in &self.video_slots {
             if let Ok(mut slot)=slot.lock(){
@@ -889,11 +902,23 @@ impl App {
         let slot = self.video_slots.get(&token.device_id).ok_or(AppError::Conflict("LCD latest unavailable"))?;
         let mut slot = slot.lock().map_err(|_| AppError::Conflict("LCD latest unavailable"))?;
         if slot.session != *token { return Err(AppError::Conflict("stale LCD latest slot")); }
-        slot.publish(crate::lcd_stream::VideoFrame {
+        let outgoing = crate::lcd_stream::VideoFrame {
             token: frame.clone(), delivery: crate::lcd_stream::DeliveryKind::Ordinary,
             fps: 0, sequence: frame_id, generation: 0,
             mode: if d.mode == Mode::Sub { "sub" } else { "normal" }, eink_refresh, pixels,
-        });
+        };
+        if self.transient_only || self.defer_latest_publication {
+            // A reader can otherwise see the slot before the display epoch
+            // and timed key that validate it. Publish at the App boundary.
+            drop(slot);
+            self.pending_latest.insert(token.device_id.clone(), outgoing);
+        } else {
+            slot.publish(outgoing);
+        }
+        // The slot is shared with readers, but timed_frames and the display
+        // projection live in App. Publish their snapshot together after this
+        // operation, including when no durable state changed.
+        self.transient_changed |= self.transient_only;
         self.runtime.world.next_frame_id = self.runtime.world.next_frame_id.max(frame_id + 1);
         Ok(frame)
     }
@@ -3304,6 +3329,42 @@ mod clock_tests {
         let decoded = crate::protocol::Decoder::default().push(&start).unwrap();
         assert!(matches!(&decoded[0], crate::protocol::WireMessage::FrameStart{
             width:250,height:122,format,eink_refresh:Some(_),stream:None,..} if format == "mono1"));
+    }
+    #[test]
+    fn shared_eink_clock_latest_publishes_one_frame_per_minute_even_after_ack() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now = Arc::new(Clock(AtomicI64::new(1_792_336_799)));
+        let shared = crate::shared::Application::new(
+            App::open_with_clock(&tmp.path().join("db"), now.clone()).unwrap(),
+        );
+        let token = {
+            let mut app = shared.lock().unwrap();
+            let token = app.hello("paper", ["eink", crate::protocol::FRAME_BYTES_CAPABILITY,
+                crate::protocol::EINK_CLOCK_CAPABILITY].into_iter().map(str::to_owned).collect(), 1).unwrap();
+            select_clock(&mut app, &token);
+            token
+        };
+        let first = {
+            let app = shared.read().unwrap();
+            let rx = app.published_video_receiver(&token).unwrap();
+            let frame = rx.borrow().as_ref().unwrap().clone();
+            frame
+        };
+        assert_eq!(shared.refresh_timed_frames().unwrap(), 0);
+        assert!(shared.read().unwrap().start_lcd_latest_send(&first));
+        let ack = crate::protocol::WireMessage::RenderedAck { token: first.token.clone() };
+        assert!(shared.input_lock(&token, &ack).unwrap().lcd_latest_ack(&first.token, true));
+        assert_eq!(shared.refresh_timed_frames().unwrap(), 0);
+        now.0.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(shared.refresh_timed_frames().unwrap(), 1);
+        let second = {
+            let app = shared.read().unwrap();
+            let rx = app.published_video_receiver(&token).unwrap();
+            let frame = rx.borrow().as_ref().unwrap().clone();
+            frame
+        };
+        assert!(second.token.frame_id > first.token.frame_id);
+        assert_eq!(shared.refresh_timed_frames().unwrap(), 0);
     }
     #[test]
     fn clock_refresh_metadata_is_negotiated_and_isolated_from_lcd_and_other_plugins() {
