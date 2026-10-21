@@ -42,17 +42,31 @@ heartbeatトリガのrecordはbutton/SIM eventを流用せず、physical/SIM cou
 
 hostは専用arm引数 `trigger=heartbeat` を追加し、対象の現行bindingで最初のDecoded kind5だけを起点にする。defaultは従来input。最初のheartbeatがPiに届かなければhostはARMEDのまま、有限controller期限でfreezeして未到着/未triggerを示す。Pico/hostの20秒は別時計・別起点で、同一時刻の完全窓とは呼ばない。入力eventを偽装してhostを起動しない。
 
+### P2補正：host開始は仮の起点、対象は番号とCOPYで確定
+
+独立レビュー `/tmp/picomado-heartbeat-review-ost82_dy/review-outcome.json` のP2を反映する。最初のDecoded kind5だけではPREPARED中のheartbeatや古い未確認heartbeatと区別できないため、以下を全て満たして初めて同じ対象と認定する。
+
+1. Pico ARM_HB時点の送出ordinalをorigin Mとして保存する。hostは対象の現行connection/sessionの正常処理済みordinalを、既存診断feature内の非待機metadataとして保持する。hostのheartbeat armはbaseline=M、expected_message=M+1を必須にし、現在watermark=Mとの一致を同じstate lock内で検査する。遅れた古いheartbeatが未処理ならarmを拒否する。counterのwrap/connection不明/番号不一致も拒否する。
+2. DTR low時のPico gate ordinalも固定する。origin=gate=Mかつevent25のmessage=M+1を要求する。PREPARED中にheartbeatまたは他messageが送出されていれば、hostが先に仮開始してもgateまたは対象番号の不一致で品質停止する。物理/SIM入力も独立に品質失敗とする。
+3. 対象の最初のWRITE_BEGINでunacked/unsentがなく、TX_POSITIONのfirst=lastackであることを要求する。古い未確認データ/ACK遅れがあれば、その初回を今回捕捉したとせず品質停止する。接続やTCPをリセット/flushしない。
+4. event25→BEFORE_LOCK→ENCODED→成功COPY位置→send returnを一意に対応し、hostでexpected_messageのDecoded kind5/session/JSON長/CRCが一意に一致することを要求する。hostのtrigger messageもこの番号に一致させる。番号はconnectionごとの送受信順序として扱い、途中COPY失敗・reconnect・欠測・prehistory overwrite・仮開始より前の不明なdecoded messageは曖昧として停止する。JSONが同じだけの後続heartbeatへ対応をずらさない。
+5. hostの20秒開始はexpected_messageのkind5だけに限定する。古い番号はbounded prehistoryに残すが対象とはしない。期待番号の別kindや期待番号を越えたdecodeはorigin不一致としてfreezeする。未到着なら未triggerのまま有限終了する。両端の時刻差やfixtureだけが知る送信時刻で同一性を補完しない。
+
+この方法はapp heartbeat payload、周期、COPY/TCP bool、送信動作を変更しない。host watermark更新も対象connectionだけ、try_lock・固定整数metadataで、hot-pathのformat/IO/待機を追加しない。ロック競合でwatermarkが更新できなければ準備拒否または既存contention品質失敗とし、安全側で停止する。host readerが新connectionを認定したときwatermarkをリセットし、旧close/旧readerが新bindingの値を書き換えない。
+
+検証にはPREPARED中heartbeatのhost先行開始、ARM/DTR前後のmessage、古いunacked、ACK遅れ、遅着/未到着、同じCRCの複数HB、COPY失敗、ordinal不整合/overflow、再接続と旧reader、metadata lock競合を追加する。単なる最初のkind5やCRC一致では受け入れない。
+
 新toolはheartbeatモードを明示し、Caps未対応ならUSB準備段階で拒否する。単一owner、DTR lowの間のUSB通信0、対象tupleヘッダのみ、設定/flags不変、有限採取・保存digest・正規release/IDLEの既存手順を使用する。heartbeat triggerの由来条件を追加した専用validatorを作り、既存input validatorの失敗を無視して流用しない。試験開始のtriggerと測定対象入力を混同しないため、最初の試験は測定対象入力自体を0回とする。
 
 ## 容量・資源gate
 
-既存容量はAP2 96件、TX32件、CY8件、host512件。20秒窓と全品質停止条件は維持する。LCDの通常heartbeat周期15秒で、trigger直後の1件と15秒後の1件が通常2件。heartbeat1件のAP2送信境界は8件、20回程度の1秒snapshotとtrigger1件を加えた無再接続・無入力の基礎負荷は約37件。ただしfreeze端点・他イベント・TCP再送/自然なframe更新を含む完全上限ではない。
+既存容量はAP2 96件、TX32件、CY8件、host512件。今回の独立実装では単純な全量CY15へ拡張し、15行すべてで対象tupleのdataの初回・全再送・異常を記録する。選択範囲による除外やserializer/overlayは導入しない。16件目は既存dropを増やし品質停止する。20秒窓と全品質停止条件は維持する。LCDの通常heartbeat周期15秒で、trigger直後の1件と15秒後の1件が通常2件。heartbeat1件のAP2送信境界は8件、20回程度の1秒snapshotとtrigger1件を加えた無再接続・無入力の基礎負荷は約37件。ただしfreeze端点・他イベント・TCP再送/自然なframe更新を含む完全上限ではない。
 
-CYの基礎2件に対し余裕は6件のみ。Rを再送、Xをそれ以外の対象data送信とすると `2+R+X <= 8` が必要で、開始時の既存未確認データもXへ含む。旧試行から「入力/ACKを引けば収まる」とする反実仮想は容量証明にしない。正規の再送・server側frame更新を含む最悪順序で8以内とする証明は現時点で未完了。**トリガ追加だけでCY8件の全20秒完全性を保証できないため、実機開始gateは未成立**。必要なら別の固定メモリ予算を設計レビューするが、既存容量WIPのoverlay/serializerを混ぜない。
+CY15の基礎2件に対し余裕は13件。Rを再送、Xをそれ以外の対象data送信とすると `2+R+X <= 15` が必要。旧試行から「入力/ACKを引けば収まる」とする反実仮想は容量証明にしない。正規の再送・server側frame更新を含む最悪順序で15以内とする証明は未完了。**CY15でも20秒全量完全性を保証済みとはしない**。16件以上ならfull-window incompleteのまま停止。IRQ/CRC/pollの既存境界、対象tupleのscopeとskip/drop/reject等の全counterを保存する。
 
 CY/TX/AP2/hostのdrop・malformed・generation変化・digest不一致、全TX/CY join不足、観測USB overlap、初期/途中binding不整合等の全停止条件を残す。溢れた窓をcleanにしない。未知の初期未確認データを今回の初回に読み替えず、各runを独立保存する。容量で早期終了した窓を従来20秒の完全性として報告しない。
 
-追加常駐RAMの案の上限はmode/由来等32B、追加stack64B以内。実測前の概算であり、実装後にARM map/stackを照合し、既存heap8192B/stack4096B下限を維持する。初期値OFF、IRQ writer/待機/動的allocation/新USB hot-path出力を追加しない。CY LL生成patchやSDK原本は変更しない。
+追加常駐RAMはCY7行×144B=1008B、mode/由来等32B以内、追加stack64B以内を上限案とする。整合候補heap11096Bからの概算は10056Bであり、実装後のARM mapで照合して既存heap8192B/stack4096B下限を維持する。初期値OFF、IRQ writer/待機/動的allocation/新USB hot-path出力を追加しない。CY LL生成patchやSDK原本は変更しない。
 
 ## 実装前に固定する検証条件
 
@@ -71,7 +85,7 @@ CY/TX/AP2/hostのdrop・malformed・generation変化・digest不一致、全TX/C
 
 基準は受入れ済みf2bdc7bのappとSDK整合候補の診断適合5ファイル。次の実装用隔離sourceを作る際にこの出自を固定し、容量WIP6ファイルは現在のworkに元hashで保持する。主な対象はfirmware ack_probe.c/h、host ack_probe.rs、専用collector/validatorとそのtests。net.cのtx_sync/共有hookや既存LL patchはそのまま使える見込みだが、順序試験で確認する。
 
-今回は設計・検証条件の先行固定まで。新トリガのruntime実装・候補build・新規採取・実機再flash・サービス/設定/SSH操作は行わない。現行だけで必要事実が得られないこととCY容量gate未成立を親へ返し、レビュー可能な隔離実装案とする。
+P2契約補正を先行コミットした後、この契約を基準に独立worktreeで実装・ホスト回帰・ARM buildへ進む。元workの容量WIP6ファイルは含めない。実機開始gateとobserver effect実測は未成立のままで、新規採取・USB/実機再flash・サービス/設定/SSH/push操作は行わない。
 
 ## 現行版の特性確認結果
 
