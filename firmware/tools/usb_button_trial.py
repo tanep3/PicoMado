@@ -80,15 +80,35 @@ def release_prior(host,usb,device,saved_dir,out):
     got=host({'op':'release','boot':hs['boot'],'run':hs['run'],'digest':hs['digest']})
     require(got['phase']=='idle','prior host release unconfirmed');return got
 
-def refresh_target(args,host,observer):
-    a=host({'op':'status'});require(a['target']==args.device and a['phase']=='armed' and a['connection'] and a['session'],'host not ready')
+def known_neighbor(args,evidence=None):
+    """Resolve identity and reachability separately; read only, one snapshot."""
+    row=dict(interface=args.interface,known_mac=args.known_mac.lower(),clock=time.monotonic_ns())
+    try:
+        neighbors=json.loads(subprocess.check_output(['ip','-j','neigh','show','dev',args.interface],text=True,timeout=2))
+        require(isinstance(neighbors,list),'invalid neighbor reply')
+        matches=[{k:x[k]for k in ('dst','dev','lladdr','state')if k in x}for x in neighbors
+                 if isinstance(x,dict)and str(x.get('lladdr','')).lower()==args.known_mac.lower()]
+        row.update(matches=matches,match_count=len(matches))
+        if len(matches)!=1:row['refusal']='known MAC match count is not one'
+        elif matches[0].get('dev')not in (None,args.interface)or not matches[0].get('dst'):
+            row['refusal']='known MAC interface/IP mismatch'
+        elif not isinstance(matches[0].get('state'),list)or 'REACHABLE'not in matches[0]['state']:
+            row['refusal']='known MAC is not REACHABLE'
+        else:row['decision']='reachable_identity_candidate'
+    except BaseException as error:
+        row['refusal']=f'neighbor read failed: {type(error).__name__}: {error}'[:240]
+        if evidence is not None:ap.persist(evidence,row)
+        raise
+    if evidence is not None:ap.persist(evidence,row)
+    require('refusal'not in row,row.get('refusal',''))
+    return row['matches'][0]['dst']
+
+def refresh_target(args,host,observer,*,expected_phase='armed',neighbor_evidence=None):
+    a=host({'op':'status'});require(a['target']==args.device and a['phase']==expected_phase and a['connection'] and a['session'],'host not ready')
     process=Path('/proc')/str(args.host_pid)
     require(process.stat().st_uid==os.getuid(),'server process owner mismatch')
     require(int(a['boot'].rsplit('-',1)[1],16)==args.host_pid,'server boot PID mismatch')
-    neighbors=json.loads(subprocess.check_output(['ip','-j','neigh','show','dev',args.interface],text=True,timeout=2))
-    matches=[x for x in neighbors if x.get('lladdr','').lower()==args.known_mac.lower()]
-    require(len(matches)==1 and 'REACHABLE' in matches[0]['state'],'known MAC must be uniquely REACHABLE; no ping/config/retry')
-    peer=matches[0]['dst'];route=json.loads(subprocess.check_output(['ip','-j','route','get',peer],text=True,timeout=2))
+    peer=known_neighbor(args,neighbor_evidence);route=json.loads(subprocess.check_output(['ip','-j','route','get',peer],text=True,timeout=2))
     require(len(route)==1 and route[0]['dev']==args.interface and route[0].get('prefsrc')==args.local_ip,'route mismatch')
     owned={}
     for p in(process/'fd').iterdir():
@@ -113,6 +133,14 @@ def refresh_target(args,host,observer):
     finally:diag.close()
     target.update(metadata_monotonic_ns=time.monotonic_ns(),clock=observer.stamp(),known_device_mac=args.known_mac,binding={k:a[k]for k in ['boot','run','phase','connection','session','target']})
     observer.validate_target(target);return target
+
+def require_same_target(preflight,target):
+    stable=('interface','local_ip','local_port','peer_ip','peer_port','inode',
+            'pid','process_start_ticks','cookie','known_device_mac')
+    require(all(target[k]==preflight[k]for k in stable)
+            and all(target['binding'][k]==preflight['binding'][k]
+                    for k in ('boot','connection','session','target')),
+            'preflight target/socket binding changed after ARM')
 
 def tx_digest(rows):
     value=2166136261

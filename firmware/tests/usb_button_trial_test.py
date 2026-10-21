@@ -4,6 +4,42 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 import usb_button_trial as m
 class Tests(unittest.TestCase):
+ def test_known_neighbor_saved_identity_and_reachability_are_separate(self):
+  # The MAC/interface are from the retained trial-02 config; DELAY was the
+  # later read-only observation, not a guard-instant state from that trial.
+  args=types.SimpleNamespace(interface='eth0',known_mac='28:cd:c1:09:78:41')
+  # Actual scoped `ip -j neigh show dev eth0` rows omit `dev` on this host.
+  row=dict(dst='192.168.0.173',lladdr=args.known_mac,state=['DELAY'])
+  with tempfile.TemporaryDirectory()as d:
+   path=Path(d)/'neighbor.json'
+   with patch.object(m.subprocess,'check_output',return_value=json.dumps([row])):
+    with self.assertRaisesRegex(ValueError,'not REACHABLE'):m.known_neighbor(args,path)
+   saved=json.loads(path.read_text())
+   self.assertEqual(saved['match_count'],1)
+   self.assertEqual(saved['matches'],[row])
+   self.assertEqual(saved['refusal'],'known MAC is not REACHABLE')
+   row['state']=['REACHABLE']
+   with patch.object(m.subprocess,'check_output',return_value=json.dumps([row])):
+    self.assertEqual(m.known_neighbor(args,Path(d)/'reachable.json'),'192.168.0.173')
+   with patch.object(m.subprocess,'check_output',return_value=json.dumps([row,row])):
+    with self.assertRaisesRegex(ValueError,'match count'):m.known_neighbor(args,Path(d)/'duplicate.json')
+   with patch.object(m.subprocess,'check_output',return_value=json.dumps([row|{'dev':'wlan0'}])):
+    with self.assertRaisesRegex(ValueError,'interface/IP mismatch'):m.known_neighbor(args,Path(d)/'wrong-dev.json')
+   with patch.object(m.subprocess,'check_output',side_effect=OSError('netlink blocked')):
+    with self.assertRaisesRegex(OSError,'netlink blocked'):m.known_neighbor(args,Path(d)/'read-error.json')
+   self.assertIn('neighbor read failed',json.loads((Path(d)/'read-error.json').read_text())['refusal'])
+ def test_preflight_socket_cookie_and_binding_must_survive_arm(self):
+  target=dict(interface='eth0',local_ip='192.168.0.120',local_port=16153,
+              peer_ip='192.168.0.173',peer_port=55555,inode=123,pid=456,
+              process_start_ticks=789,cookie=[1,2],known_device_mac='28:cd:c1:09:78:41',
+              binding=dict(boot='boot',connection=12,session=2318,target='PicoMado-lcd1',
+                           phase='idle',run='0'))
+  after=json.loads(json.dumps(target));after['binding'].update(phase='armed',run='new-run')
+  m.require_same_target(target,after)
+  after['cookie']=[1,3]
+  with self.assertRaisesRegex(ValueError,'changed after ARM'):m.require_same_target(target,after)
+  after['cookie']=[1,2];after['binding']['connection']=13
+  with self.assertRaisesRegex(ValueError,'changed after ARM'):m.require_same_target(target,after)
  def test_start_before_commit_and_lost_ack_no_retry(self):
   events=[]
   class Session:

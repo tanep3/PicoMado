@@ -375,7 +375,19 @@ def main():
     from types import SimpleNamespace
     a=SimpleNamespace(device=cfg['device'],host_pid=cfg['PID'],interface=cfg['interface'],known_mac=cfg['known_mac'],
                       local_ip=cfg['local_ip'],port=cfg['port'],socket=Path(cfg['host_socket']))
-    resolve=lambda ready:hc.txlib.refresh_target(a,host,observer)
+    try:
+        preflight=hc.txlib.refresh_target(a,host,observer,expected_phase='idle',
+            neighbor_evidence=args.dir/'neighbor-before-arm.json')
+        hc.ap.persist(args.dir/'target-before-arm.private.json',preflight)
+    except BaseException as problem:
+        hc.ap.persist(args.dir/'target-preflight-error.json',dict(
+            type=type(problem).__name__,message=str(problem)[:240],USB_opened=False,ARM_sent=False))
+        raise
+    def resolve(ready):
+        target=hc.txlib.refresh_target(a,host,observer,
+            neighbor_evidence=args.dir/'neighbor-after-arm.json')
+        hc.txlib.require_same_target(preflight,target)
+        return target
     owner=Owner(cfg['serial_by_id'],args.dir/'owner.private.jsonl')
     runner=Runner(owner,host,resolve,lambda target:client.Session(target,seconds=40,prepare_seconds=20),args.dir)
     result=runner.run(cfg['device'],format(time.time_ns(),'x'))

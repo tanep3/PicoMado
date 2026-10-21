@@ -1,6 +1,7 @@
 """Runner integration specification. Fresh PTYs only; DTR bits are modeled."""
 import copy
 import errno
+import hashlib
 import json
 import os
 import select
@@ -185,6 +186,25 @@ class Observer:
 
 
 class Tests(unittest.TestCase):
+    def test_preflight_refusal_is_saved_before_usb_owner(self):
+        with tempfile.TemporaryDirectory() as base:
+            root=Path(base);observer=root/'observer';observer.mkdir()
+            digests={}
+            for name in ('header_observer.py','observer_client.py'):
+                data=b'# isolated observer stub\n';(observer/name).write_bytes(data)
+                digests[name]=hashlib.sha256(data).hexdigest()
+            cfg=dict(device='PicoMado-lcd1',expected_flash_id='E661640843239D21',
+                serial_by_id='/dev/serial/by-id/E661640843239D21',PID=os.getpid(),
+                server_sha=hashlib.sha256(Path(f'/proc/{os.getpid()}/exe').read_bytes()).hexdigest(),
+                observer=str(observer),observer_SHA256=digests,host_socket=str(root/'host.sock'),
+                interface='eth0',known_mac='28:cd:c1:09:78:41',local_ip='192.168.0.120',port=16153)
+            config=root/'config.json';config.write_text(json.dumps(cfg));out=root/'trial'
+            with patch.object(sys,'argv',['heartbeat_capture_runner.py','--config',str(config),'--dir',str(out),'--execute']),\
+                 patch.object(run.hc.txlib,'refresh_target',side_effect=ValueError('neighbor not REACHABLE')),\
+                 patch.object(run,'Owner',side_effect=AssertionError('USB opened')):
+                with self.assertRaisesRegex(ValueError,'neighbor not REACHABLE'):run.main()
+            self.assertEqual(json.loads((out/'target-preflight-error.json').read_text())['USB_opened'],False)
+            self.assertFalse((out/'owner.private.jsonl').exists())
     def scenario(self,name='normal',disk_failure=False,result_failure=False):
         m=Model(name);ports=[]
         def port(path):
