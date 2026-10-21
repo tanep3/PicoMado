@@ -1,0 +1,72 @@
+{
+  "design_only": true,
+  "measured_bursts": [
+    {
+      "capture": "013754Z",
+      "first": 18,
+      "last": 43,
+      "span_us": 18215,
+      "attempts_lower_bound": 26
+    },
+    {
+      "capture": "014716Z",
+      "first": 7804,
+      "last": 7836,
+      "span_us": 17170,
+      "attempts_lower_bound": 33
+    },
+    {
+      "capture": "014716Z",
+      "first": 8071,
+      "last": 8160,
+      "span_us": 69890,
+      "attempts_lower_bound": 90,
+      "minimum_B_at600": 48.066
+    }
+  ],
+  "arrival": {
+    "O": {
+      "burst": 50,
+      "rate": 600,
+      "wire": 84
+    },
+    "C": {
+      "burst": 10,
+      "rate": 40,
+      "wire": 151
+    },
+    "T": {
+      "burst": 2,
+      "rate": 20,
+      "wire": 151
+    }
+  },
+  "service": {
+    "latency_seconds": 0.05,
+    "O": 56000,
+    "C": 16000,
+    "T": 8000,
+    "total": 80000,
+    "max_USB_zero_ms": 10
+  },
+  "capacity": {
+    "O": 84,
+    "C": 16,
+    "T": 4
+  },
+  "RAM": {
+    "old_queue": 5120,
+    "new_rows": 8720,
+    "extra_management_max": 96,
+    "maximum_delta": 3696,
+    "old_possible_heap": 11080,
+    "new_possible_heap_lower_bound": 7384,
+    "required_heap_floor": 8192,
+    "shortfall_to_required_floor": 808
+  },
+  "control_wait_ms": 150,
+  "lifecycle_wait_ms": 400,
+  "physical_measurements_unavailable": true,
+  "design_resolved": false,
+  "implementation_blocker": "source B40 fails witnessed90offers/69.890ms; B50 requires at least808B additional RAM recovery to retain8KiB heap floor"
+}

@@ -36,9 +36,9 @@ Pico区間は同じPico boot、server区間は同じserver Instant内の差。�
 
 op6203はCOPY成功後TCP範囲[20176,20322)を公開し、同範囲のlinkoutputとOKを保持。最初の呼出しは入力1.456ms後、完了1.799ms後、nrtx=0。同copyをparentとする完了を入力1178.268ms後(nrtx=1)、4178.326ms後(nrtx=2)、10178.150ms後(nrtx=3)、10189.394ms後(nrtx=4)にも保持した。初回から約1.176、4.177、10.176秒の再送で、全てgap-free prefix内。nrtxは接続PCBのcounterであり、操作ごとの再送回数ではない。同一copy/TCP範囲の反復からこの通知の再送を確認している。
 
-8220.151ms後のop6218では、新COPY範囲[20322,20468)、送信前snapshot snd_nxt=20322,lastack=20176,cwnd=1400,snd_wnd=64076。前通知146byteの累積ACKが進んでいないことが確定。linkoutput OKは無線送信・相手到達・ACK到達の証明ではない。 同操作の初回tcp_output後seq6211はresult=0, flags=13。実装のbit定義によりpcb有、unsentなし、unackedあり、TF_NODELAY有を確認した。今回の初回送信がNagle待ちでunsentに残った説明には合わない。後刻の全状態や無線送信を保証する値ではない。
+8220.151ms後のop6218では、新COPY範囲[20322,20468)、送信前snapshot snd_nxt=20322,lastack=20176,cwnd=1400,snd_wnd=64076。前通知146byteの累積ACKが進んでいないことが確定。linkoutput OKは無線送信・相手到達・ACK到達の証明ではない。 前操作op6203の初回tcp_output後seq6211はresult=0, flags=13。op6218自身のOUTPUTはseq6226で、こちらもresult=0, flags=13。実装のbit定義によりpcb有、unsentなし、unackedあり、TF_NODELAY有を確認した。今回の初回送信がNagle待ちでunsentに残った説明には合わない。後刻の全状態や無線送信を保証する値ではない。
 
-serverのop6203/6218 API受付間隔は69.346ms。Pico入力間隔8220.151msより大幅に短い。各時計内の間隔の比較で共通offsetを使わない。API前WS decodeは12/15µs、API後の返信は数十msで、長い部分をApp永続化だけで説明できない。
+serverのop6203/6218 API受付間隔は69.346ms。Pico入力間隔8220.151msより大幅に短い。各時計内の間隔の比較で共通offsetを使わない。decode開始→API受付は12/15µs（WS完了→APIは12/16µs）、API後の返信は数十msで、長い部分をApp永続化だけで説明できない。
 
 raw read/WS消費の正確な対応とkernel到着時刻はunknown。RF往路、AP/経路、相手kernel、ACK復路、Pico受信処理の場所は確定しない。ACK未観測からserver kernel未到着と断定しない。観測ONの摂動・SIMとGPIOとの差が残り、旧1.478秒事例との根因一致も未確定。
 
