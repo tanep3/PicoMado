@@ -4,6 +4,8 @@
 
 ## 通信の現在の契約
 
+後続のサーバ限定設計 [LCD-ACKLESS-20261021](../docs/changes/LCD-ACKLESS-20261021.md) は、push 対応通常 LCD の送信許可だけを変更する。以下の表は既存の実装・採用時点を記す履歴であり、設計コミットだけで本番やファームが更新された意味ではない。
+
 | 境界 | 採用動作と適用範囲 | 根拠 |
 | --- | --- | --- |
 | 搬送・framing | Pico開始TCP、必要時SOCKS5、HTTP Upgrade後binary WS。アプリ1件はbig-endian length:u32、version:u8、kind:u8、body。WSとアプリ境界は一致不要。 | `service/src/protocol.rs::encode/Decoder`、`src/net.c` |
