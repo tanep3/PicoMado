@@ -114,10 +114,15 @@ int main(void){
   if(scenario==6)assert(r->flags&PM_CY_IO_ERROR);
   if(scenario==7)assert((r->flags&PM_CY_TIMEOUT)&&!(r->flags&PM_CY_BUS)&&probe.crc_calls==1);
   if(scenario==9||scenario==10)assert(r->nested==1&&r->depth==1);
-  if(scenario==10)assert(probe.rows[1].depth==2&&probe.rows[1].original.seq!=r->original.seq);
+  if(scenario==0)assert(r->sequence_before==0&&r->sequence_bus==1&&(r->validity&PM_FV_SDPCM_OK));
+  if(scenario==10){
+   assert(probe.rows[1].depth==2&&probe.rows[1].original.seq!=r->original.seq);
+   assert(r->sequence_before==0&&r->sequence_bus==2&&r->nested==1);
+   assert((r->validity&PM_FV_SDPCM_OK) && (r->validity&PM_FV_SDPCM_CHECKED));
+  }
   if(scenario==11)assert(r->flags&PM_CY_PREFIX);
   if(scenario==16)assert(r->rx_length==0x8040&&!probe.saturated);
-  if(scenario==15)assert(r->sequence_before==255&&r->sequence_bus==0&&r->credit_before==255&&r->credit_bus==0);
+  if(scenario==15)assert(r->sequence_before==255&&r->sequence_bus==0&&r->credit_before==255&&r->credit_bus==0&&(r->validity&PM_FV_SDPCM_OK));
   if(scenario==13)assert(probe.rows[1].original.seq==r->original.seq&&probe.rows[1].original.ipid!=r->original.ipid&&probe.rows[1].ticket!=r->ticket);
   assert(probe.crc_calls<=3*probe.count&&probe.crc_bytes<=3*256*probe.count);
   printf("diagnostic scenario=%u rows=%u flags=%x polls=%u rx=%u/%u/%u bad=%u io=%u/%u crc_calls=%u\n",scenario,probe.count,r->flags,r->polls,r->rx_data,r->rx_control,r->rx_event,r->rx_bad,r->io_calls,r->io_errors,probe.crc_calls);

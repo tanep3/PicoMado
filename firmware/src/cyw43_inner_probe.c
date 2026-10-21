@@ -106,7 +106,9 @@ void pm_cyw_probe_bus(uint32_t ticket,const uint8_t*p,size_t capacity,uint8_t fl
  if(view(r,p,capacity)){
   r->crc_bus=crc(p+14,r->covered);bool matches;key(p+18,r->domain-4,&r->bus,&matches);r->bdc_bus=be32(p+14);
   if(r->covered==r->domain){
-   pm_frame_validity v=pm_cyw_validate_frame(p,capacity,r->domain-4,r->sequence_before);
+   /* SDK increments the sequence immediately after writing this header. A
+      nested send during credit wait can advance it after probe_open(). */
+   pm_frame_validity v=pm_cyw_validate_frame(p,capacity,r->domain-4,(uint8_t)(sequence-1u));
    r->validity=v.checks;memcpy(r->dest_mac,v.dest_mac,sizeof r->dest_mac);
   }
   if(r->crc_bus!=r->crc_before)r->flags|=PM_CY_CHANGED;
