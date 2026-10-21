@@ -53,3 +53,15 @@ E-inkは案内を未開始jobとして合流し、remote画像を最優先する
 | 対応画像が保持される / no-opが確定 / owner失効 | 各既存状態に従い案内を抑止/完了/取消し | 正常・no-op復元・復旧表示を変更しない |
 
 恒久回帰は独立反例そのものを実main/parserへ取り込み、両E-ink×trace有無×候補置換/次入力に加え、次SUB・期限境界も確認する。実adapterでは旧画像描画中の未開始取消し→再要求、準備中取消し→再要求、表示済みの再要求で余計な更新が出ないことを確認する。旧実装で失敗し、修正後に通ることを保存する。独立レビューの原本・manifest・再現C/ログ等は結果領域 `review-fix-20261022/original-review/` へSHA照合して保存し、以前の候補も保持する。
+
+## 受入済み候補を通常build/flash入口へ接続する限定対応
+
+親 `01a1570e-43cf-74e4-b507-318bfec760c5` は、独立再レビュー（`review-fix-20261022/independent-re-review-20261022/review-outcome.json`）を根拠に、製品実装 `38bd24d` / 最終 `0ced9c1` を受け入れた。実機の視認性・ちらつき・負荷は未検証。実機適用/効果確認は未実施のまま、通常書込みに必要な実build出自とcandidate/親受入れの記録準備のみを委任された。USB/実機書込み/SSH/サービス操作は対象外で、既存flashの `--verify-only` までを行う。
+
+既存build adapter `tools/build_lineage.py` だけへ、既存7 flags (`PM_ACK_PATH_PROBE`, `PM_USB_BUTTON_SIM`, `PM_TX_LINK_PROBE`, `PM_CYW43_INNER_PROBE`, `PM_CYW43_SPI_REAL_SIZE`, `PM_EVENT_STREAM`, `PM_STREAM_DIAGNOSTICS`) の環境変数入力を追加する。値は `ON/OFF` に限定し、未指定はすべて `OFF`、任意CMake引数やshell文字列を受け取る汎用口は追加しない。7値を実configureへ `-Dname=value` で明示し、configure後の既存snapshotに記録された実値との一致を検証してからbuildする。既存のsource/config/SDK/receipt/親受入れ検査は維持し、検証器やflash処理を弱めない。flags依存関係は既存CMake契約に従う。
+
+LCDは7値を `ON`、E-ink両個体は7値を `OFF` として既存 `firmware/tools/build.sh` を使い、fresh build dirで実controlled buildを行う。AWAY_EEX1、sample/unboundは引き続き `OFF`。現在の個体設定とSDK/PR155/Nagleを維持し、生成cache・実compile flags・private LL・UF2全hashと設定sector非包含を受入済み候補と比較する。成果物へreceiptを手書きで追加しない。
+
+最小回帰: 全OFF既定値、7値ON入力、許容外の値の拒否、private fixtureを使う既存root build経路への引数/receipt反映、生成cacheが指定値を変えた場合のbuild前拒否。fixtureは実機成果物の認定とは区別し、実3個体のcontrolled build/照合を別に行う。
+
+親受入れの原レビューは改変せずSHA付きで参照する。新成果物のUF2が受入済み完全SHAと一致する場合だけ、その同一性と本メッセージによる委任を根拠に、既存形式の親受入れを現在subjectと各candidate/receiptへ束縛する。hashが変わった場合は差分・理由を報告し、再照合前に受入済みとしない。通常入口の `--verify-only` はpicotool呼出し前に終了することを維持する。
