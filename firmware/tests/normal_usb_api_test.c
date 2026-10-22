@@ -107,20 +107,20 @@ int main(void){
     assert(buttons[power_key].stable&&wire_count==2);
 #endif
     // Both just-before and exact-deadline CRC arrival suppress unstarted UI.
-    for(unsigned delay=198;delay<=200;delay+=2){
+    for(unsigned delay=399;delay<=400;delay++){
         begin();command("INPUT DO 22 1 SUB");clock_ms+=delay;receive_full(200+delay,2);
         poll_switch_feedback();assert(!feedback_shows);finish_remote();assert(!switching.waiting);
     }
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
     begin();receive_full(500,1);assert(drawing);command("INPUT DO 22 1 SUB");
-    clock_ms+=200;poll_switch_feedback();assert(feedback_shows==1);
+    clock_ms+=400;poll_switch_feedback();assert(feedback_shows==1);
     receive_full(501,2);assert(pm_switch_received(&switching)&&!switching.hint_requested);
     command("INPUT DO 22 2 SUB");assert(!pm_switch_received(&switching));
-    panel_result=true;poll_display();clock_ms+=200;poll_switch_feedback();assert(feedback_shows==2);
+    panel_result=true;poll_display();clock_ms+=400;poll_switch_feedback();assert(feedback_shows==2);
     receive_full(502,3);finish_remote();assert(!switching.waiting);
 #endif
-    // A completed semantic request enters the already accepted 200 ms model.
-    begin();command("INPUT DO 22 1 SUB");clock_ms+=199;poll_switch_feedback();assert(!feedback_shows);
+    // A completed semantic request enters the already accepted 400 ms model.
+    begin();command("INPUT DO 22 1 SUB");clock_ms+=399;poll_switch_feedback();assert(!feedback_shows);
     clock_ms++;poll_switch_feedback();assert(feedback_shows==1);
     command("INPUT DO 22 1 SUB");assert(wire_count==1&&feedback_shows==1);
     reply(10,1,1,1,"normal",false);assert(!switching.waiting&&feedback_restores==1);
@@ -143,5 +143,5 @@ int main(void){
     begin();pm_usb_control_input(1);command("INPUT DO 22 1 SUB");assert(!wire_count);command("INPUT DO 22 1 UP");assert(wire_count==1);
     begin();char too_long[130];memset(too_long,'A',sizeof too_long-1);too_long[sizeof too_long-1]=0;
     command(too_long);expect("usb error=length");assert(!wire_count);command("INPUT DO 22 1 UP");assert(wire_count==1);
-    printf("normal USB API %s keys=%u trace=%u: semantic shared dispatch, IDs/capabilities/state, no probes, partial/zero output, reconnect, 200ms PASS\n",PM_DISPLAY_CAPABILITY,PM_BUTTON_COUNT,PM_TRACE_ENABLE);
+    printf("normal USB API %s keys=%u trace=%u: semantic shared dispatch, IDs/capabilities/state, no probes, partial/zero output, reconnect, 400ms PASS\n",PM_DISPLAY_CAPABILITY,PM_BUTTON_COUNT,PM_TRACE_ENABLE);
 }

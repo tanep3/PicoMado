@@ -7,7 +7,7 @@
  * Current server replies once per input, in connection order. Each accepted
  * display change advances the epoch; a no-op consumes a reply without doing so.
  * This lower bound keeps an earlier click's image from completing a later one. */
-#define PM_SWITCH_DELAY_US UINT64_C(200000)
+#define PM_SWITCH_DELAY_US UINT64_C(400000)
 typedef struct {
     uint64_t sent, replied, started_us, base_epoch, minimum_epoch, minimum_frame;
     uint64_t incarnation, session, owner;

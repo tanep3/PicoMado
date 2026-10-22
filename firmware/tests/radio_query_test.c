@@ -109,7 +109,7 @@ int PM_RADIO_TEST_ENTRY(void){
  // INPUT IDs, and a second pending query cannot cause an extra SDK call.
  begin();text(request);text("INPUT DO 22 1 UP");assert(input_sends==1);
  service();assert(!radio_ioctl_calls);expect("status=busy rc=0 cdc_status=not_read\n");expect("id=1 op=UP status=dispatched\n");
- clock_ms+=199;poll_switch_feedback();assert(!feedback_shows);
+ clock_ms+=399;poll_switch_feedback();assert(!feedback_shows);
  clock_ms++;poll_switch_feedback();assert(feedback_shows==1&&!radio_ioctl_calls);
  text("INPUT CAPS");drain();expect("last_request_id=1\n");
  begin();text(request);text(request);service();expect("radio error=busy\n");assert(radio_ioctl_calls==1);

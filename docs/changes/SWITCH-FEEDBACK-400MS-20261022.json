@@ -7,12 +7,17 @@
     "docs/changes/LOCAL-SWITCH-FEEDBACK-20261022.md",
     "docs/changes/SWITCH-FEEDBACK-400MS-20261022.md"
   ],
-  "design_commit": "pending",
+  "design_commit": "ce9acfd580d1ad41d03ad71770b4a9a75ddd2420",
   "status": "in_progress",
   "stages": {
     "design": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "ce9acfd580d1ad41d03ad71770b4a9a75ddd2420"
+        }
+      ]
     },
     "implementation": {
       "state": "in_progress",

@@ -74,9 +74,9 @@ int main(void){
  roaming_fresh(0);text(request);pm_usb_control_poll(false);service();assert(!radio_ioctl_calls&&!radio_write_calls);
  roaming_fresh(0);text("INPUT CAPS");text("INPUT CAPS");roam(request);assert(!radio_ioctl_calls&&!radio_write_calls);
  roaming_fresh(0);trace_write_cap=0;roam(request);assert(radio_write_calls==1&&!trace_used);trace_write_cap=3;service();expect("s=returned");assert(radio_write_calls==1);
- // Existing INPUT wins busy arbitration; its 200ms deadline remains functional.
+ // Existing INPUT wins busy arbitration; its 400ms deadline remains functional.
  roaming_fresh(0);text("RADIO ROAMING GET 22");text("INPUT DO 22 1 UP");service();expect("status=busy");assert(!radio_ioctl_calls);
- clock_ms+=200;poll_switch_feedback();assert(feedback_shows==1);
+ clock_ms+=400;poll_switch_feedback();assert(feedback_shows==1);
  roaming_fresh(0);pm_usb_control_init(UINT64_MAX,PM_BUTTON_COUNT);poll_local_inputs(clock_ms,true);
  radio_write_result=INT32_MIN;radio_after_override=true;radio_after_result=INT32_MIN;
  roam("RADIO ROAMING OFF ffffffffffffffff ffffffffffffffff");expect("s=werr w=-2147483648 r=-2147483648");assert(!strstr(trace_text,"response_length"));
