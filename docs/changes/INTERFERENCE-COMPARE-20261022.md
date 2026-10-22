@@ -33,7 +33,7 @@ mainが所有するRAMに baseline候補 / held / stale だけを保持する。
 - `RADIO INTERFERENCE TRY3 <boot> <id>` : 3だけへ比較設定する。
 - `RADIO INTERFERENCE RESTORE <boot> <id>` : RAMのbaseline候補だけへ戻す。
 
-idはboot内のradio変異操作だけの単調増加hex非zero。INPUT IDとは別。直前の同一id/同一opは保存済み返信を再送しSDKを繰り返さない。古いid/同id別opは拒否。busy等の確定返信も同じidでは再実行しない。未実行pendingは切断で取消し、処理済みcacheとbaselineはUSB切断で消さない。返信枠確保前に変異をしない。
+idはboot内のradio変異操作だけの単調増加hex非zero。INPUT IDとは別。直前の同一id/同一opは保存済み返信を再送しSDKを繰り返さない。古いid/同id別opは拒否。mainが確定したbusy等の処理済み返信も同じidでは再実行しない。parserの満杯/構文/boot拒否は未受付でidを消費しないが、自動retryはしない。未実行pendingは切断で取消し、処理済みcacheとbaselineはUSB切断で消さない。返信枠確保前に変異をしない。
 
 変異返信は既存144B以内の短い行 `radio change b=<boot> id=<id> op=3|R s=<status> w=<write-rc|-> r=<read-rc> x=<raw8hex> t=<target|-> base=<baseline|-> m=<0|1> cdc_status=unverified`。mはAPI返却payloadの一致だけ。busy/context/unavailableでは cdc_status=not_read。SDK rc失敗、unknown、mismatchは区別する。SETされたと断定するverified/success表現は使わない。
 
@@ -43,4 +43,6 @@ baseline候補0/1/2/4→3→同じbaseline、初期3/未知値/GET失敗の無SE
 
 ## 後の実機比較（今回実行しない）
 
-統合版を一度適用後、hardware ownerがquiet時にCAPSとGETを取得して保存する。Aの既存切替試験、quiet時TRY3、Bの同じ試験、quiet時RESTORE、A2の同じ試験。操作列/間隔/位置/AP/サーバ/PM/Nagle/roaming/表示/SDKを固定。baseline候補4なら4→3の候補比較と表現するがCDCは未検証と付記する。設定のAPI整合性と遅延分布の改善を別に評価する。未知/エラー/再初期化/staleなら新規試行を止め、復旧未確認を報告する。先にホストへbaselineとreplyを保存し、USB/電源断で元値を失わない。再起動後の復旧は別判断が必要。
+統合版を一度適用後、hardware ownerがquiet時にCAPSとGETを取得して保存する。Aの既存切替試験、quiet時TRY3、Bの同じ試験、quiet時RESTORE、A2の同じ試験。TRY3返信のbaseがA直前GETの候補と異なれば、比較成立とせず、新規試行を止めて保存baselineへのRESTORE結果を記録する。操作列/間隔/位置/AP/サーバ/PM/Nagle/roaming/表示/SDKを固定。baseline候補4なら4→3の候補比較と表現するがCDCは未検証と付記する。設定のAPI整合性と遅延分布の改善を別に評価する。未知/エラー/再初期化/staleなら新規試行を止め、復旧未確認を報告する。先にホストへbaselineとreplyを保存し、USB/電源断で元値を失わない。再起動後の復旧は別判断が必要。
+
+IDはCAPS.last_id+1を通常運用とする。64bit IDを使い切った場合に再起動してbaselineを消す自動回復は行わない。baseline候補自体がCDC未検証なので、RESTOREが実際の元設定を再現した保証はない。統合担当は本限定差分を他の受入済み機能と一つの候補へまとめ、個別の試し書込みを繰り返さない。
