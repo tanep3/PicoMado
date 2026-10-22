@@ -7,6 +7,7 @@ void pm_usb_control_input(int c){(void)c;}
 void pm_usb_control_poll(bool c){(void)c;}
 void pm_usb_control_service_radio(bool c,pm_radio_reader r){(void)c;(void)r;}
 void pm_usb_control_service_radio_change(bool c,pm_radio_changer r){(void)c;(void)r;}
+void pm_usb_control_service_roaming(bool connected,pm_radio_reader reader,pm_roaming_changer changer){(void)connected;(void)reader;(void)changer;}
 pm_sim_dispatch pm_usb_control_tick(bool c,unsigned p,bool a,uint64_t s,unsigned t,bool b,uint32_t l,uint32_t n){(void)c;(void)p;(void)a;(void)s;(void)t;(void)b;(void)l;(void)n;return (pm_sim_dispatch){0};}
 void pm_usb_control_dispatched(pm_sim_dispatch e,uint64_t s,unsigned t,uint32_t n){(void)e;(void)s;(void)t;(void)n;}
 const pm_button_sim *pm_usb_sim_status(void){return NULL;}

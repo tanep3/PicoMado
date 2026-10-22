@@ -6,12 +6,17 @@
   "design_artifacts": [
     "docs/changes/ROAMING-COMPARE-20261022.md"
   ],
-  "design_commit": "pending",
+  "design_commit": "0bf8d76a4122807fd337d85a208e96f8b111d6b4",
   "status": "in_progress",
   "stages": {
     "design": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "0bf8d76a4122807fd337d85a208e96f8b111d6b4"
+        }
+      ]
     },
     "implementation": {
       "state": "in_progress",

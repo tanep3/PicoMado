@@ -80,6 +80,7 @@ static enum { WIFI_PM_UNREQUESTED, WIFI_PM_PENDING, WIFI_PM_CHECKED } wifi_pm_st
 static int wifi_pm_request_result,wifi_pm_readback_result;
 static uint32_t wifi_pm_readback;
 static pm_radio_comparison radio_comparison;
+static pm_roaming_comparison roaming_comparison;
 static pm_token last_rendered;
 static pm_token pending_render_token;
 static bool pending_render_ack;
@@ -202,10 +203,10 @@ static void check_wifi_pm(void){
     wifi_pm_status=WIFI_PM_CHECKED;
     log_wifi_pm_status();
 }
-static bool radio_allowed(pm_radio_read *rejection){
+static bool radio_allowed_for(pm_radio_read *rejection,bool recovery){
     if(!pm_radio_thread_context()){*rejection=pm_radio_rejected(PM_RADIO_CONTEXT);return false;}
-    bool available=wifi_enabled&&state==ACTIVE&&have_display&&
-        cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)==CYW43_LINK_UP;
+    bool available=wifi_enabled&&(recovery?(state!=MENU&&state!=STANDBY):
+        (state==ACTIVE&&have_display&&cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)==CYW43_LINK_UP));
     if(!available){*rejection=pm_radio_rejected(PM_RADIO_UNAVAILABLE);return false;}
     bool busy=switching.waiting||switching.sent!=switching.replied||await_selection||
         pending_standby||pending_sub_cancel||pending_render_ack||assembly.active;
@@ -216,6 +217,14 @@ static bool radio_allowed(pm_radio_read *rejection){
 #endif
     if(busy){*rejection=pm_radio_rejected(PM_RADIO_BUSY);return false;}
     return true;
+}
+static bool radio_allowed(pm_radio_read *rejection){return radio_allowed_for(rejection,false);}
+static pm_radio_read usb_roaming_query(void){
+ pm_radio_read rejection;return radio_allowed(&rejection)?pm_radio_roaming_get(true):rejection;
+}
+static pm_roaming_change usb_roaming_change(pm_roaming_op op){
+ pm_radio_read rejection;return radio_allowed_for(&rejection,op==PM_ROAM_RESTORE)?
+  pm_radio_roaming_change(&roaming_comparison,op):pm_roaming_rejected(op,rejection);
 }
 static pm_radio_read usb_radio_query(void){
     pm_radio_read rejection;
@@ -237,6 +246,7 @@ static void log_usb_snapshot(void){
     pm_usb_control_poll(connected);
     pm_usb_control_service_radio(connected,usb_radio_query);
     pm_usb_control_service_radio_change(connected,usb_radio_change);
+    pm_usb_control_service_roaming(connected,usb_roaming_query,usb_roaming_change);
     if(connected && !was_connected)pm_net_rx_snapshot();
     pm_stats_usb_poll(connected);
     if(!connected){was_connected=false;return;}
@@ -320,7 +330,7 @@ static void wifi_off(void){
     endpoint_reset();
 #endif
     pm_net_close();
-    if(wifi_enabled){pm_radio_comparison_invalidate(&radio_comparison);cyw43_arch_disable_sta_mode();wifi_enabled=false;}
+    if(wifi_enabled){pm_radio_comparison_invalidate(&radio_comparison);pm_roaming_invalidate(&roaming_comparison);cyw43_arch_disable_sta_mode();wifi_enabled=false;}
 }
 static void standby(void){
     retained_pixels=false;

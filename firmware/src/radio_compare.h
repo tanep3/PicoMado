@@ -16,25 +16,32 @@ static inline void pm_radio_comparison_invalidate(pm_radio_comparison *s){if(s->
 static inline pm_radio_change pm_radio_change_rejected(pm_radio_change_op op,pm_radio_read read){
  return (pm_radio_change){.op=op,.phase=PM_CHANGE_REJECTED,.read=read};
 }
+/* Shared pure decision; typed setting wrappers own decoding and storage. */
+static inline pm_radio_change_phase pm_radio_comparison_decide(bool held,bool stale,bool restore,
+        bool valid,uint32_t before,uint32_t baseline,uint32_t trial){
+ if(stale)return PM_CHANGE_STALE;
+ if(restore)return held?PM_CHANGE_WRITE:PM_CHANGE_NO_BASELINE;
+ if(!valid)return PM_CHANGE_REJECTED;
+ if(before==trial)return held?PM_CHANGE_ALREADY3:PM_CHANGE_BASE3;
+ if(held&&before!=baseline)return PM_CHANGE_BASE_CHANGED;
+ return PM_CHANGE_WRITE;
+}
 static inline pm_radio_change pm_radio_change_plan(pm_radio_comparison *s,pm_radio_change_op op,pm_radio_read before){
  pm_radio_change out=pm_radio_change_rejected(op,before);out.baseline=s->baseline.setting;
  if(op!=PM_RADIO_TRY3&&op!=PM_RADIO_RESTORE)return out;
- if(s->stale){out.phase=PM_CHANGE_STALE;return out;}
- if(op==PM_RADIO_RESTORE){
-  if(!s->held){out.phase=PM_CHANGE_NO_BASELINE;return out;}
-  out.target=s->baseline.setting;out.phase=PM_CHANGE_WRITE;return out;
+ pm_interference_readback readback={0};uint32_t value=0,base=0;
+ bool valid=pm_radio_transport_readback(before,&readback)&&pm_interference_candidate_value(readback.setting,&value);
+ if(s->held)pm_interference_candidate_value(s->baseline.setting,&base);
+ out.phase=pm_radio_comparison_decide(s->held,s->stale,op==PM_RADIO_RESTORE,valid,value,base,3);
+ // Preserve the existing interference reply target even on a no-write result.
+ if(op==PM_RADIO_TRY3&&!s->stale)pm_interference_candidate_from_raw(3,&out.target);
+ if(out.phase!=PM_CHANGE_WRITE)return out;
+ if(op==PM_RADIO_RESTORE)out.target=s->baseline.setting;
+ else {
+  pm_interference_candidate_from_raw(3,&out.target);
+  if(!s->held){s->baseline=readback;s->held=true;out.baseline=readback.setting;}
  }
- pm_interference_readback readback;uint32_t value,base;
- pm_interference_candidate_from_raw(3,&out.target);
- if(!pm_radio_transport_readback(before,&readback)||!pm_interference_candidate_value(readback.setting,&value))return out;
- if(!s->held){
-  if(value==3){out.phase=PM_CHANGE_BASE3;return out;}
-  s->baseline=readback;s->held=true;out.baseline=readback.setting;
- }else{
-  if(value==3){out.phase=PM_CHANGE_ALREADY3;return out;}
-  if(!pm_interference_candidate_value(s->baseline.setting,&base)||value!=base){out.phase=PM_CHANGE_BASE_CHANGED;return out;}
- }
- out.phase=PM_CHANGE_WRITE;return out;
+ return out;
 }
 static inline pm_radio_change pm_radio_change_finish(pm_radio_change plan,int rc,pm_radio_read after){
  plan.wrote=true;plan.write_result=rc;plan.read=after;plan.phase=PM_CHANGE_RETURNED;return plan;

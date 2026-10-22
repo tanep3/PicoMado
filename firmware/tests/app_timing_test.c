@@ -173,6 +173,21 @@ int cyw43_wifi_get_pm(cyw43_t *s,uint32_t *value){
     return pm_read_result;
 }
 int cyw43_ioctl(cyw43_t *s,uint32_t command,size_t length,uint8_t *buffer,uint32_t interface){
+    if(command==0x20c||command==0x20f){
+        assert(s==&cyw43_state&&length==13&&interface==CYW43_ITF_STA);
+        assert(lwip_depth==1&&!radio_core&&!radio_exception&&sta_on);
+        assert(!memcmp(buffer,"roam_off",9));
+        if(command==0x20f){
+            assert(buffer[9]<=1&&!buffer[10]&&!buffer[11]&&!buffer[12]);
+            radio_write_calls++;radio_last_written=buffer[9];
+            if(radio_write_applies)radio_sdk_value=buffer[9];
+            if(radio_after_override){radio_sdk_result=radio_after_result;radio_sdk_value=radio_after_value;}
+            return radio_write_result;
+        }
+        assert(!buffer[9]&&!buffer[10]&&!buffer[11]&&!buffer[12]);
+        radio_ioctl_calls++;if(!radio_sdk_result)memcpy(buffer,&radio_sdk_value,radio_copy_bytes);
+        return radio_sdk_result;
+    }
     assert(s==&cyw43_state&&length==4&&interface==CYW43_ITF_STA);
     assert(lwip_depth==1&&!radio_core&&!radio_exception&&sta_on);
     uint32_t initial;memcpy(&initial,buffer,4);
