@@ -9,3 +9,7 @@
 最新のユーザー指示により、LCDとE-ink_0/1の通常UF2を個体設定と既存flagsを保持して準備する。実機/USB/flash/SSH操作はしない。入力修正を保持して通常入口でbuildし、独立確認とLCD先行・E-ink後続の適用は親/hardware ownerへ引き渡す。400 msの視認頻度や実体感の改善は未確認。
 
 LCDのmode3/roaming OFFはvolatileであり、flash/reboot後に維持される保証はない。自動適用・永続化を追加せず、静止画のquiet状態で既存INTERFERENCE GET/TRY3/GETとROAMING GET/OFF/GETをhardware ownerが明示実行して条件を戻す。値とCDC未検証の制約を保存する。E-inkの現機RF値は今回未取得で、LCDの値を無断で複製しない。
+
+## 最新承認によるRF既定の追加
+
+上記の手動再適用のみという初期方針は、後の明示承認で更新された。mode3/roaming OFFをFW起動/STA再初期化後に再適用する最小仕様は[デモRF既定](DEMO-RADIO-DEFAULTS-20261022.md)を正本とする。credential sectorへ設定を追加する方式ではない。400 msの表示仕様は変更しない。
