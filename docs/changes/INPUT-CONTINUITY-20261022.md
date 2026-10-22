@@ -40,3 +40,7 @@ This is not proof of electrical continuity between samples. Existing35ms debounc
 ## Limitations / follow-up
 
 An unexpected long operation can also arise from unobserved input origin or electrical faults. This change only closes the reproduced untrusted-sampling path. No observer firmware, new gate, automatic retry, or new process framework is introduced. Parent owns independent acceptance, operational application and closure.
+
+## Scope correction for direct press operations
+
+[INPUT-CADENCE-20261022](INPUT-CADENCE-20261022.md) narrows gap cancellation to release/hold bindings. `on_press` operations retain their existing debounce/edge behavior and never synthesize a long operation. The previous all-physical wording above is superseded for these direct bindings; false-SUB/POWER protection for held gestures remains.
