@@ -1,0 +1,38 @@
+{
+  "id": "INTERFERENCE-COMPARE-20261022",
+  "title": "Single-binary radio comparison target 3 and retained baseline restoration",
+  "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
+  "implementer": "interference comparison worker",
+  "design_artifacts": [
+    "docs/changes/INTERFERENCE-COMPARE-20261022.md"
+  ],
+  "design_commit": "140ad7e3f6f4ec13711889650c8adf4536621796",
+  "status": "in_progress",
+  "stages": {
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "140ad7e3f6f4ec13711889650c8adf4536621796"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "in_progress",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}

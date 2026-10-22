@@ -21,7 +21,10 @@ static void begin(void){
 }
 static void expect(const char *s){if(!strstr(trace_text,s)){fprintf(stderr,"missing [%s] in [%s]\n",s,trace_text);assert(0);}}
 static void no_candidate(void){assert(!strstr(trace_text," candidate="));assert(!strstr(trace_text,"status=observed"));}
-int main(void){
+#ifndef PM_RADIO_TEST_ENTRY
+#define PM_RADIO_TEST_ENTRY main
+#endif
+int PM_RADIO_TEST_ENTRY(void){
  pm_interference_candidate mode={0};uint32_t value=42;
  assert(!pm_interference_candidate_value(mode,&value)&&value==42);
  assert(!pm_interference_candidate_from_raw(UINT32_MAX,&mode));
@@ -121,4 +124,5 @@ int main(void){
  assert(radio_ioctl_calls==1);
  assert(!strstr(strstr(trace_text,"radio interference")+1,"radio interference"));
  printf("radio GET %s trace=%u: real main/parser, CDC-unverified candidates/errors/unknown/short, idle/busy/context, deferred IO, reserved/partial reply, reconnect, INPUT isolation PASS\n",PM_DISPLAY_CAPABILITY,PM_TRACE_ENABLE);
+ return 0;
 }

@@ -39,6 +39,9 @@ static struct {
     uint32_t now;
     bool overflow,connected,turn,radio_pending;
     unsigned radio_slot;
+    pm_radio_change_op radio_op,radio_last_op;
+    uint64_t radio_id,radio_last_id;
+    char radio_last_reply[REPLY];
     char line[LINE],replies[2][REPLY];
 #if PM_USB_BUTTON_SIM
     pm_button_sim sim;
@@ -69,19 +72,48 @@ void pm_usb_control_set_operations(uint8_t operations,pm_input_handler handler){
     ctl.operations=operations&PM_OPERATION_MASK;ctl.input=handler;
 }
 static void radio_command(char **w,unsigned n){
-    uint64_t boot;
-    if(n!=4||strcmp(w[1],"INTERFERENCE")||strcmp(w[2],"GET")||!hex(w[3],&boot)){
-        response("radio error=syntax\n");return;
+    if(n==3&&!strcmp(w[1],"INTERFERENCE")&&!strcmp(w[2],"CAPS")){
+        response("radio caps b=%llx last_id=%llx last_op=%u\n",(unsigned long long)ctl.boot,
+            (unsigned long long)ctl.radio_last_id,(unsigned)ctl.radio_last_op);return;
     }
+    uint64_t boot,id=0;pm_radio_change_op op=0;
+    if(n>=3&&!strcmp(w[2],"TRY3"))op=PM_RADIO_TRY3;
+    if(n>=3&&!strcmp(w[2],"RESTORE"))op=PM_RADIO_RESTORE;
+    if(n!=(op?5u:4u)||strcmp(w[1],"INTERFERENCE")||
+        (!op&&strcmp(w[2],"GET"))||!hex(w[3],&boot)||
+        (op&&(!hex(w[4],&id)||!id))){response("radio error=syntax\n");return;}
     if(boot!=ctl.boot){response("radio error=boot\n");return;}
     if(!ctl.connected){response("radio error=disconnected\n");return;}
+    if(op&&id<=ctl.radio_last_id){
+        if(id<ctl.radio_last_id)response("radio error=stale_id\n");
+        else if(op!=ctl.radio_last_op)response("radio error=conflict\n");
+        else enqueue(ctl.radio_last_reply);
+        return;
+    }
     if(ctl.radio_pending||ctl.count==2){response("radio error=busy\n");return;}
-    // Reserve the reply before any SDK work; other replies cannot steal it.
+    ctl.radio_op=op;ctl.radio_id=id;
     ctl.radio_slot=(ctl.head+ctl.count)%2;
     enqueue("");ctl.radio_pending=true;
 }
+void pm_usb_control_service_radio_change(bool connected,pm_radio_changer changer){
+    if(!connected||!ctl.radio_pending||!ctl.radio_op)return;
+    pm_radio_change result=changer?changer(ctl.radio_op):
+        pm_radio_change_rejected(ctl.radio_op,pm_radio_rejected(PM_RADIO_UNAVAILABLE));
+    char wr[16]="-",target[2]="-",base[2]="-";uint32_t v;
+    if(result.wrote)snprintf(wr,sizeof wr,"%d",result.write_result);
+    if(pm_interference_candidate_value(result.target,&v))target[0]=(char)('0'+v);
+    if(pm_interference_candidate_value(result.baseline,&v))base[0]=(char)('0'+v);
+    char *reply=ctl.replies[ctl.radio_slot];
+    int n=snprintf(reply,REPLY,"radio change b=%llx id=%llx op=%s s=%s w=%s r=%d x=%08lx t=%s base=%s m=%u cdc_status=%s\n",
+        (unsigned long long)ctl.boot,(unsigned long long)ctl.radio_id,ctl.radio_op==PM_RADIO_TRY3?"3":"R",
+        pm_radio_change_status(result),wr,result.read.sdk_result,(unsigned long)result.read.raw,
+        target,base,pm_radio_change_match(result)?1u:0u,pm_radio_change_cdc(result));
+    if(n<0||(size_t)n>=REPLY)snprintf(reply,REPLY,"radio error=response_length\n");
+    ctl.radio_last_id=ctl.radio_id;ctl.radio_last_op=ctl.radio_op;
+    snprintf(ctl.radio_last_reply,REPLY,"%s",reply);ctl.radio_pending=false;
+}
 void pm_usb_control_service_radio(bool connected,pm_radio_reader reader){
-    if(!connected||!ctl.radio_pending)return;
+    if(!connected||!ctl.radio_pending||ctl.radio_op)return;
     pm_radio_read read=reader?reader():pm_radio_rejected(PM_RADIO_UNAVAILABLE);
     char *reply=ctl.replies[ctl.radio_slot];
     pm_interference_candidate mode;uint32_t value;
