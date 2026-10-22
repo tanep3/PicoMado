@@ -116,10 +116,10 @@ void pm_usb_control_service_radio(bool connected,pm_radio_reader reader){
     if(!connected||!ctl.radio_pending||ctl.radio_op)return;
     pm_radio_read read=reader?reader():pm_radio_rejected(PM_RADIO_UNAVAILABLE);
     char *reply=ctl.replies[ctl.radio_slot];
-    pm_interference_candidate mode;uint32_t value;
-    if(pm_radio_transport_candidate(read,&mode)&&pm_interference_candidate_value(mode,&value))
-        snprintf(reply,REPLY,"radio interference b=%llx status=transport_returned rc=0 raw=%08lx candidate=%lu cdc_status=unverified\n",
-            (unsigned long long)ctl.boot,(unsigned long)read.raw,(unsigned long)value);
+    pm_interference_readback readback;uint32_t value;
+    if(pm_radio_transport_readback(read,&readback)&&pm_interference_candidate_value(readback.setting,&value))
+        snprintf(reply,REPLY,"radio interference b=%llx status=transport_returned rc=0 raw=%08lx candidate=%lu auto_active=%u cdc_status=unverified\n",
+            (unsigned long long)ctl.boot,(unsigned long)read.raw,(unsigned long)value,readback.auto_active?1u:0u);
     else if(read.status==PM_RADIO_UNKNOWN)
         snprintf(reply,REPLY,"radio interference b=%llx status=unknown rc=%d raw=%08lx cdc_status=unverified\n",
             (unsigned long long)ctl.boot,read.sdk_result,(unsigned long)read.raw);

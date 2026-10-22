@@ -6,17 +6,20 @@ static void fresh(uint32_t baseline){
 }
 static void change(const char *line){text(line);assert(!radio_write_calls||radio_comparison.held);service();}
 static void fact(const char *s){expect(s);}
-int main(void){
+#ifndef PM_COMPARE_TEST_ENTRY
+#define PM_COMPARE_TEST_ENTRY main
+#endif
+int PM_COMPARE_TEST_ENTRY(void){
  const uint32_t baselines[]={0,1,2,4};
  for(unsigned i=0;i<4;i++){
   fresh(baselines[i]);text("RADIO INTERFERENCE TRY3 22 1");assert(!radio_ioctl_calls&&!radio_write_calls);
   service();assert(radio_ioctl_calls==2&&radio_write_calls==1&&radio_last_written==3);
-  uint32_t base;assert(radio_comparison.held&&pm_interference_candidate_value(radio_comparison.baseline,&base)&&base==baselines[i]);
+  uint32_t base;assert(radio_comparison.held&&pm_interference_candidate_value(radio_comparison.baseline.setting,&base)&&base==baselines[i]);
   fact("op=3 s=returned w=0 r=0 x=00000003 t=3 ");fact("m=1 cdc_status=unverified\n");
   change("RADIO INTERFERENCE RESTORE 22 2");assert(radio_write_calls==2&&radio_last_written==baselines[i]&&radio_sdk_value==baselines[i]);
   assert(radio_comparison.held);fact("op=R s=returned");
   change("RADIO INTERFERENCE TRY3 22 3");assert(radio_write_calls==3&&radio_last_written==3);
-  assert(pm_interference_candidate_value(radio_comparison.baseline,&base)&&base==baselines[i]);
+  assert(pm_interference_candidate_value(radio_comparison.baseline.setting,&base)&&base==baselines[i]);
   change("RADIO INTERFERENCE RESTORE 22 4");assert(radio_write_calls==4&&radio_sdk_value==baselines[i]);
  }
  // A failed write may have applied: retain baseline, show both results, and
@@ -73,4 +76,5 @@ int main(void){
  change("RADIO INTERFERENCE TRY3 ffffffffffffffff ffffffffffffffff");
  fact("s=werr w=-2147483648 r=-2147483648");fact("cdc_status=unverified\n");assert(!strstr(trace_text,"response_length"));
  puts("radio comparison: same binary baseline/3/restore, CDC limits, uncertain effects, stale scope, IDs/reconnect, deferred and bounded IO PASS");
+ return 0;
 }

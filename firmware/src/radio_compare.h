@@ -2,7 +2,7 @@
 #include "radio_query.h"
 /* RAM ownership, not a claim that the SDK checked CDC status. Never replace a
  * captured baseline with the experimental value after an uncertain write. */
-typedef struct { pm_interference_candidate baseline;bool held,stale; } pm_radio_comparison;
+typedef struct { pm_interference_readback baseline;bool held,stale; } pm_radio_comparison;
 typedef enum { PM_RADIO_TRY3=1,PM_RADIO_RESTORE=2 } pm_radio_change_op;
 typedef enum { PM_CHANGE_REJECTED,PM_CHANGE_NO_BASELINE,PM_CHANGE_STALE,
  PM_CHANGE_BASE3,PM_CHANGE_BASE_CHANGED,PM_CHANGE_ALREADY3,PM_CHANGE_WRITE,
@@ -17,22 +17,22 @@ static inline pm_radio_change pm_radio_change_rejected(pm_radio_change_op op,pm_
  return (pm_radio_change){.op=op,.phase=PM_CHANGE_REJECTED,.read=read};
 }
 static inline pm_radio_change pm_radio_change_plan(pm_radio_comparison *s,pm_radio_change_op op,pm_radio_read before){
- pm_radio_change out=pm_radio_change_rejected(op,before);out.baseline=s->baseline;
+ pm_radio_change out=pm_radio_change_rejected(op,before);out.baseline=s->baseline.setting;
  if(op!=PM_RADIO_TRY3&&op!=PM_RADIO_RESTORE)return out;
  if(s->stale){out.phase=PM_CHANGE_STALE;return out;}
  if(op==PM_RADIO_RESTORE){
   if(!s->held){out.phase=PM_CHANGE_NO_BASELINE;return out;}
-  out.target=s->baseline;out.phase=PM_CHANGE_WRITE;return out;
+  out.target=s->baseline.setting;out.phase=PM_CHANGE_WRITE;return out;
  }
- pm_interference_candidate candidate;uint32_t raw,base;
+ pm_interference_readback readback;uint32_t value,base;
  pm_interference_candidate_from_raw(3,&out.target);
- if(!pm_radio_transport_candidate(before,&candidate)||!pm_interference_candidate_value(candidate,&raw))return out;
+ if(!pm_radio_transport_readback(before,&readback)||!pm_interference_candidate_value(readback.setting,&value))return out;
  if(!s->held){
-  if(raw==3){out.phase=PM_CHANGE_BASE3;return out;}
-  s->baseline=candidate;s->held=true;out.baseline=candidate;
+  if(value==3){out.phase=PM_CHANGE_BASE3;return out;}
+  s->baseline=readback;s->held=true;out.baseline=readback.setting;
  }else{
-  if(raw==3){out.phase=PM_CHANGE_ALREADY3;return out;}
-  if(!pm_interference_candidate_value(s->baseline,&base)||raw!=base){out.phase=PM_CHANGE_BASE_CHANGED;return out;}
+  if(value==3){out.phase=PM_CHANGE_ALREADY3;return out;}
+  if(!pm_interference_candidate_value(s->baseline.setting,&base)||value!=base){out.phase=PM_CHANGE_BASE_CHANGED;return out;}
  }
  out.phase=PM_CHANGE_WRITE;return out;
 }

@@ -36,19 +36,19 @@ int PM_RADIO_TEST_ENTRY(void){
   assert(pm_radio_transport_candidate(pm_radio_decode(0,v),&mode));
   begin();radio_sdk_value=v;text("RADIO INTERFERENCE GET 22");
   assert(!radio_ioctl_calls);drain();assert(!radio_ioctl_calls&&!trace_used);
-  service();assert(radio_ioctl_calls==1);char expected[88];snprintf(expected,sizeof expected,"raw=%08x candidate=%u cdc_status=unverified\n",v,v);
+  service();assert(radio_ioctl_calls==1);char expected[88];snprintf(expected,sizeof expected,"raw=%08x candidate=%u auto_active=0 cdc_status=unverified\n",v,v);
   expect("status=transport_returned rc=0 ");expect(expected);service();assert(radio_ioctl_calls==1);
  }
  // A nonzero CDC status with in-range payload is indistinguishable through
  // the current SDK API: even rc=0/raw=4 MUST say CDC unverified, never mode=.
  begin();text("RADIO INTERFERENCE GET 22");service();
- expect("status=transport_returned rc=0 raw=00000004 candidate=4 cdc_status=unverified\n");
+ expect("status=transport_returned rc=0 raw=00000004 candidate=4 auto_active=0 cdc_status=unverified\n");
  assert(!strstr(trace_text," mode=")&&!strstr(trace_text,"status=observed"));
  // Error/unknown/short output never constructs a candidate value, including 0.
  begin();radio_sdk_result=-110;radio_sdk_value=0;text("RADIO INTERFERENCE GET 22");service();
  expect("status=sdk_error rc=-110 cdc_status=unverified\n");no_candidate();assert(radio_ioctl_calls==1&&!lwip_depth);
  radio_sdk_result=0;radio_sdk_value=3;trace_used=0;trace_text[0]=0;text("RADIO INTERFERENCE GET 22");service();
- expect("status=transport_returned rc=0 raw=00000003 candidate=3 cdc_status=unverified\n");assert(radio_ioctl_calls==2);
+ expect("status=transport_returned rc=0 raw=00000003 candidate=3 auto_active=0 cdc_status=unverified\n");assert(radio_ioctl_calls==2);
  for(unsigned count=0;count<4;count++){
   begin();radio_copy_bytes=count;radio_sdk_value=0;text("RADIO INTERFERENCE GET 22");service();
   expect("status=unknown rc=0 raw=");no_candidate();assert(radio_ioctl_calls==1);
@@ -117,7 +117,7 @@ int PM_RADIO_TEST_ENTRY(void){
  // Shared partial writer: zero progress does not replay IO or interleave lines.
  begin();trace_write_cap=0;text(request);service();assert(radio_ioctl_calls==1&&!trace_used);
  trace_write_cap=3;pm_logf("ordinary shared line\n");service();
- expect("radio interference b=22 status=transport_returned rc=0 raw=00000004 candidate=4 cdc_status=unverified\n");
+ expect("radio interference b=22 status=transport_returned rc=0 raw=00000004 candidate=4 auto_active=0 cdc_status=unverified\n");
 #if PM_TRACE_ENABLE
  expect("ordinary shared line\n");
 #endif

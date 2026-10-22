@@ -13,5 +13,8 @@ for device in sample-a E-ink_0 E-ink_1; do
   cc "${base[@]}" "-DPM_TRACE_ENABLE=$trace" '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
    -I"devices/$device" tests/radio_compare_test.c src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c -o "$work/compare-$device-$trace"
   "$work/compare-$device-$trace"
+  cc "${base[@]}" "-DPM_TRACE_ENABLE=$trace" '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
+   -I"devices/$device" tests/radio_readback_test.c src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c -o "$work/readback-$device-$trace"
+  "$work/readback-$device-$trace"
  done
 done
