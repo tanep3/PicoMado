@@ -14,6 +14,7 @@
 #include "pico/stdlib.h"
 #include "pico/rand.h"
 #include "pico/cyw43_arch.h"
+#include "radio_query_sdk.h"
 #include "pico/unique_id.h"
 #include "pico/stdio_usb.h"
 #include "hardware/flash.h"
@@ -200,6 +201,15 @@ static void check_wifi_pm(void){
     wifi_pm_status=WIFI_PM_CHECKED;
     log_wifi_pm_status();
 }
+static pm_radio_read usb_radio_query(void){
+    if(!pm_radio_thread_context())return pm_radio_rejected(PM_RADIO_CONTEXT);
+    bool available=wifi_enabled&&(state==SERVER||state==SESSION||state==ACTIVE);
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+    available=available&&!panel_standby;
+#endif
+    available=available&&cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)==CYW43_LINK_UP;
+    return pm_radio_interference_get(available);
+}
 static void log_usb_snapshot(void){
     static bool was_connected;
     static uint32_t last_ms;
@@ -209,6 +219,7 @@ static void log_usb_snapshot(void){
 #endif
     if(connected)for(unsigned n=0;n<16;n++){int ch=getchar_timeout_us(0);if(ch<0)break;pm_usb_control_input(ch);}
     pm_usb_control_poll(connected);
+    pm_usb_control_service_radio(connected,usb_radio_query);
     if(connected && !was_connected)pm_net_rx_snapshot();
     pm_stats_usb_poll(connected);
     if(!connected){was_connected=false;return;}

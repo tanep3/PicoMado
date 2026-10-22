@@ -6,15 +6,20 @@
   "design_artifacts": [
     "docs/changes/INTERFERENCE-GET-20261022.md"
   ],
-  "design_commit": "",
+  "design_commit": "19f8ece6054bf1fb08cdb7b71b7d9dc55274ea08",
   "status": "in_progress",
   "stages": {
     "design": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "19f8ece6054bf1fb08cdb7b71b7d9dc55274ea08"
+        }
+      ]
     },
     "implementation": {
-      "state": "not_started",
+      "state": "in_progress",
       "evidence": []
     },
     "independent_verification": {

@@ -68,6 +68,12 @@ static unsigned lwip_depth;
 void cyw43_arch_lwip_begin(void){assert(lwip_depth==0);lwip_depth=1;}
 void cyw43_arch_lwip_end(void){assert(lwip_depth==1);lwip_depth=0;}
 int cyw43_wifi_pm(cyw43_t *s,uint32_t value){assert(lwip_depth==1 && s==&cyw43_state && value==CYW43_NONE_PM);return 0;}
+uint get_core_num(void){return 0;}
+uint __get_current_exception(void){return 0;}
+int cyw43_ioctl(cyw43_t *s,uint32_t command,size_t length,uint8_t *buffer,uint32_t interface){
+    (void)s;(void)command;(void)length;(void)buffer;(void)interface;
+    assert(!"unrequested radio GET in existing application fixture");return -1;
+}
 int cyw43_wifi_get_pm(cyw43_t *s,uint32_t *value){assert(lwip_depth==1 && s==&cyw43_state);*value=CYW43_NONE_PM;return 0;}
 void cyw43_arch_poll(void){}
 int cyw43_arch_wifi_connect_async(const char *s,const char *p,uint32_t a){assert(s&&p&&a==CYW43_AUTH_WPA2_AES_PSK);joins++;return 0;}

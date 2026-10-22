@@ -1,6 +1,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 typedef struct { unsigned unused; } cyw43_t;
 extern cyw43_t cyw43_state;
 int cyw43_arch_init(void);
@@ -27,3 +28,5 @@ void cyw43_arch_lwip_end(void);
 #define CYW43_NO_POWERSAVE_MODE 0u
 int cyw43_wifi_pm(cyw43_t *state,uint32_t value);
 int cyw43_wifi_get_pm(cyw43_t *state,uint32_t *value);
+
+int cyw43_ioctl(cyw43_t *state,uint32_t command,size_t length,uint8_t *buffer,uint32_t interface);

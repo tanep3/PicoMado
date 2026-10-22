@@ -14,6 +14,12 @@
 
 uint8_t test_flash_sector[4096];
 cyw43_t cyw43_state;
+static unsigned radio_core,radio_exception,radio_ioctl_calls;
+static int radio_sdk_result;
+static uint32_t radio_sdk_value=UINT32_MAX;
+static size_t radio_copy_bytes=4;
+uint get_core_num(void){return radio_core;}
+uint __get_current_exception(void){return radio_exception;}
 static jmp_buf finished;
 static uint32_t clock_ms=1000,confirm_loop_ms;
 static int pressed=-1,wifi_link=CYW43_LINK_DOWN,ip_link=CYW43_LINK_DOWN;
@@ -162,6 +168,13 @@ int cyw43_wifi_get_pm(cyw43_t *s,uint32_t *value){
     pm_reads++;
     if(!pm_read_result)*value=pm_read_value;
     return pm_read_result;
+}
+int cyw43_ioctl(cyw43_t *s,uint32_t command,size_t length,uint8_t *buffer,uint32_t interface){
+    assert(s==&cyw43_state&&command==0x1a6&&length==4&&interface==CYW43_ITF_STA);
+    assert(lwip_depth==1&&!radio_core&&!radio_exception&&sta_on);
+    uint32_t initial;memcpy(&initial,buffer,4);assert(initial==UINT32_MAX);
+    radio_ioctl_calls++;if(!radio_sdk_result)memcpy(buffer,&radio_sdk_value,radio_copy_bytes);
+    return radio_sdk_result;
 }
 void cyw43_arch_poll(void){}
 int cyw43_arch_wifi_connect_async(const char *ssid,const char *pw,uint32_t auth){
