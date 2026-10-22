@@ -139,7 +139,7 @@ LCD/E-ink_0/E-ink_1の共通通信は、能力frame-bytes-v1でraw pixel kind18�
 
 ## AWAY接続先のEEX1取得
 
-Androidの手動起動アプリを使う接続先交換クライアントを追加しました。HOMEは既存direct TCPのまま、`-DPM_AWAY_EEX1=ON`を指定した端末buildのAWAYだけに適用します。既定はOFF、探索UDP portは`PM_EEX1_PORT=48116`。認証成功とSOCKS CONNECT完了で検証した接続先をWi-Fi接続世代中のRAMへ保持し、TCP再接続で再利用します。取得IP/portを永続設定へ書き戻しません。
+Androidの手動起動アプリを使う接続先交換クライアントを追加しました。HOMEは既存direct TCPのまま、製品LCD/E-inkのAWAYではEEX1による接続先取得が必須です。製品buildは既定ONで、`-DPM_AWAY_EEX1=OFF`を指定すると構成を拒否します。固定接続の試験は書込み不能なsample/unbound buildに限定します。探索UDP portは`PM_EEX1_PORT=48116`。認証成功とSOCKS CONNECT完了で検証した接続先をWi-Fi接続世代中のRAMへ保持し、TCP再接続で再利用します。取得IP/portを永続設定へ書き戻しません。
 
 [参照仕様・出典・ビルド方法・実機確認範囲](../docs/eex1-endpoint-discovery.md)を参照してください。`TARGET_CONNECTED`はSOCKSの宛先接続成功を表し、PiのWelcomeや画像描画成功は別に確認します。Androidアプリは別プロジェクトで管理します。
 
