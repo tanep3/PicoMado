@@ -1,13 +1,14 @@
 {
   "id": "SWITCH-FEEDBACK-400MS-20261022",
-  "title": "Delay shared local switch hint to400ms without other behavior changes",
+  "title": "400ms demo feedback with approved radio defaults per STA lifecycle",
   "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
   "implementer": "switch feedback worker",
   "design_artifacts": [
     "docs/changes/LOCAL-SWITCH-FEEDBACK-20261022.md",
-    "docs/changes/SWITCH-FEEDBACK-400MS-20261022.md"
+    "docs/changes/SWITCH-FEEDBACK-400MS-20261022.md",
+    "docs/changes/DEMO-RADIO-DEFAULTS-20261022.md"
   ],
-  "design_commit": "ce9acfd580d1ad41d03ad71770b4a9a75ddd2420",
+  "design_commit": "a1b9632d8e647f773efd48b7d2d347da88728273",
   "status": "in_progress",
   "stages": {
     "design": {
@@ -15,7 +16,7 @@
       "evidence": [
         {
           "kind": "commit",
-          "commit": "ce9acfd580d1ad41d03ad71770b4a9a75ddd2420"
+          "commit": "a1b9632d8e647f773efd48b7d2d347da88728273"
         }
       ]
     },

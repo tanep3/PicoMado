@@ -81,6 +81,8 @@ static int wifi_pm_request_result,wifi_pm_readback_result;
 static uint32_t wifi_pm_readback;
 static pm_radio_comparison radio_comparison;
 static pm_roaming_comparison roaming_comparison;
+static bool radio_defaults_attempted;
+static pm_radio_write_readback default_interference,default_roaming;
 static pm_token last_rendered;
 static pm_token pending_render_token;
 static bool pending_render_ack;
@@ -203,6 +205,34 @@ static void check_wifi_pm(void){
     wifi_pm_status=WIFI_PM_CHECKED;
     log_wifi_pm_status();
 }
+/* Replay startup attempt facts, not a fresh query of current RF state. */
+static void log_radio_defaults_status(void){
+ if(!radio_defaults_attempted)return;
+ pm_interference_candidate interference;pm_roaming_candidate roaming;uint32_t got;
+ bool a=pm_radio_transport_candidate(default_interference.read,&interference)&&
+        pm_interference_candidate_value(interference,&got)&&got==3;
+ bool b=pm_roaming_transport(default_roaming.read,&roaming)&&pm_roaming_value(roaming,&got)&&got==1;
+ pm_logf("radio defaults k=interference t=3 w=%d r=%d s=%s x=%08lx m=%u cdc_status=unverified\n",
+   default_interference.write_result,default_interference.read.sdk_result,pm_radio_status_name(default_interference.read.status),
+   (unsigned long)default_interference.read.raw,a?1u:0u);
+ pm_logf("radio defaults k=roam_off t=1 w=%d r=%d s=%s x=%08lx m=%u cdc_status=unverified\n",
+   default_roaming.write_result,default_roaming.read.sdk_result,pm_radio_status_name(default_roaming.read.status),
+   (unsigned long)default_roaming.read.raw,b?1u:0u);
+}
+static void apply_radio_defaults(void){
+ if(radio_defaults_attempted||!wifi_enabled||state!=WIFI||!pm_radio_thread_context()||
+    cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)!=CYW43_LINK_UP)return;
+ /* Once per enabled STA interval, including errors. No loop or baseline/ID
+  * mutation. Association is complete; do not apply before firmware bringup. */
+ radio_defaults_attempted=true;
+ pm_interference_candidate interference={0};pm_roaming_candidate roaming={0};
+ (void)pm_interference_candidate_from_raw(3,&interference);(void)pm_roaming_from_raw(1,&roaming);
+ default_interference.write_result=pm_radio_interference_write(interference);
+ default_interference.read=pm_radio_interference_get(true);
+ default_roaming.write_result=pm_radio_roaming_write(roaming);
+ default_roaming.read=pm_radio_roaming_get(true);
+ log_radio_defaults_status();
+}
 static bool radio_allowed_for(pm_radio_read *rejection,bool recovery){
     if(!pm_radio_thread_context()){*rejection=pm_radio_rejected(PM_RADIO_CONTEXT);return false;}
     bool available=wifi_enabled&&(recovery?(state!=MENU&&state!=STANDBY):
@@ -263,6 +293,7 @@ static void log_usb_snapshot(void){
 #endif
     // Replay cached results for late USB attachment; never repeat radio IOCTLs.
     log_wifi_pm_status();
+    log_radio_defaults_status();
 }
 static void log_wifi_progress(void){
     int wifi=cyw43_wifi_link_status(&cyw43_state,CYW43_ITF_STA);
@@ -330,7 +361,7 @@ static void wifi_off(void){
     endpoint_reset();
 #endif
     pm_net_close();
-    if(wifi_enabled){pm_radio_comparison_invalidate(&radio_comparison);pm_roaming_invalidate(&roaming_comparison);cyw43_arch_disable_sta_mode();wifi_enabled=false;}
+    if(wifi_enabled){radio_defaults_attempted=false;pm_radio_comparison_invalidate(&radio_comparison);pm_roaming_invalidate(&roaming_comparison);cyw43_arch_disable_sta_mode();wifi_enabled=false;}
 }
 static void standby(void){
     retained_pixels=false;
@@ -1248,6 +1279,7 @@ int main(void){
             log_wifi_progress();
             if(cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)==CYW43_LINK_UP){
                 check_wifi_pm();
+                apply_radio_defaults();
 #if PM_DIAGNOSTIC_STAGE
                 pm_display_reference_pattern();
                 pm_logf("%s\n","diag stage=wifi_up_pattern duration_ms=6000");

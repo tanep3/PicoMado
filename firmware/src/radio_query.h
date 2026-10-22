@@ -45,3 +45,6 @@ static inline const char *pm_radio_status_name(pm_radio_status status){
     return (unsigned)status<sizeof names/sizeof names[0]?names[status]:"unknown";
 }
 typedef pm_radio_read (*pm_radio_reader)(void);
+
+/* Raw effect facts; matching payload is never CDC/RF success. */
+typedef struct {int write_result;pm_radio_read read;} pm_radio_write_readback;

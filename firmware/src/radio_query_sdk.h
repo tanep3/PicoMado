@@ -21,17 +21,21 @@ static inline pm_radio_read pm_radio_interference_get(bool available){
     return pm_radio_decode(result,raw);
 }
 
+static inline int pm_radio_interference_write(pm_interference_candidate candidate){
+ uint32_t target;
+ if(!pm_radio_thread_context()||!pm_interference_candidate_value(candidate,&target))return -1;
+ cyw43_arch_lwip_begin();
+ int rc=cyw43_ioctl(&cyw43_state,0x1a9,sizeof target,(uint8_t *)&target,CYW43_ITF_STA);
+ cyw43_arch_lwip_end();return rc;
+}
+
 static inline pm_radio_change pm_radio_interference_change(pm_radio_comparison *state,pm_radio_change_op op){
  pm_radio_read before=pm_radio_rejected(PM_RADIO_UNAVAILABLE);
  if(!pm_radio_thread_context())return pm_radio_change_rejected(op,pm_radio_rejected(PM_RADIO_CONTEXT));
  if(op==PM_RADIO_TRY3&&!state->stale)before=pm_radio_interference_get(true);
  pm_radio_change plan=pm_radio_change_plan(state,op,before);
  if(plan.phase!=PM_CHANGE_WRITE)return plan;
- uint32_t target;
- if(!pm_interference_candidate_value(plan.target,&target))return pm_radio_change_rejected(op,before);
- cyw43_arch_lwip_begin();
- int rc=cyw43_ioctl(&cyw43_state,0x1a9,sizeof target,(uint8_t *)&target,CYW43_ITF_STA);
- cyw43_arch_lwip_end();
+ int rc=pm_radio_interference_write(plan.target);
  // Even an error return may follow a device-side write. Keep baseline and
  // report a separate GET, never turn a write error into success via readback.
  return pm_radio_change_finish(plan,rc,pm_radio_interference_get(true));
@@ -48,18 +52,21 @@ static inline pm_radio_read pm_radio_roaming_get(bool available){
  uint32_t raw=(uint32_t)buffer[0]|((uint32_t)buffer[1]<<8)|((uint32_t)buffer[2]<<16)|((uint32_t)buffer[3]<<24);
  return pm_roaming_decode(rc,raw);
 }
+static inline int pm_radio_roaming_write(pm_roaming_candidate candidate){
+ uint32_t value;
+ if(!pm_radio_thread_context()||!pm_roaming_value(candidate,&value))return -1;
+ uint8_t buffer[13]="roam_off";buffer[9]=(uint8_t)value;
+ cyw43_arch_lwip_begin();
+ int rc=cyw43_ioctl(&cyw43_state,0x20f,sizeof buffer,buffer,CYW43_ITF_STA);
+ cyw43_arch_lwip_end();return rc;
+}
 static inline pm_roaming_change pm_radio_roaming_change(pm_roaming_comparison *state,pm_roaming_op op){
  pm_radio_read before=pm_radio_rejected(PM_RADIO_UNAVAILABLE);
  if(!pm_radio_thread_context())return pm_roaming_rejected(op,pm_radio_rejected(PM_RADIO_CONTEXT));
  if(op==PM_ROAM_OFF&&!state->stale)before=pm_radio_roaming_get(true);
  pm_roaming_change plan=pm_roaming_plan(state,op,before);
  if(plan.phase!=PM_CHANGE_WRITE)return plan;
- uint32_t value;
- if(!pm_roaming_value(plan.target,&value))return pm_roaming_rejected(op,before);
- uint8_t buffer[13]="roam_off";buffer[9]=(uint8_t)value;
- cyw43_arch_lwip_begin();
- int rc=cyw43_ioctl(&cyw43_state,0x20f,sizeof buffer,buffer,CYW43_ITF_STA);
- cyw43_arch_lwip_end();
+ int rc=pm_radio_roaming_write(plan.target);
  plan.wrote=true;plan.write_result=rc;plan.read=pm_radio_roaming_get(true);plan.phase=PM_CHANGE_RETURNED;
  return plan;
 }
