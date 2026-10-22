@@ -6,4 +6,6 @@
 
 正本LOCAL-SWITCH-FEEDBACKの現行仕様と既存model/app/取消し/正式USB/RADIO境界試験を400 msへ揃える。過去の試験結果に書かれた200 msは当時の事実として保持する。今回の製品コード変更は定数1行だけ。入力sampling修正、ログ/診断flags、roaming/interference、EEX、SDK、serverには変更しない。既存入力cadence反例を含むhost回帰とroot検査を行う。
 
-今回実機/USB/flash/SSH操作や新UF2の作成はしない。物理確認待ちの間にsource patchと検証結果だけを渡す。後のfirmware更新時は、この基点以降の入力修正を保持して通常入口でbuild/独立確認し、実機適用を別途調整する。400 msの視認頻度や実体感の改善は未確認。
+最新のユーザー指示により、LCDとE-ink_0/1の通常UF2を個体設定と既存flagsを保持して準備する。実機/USB/flash/SSH操作はしない。入力修正を保持して通常入口でbuildし、独立確認とLCD先行・E-ink後続の適用は親/hardware ownerへ引き渡す。400 msの視認頻度や実体感の改善は未確認。
+
+LCDのmode3/roaming OFFはvolatileであり、flash/reboot後に維持される保証はない。自動適用・永続化を追加せず、静止画のquiet状態で既存INTERFERENCE GET/TRY3/GETとROAMING GET/OFF/GETをhardware ownerが明示実行して条件を戻す。値とCDC未検証の制約を保存する。E-inkの現機RF値は今回未取得で、LCDの値を無断で複製しない。
