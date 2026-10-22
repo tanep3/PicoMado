@@ -29,3 +29,6 @@ python3 tests/ack_probe_v2_test.py
 python3 tests/heartbeat_capture_test.py
 python3 tests/heartbeat_evidence_contract_test.py
 python3 tests/heartbeat_owner_runner_test.py
+
+# Read-only radio query through the normal owner/main path.
+bash tests/run_radio_query_tests.sh

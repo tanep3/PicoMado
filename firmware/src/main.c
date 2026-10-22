@@ -14,6 +14,7 @@
 #include "pico/stdlib.h"
 #include "pico/rand.h"
 #include "pico/cyw43_arch.h"
+#include "radio_query_sdk.h"
 #include "pico/unique_id.h"
 #include "pico/stdio_usb.h"
 #include "hardware/flash.h"
@@ -200,6 +201,24 @@ static void check_wifi_pm(void){
     wifi_pm_status=WIFI_PM_CHECKED;
     log_wifi_pm_status();
 }
+static pm_radio_read usb_radio_query(void){
+    if(!pm_radio_thread_context())return pm_radio_rejected(PM_RADIO_CONTEXT);
+    bool available=wifi_enabled&&state==ACTIVE&&have_display&&
+        cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)==CYW43_LINK_UP;
+    if(!available)return pm_radio_rejected(PM_RADIO_UNAVAILABLE);
+    // Existing switch/display ownership excludes known work before synchronous
+    // IOCTL entry. New input arriving DURING it can still be delayed: use only
+    // one explicit query while the device is idle, not alongside user actions.
+    bool busy=switching.waiting||switching.sent!=switching.replied||await_selection||
+        pending_standby||pending_sub_cancel||pending_render_ack||assembly.active;
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+    busy=busy||panel_standby||drawing||pending_frame.phase!=PM_EINK_EMPTY||pm_display_busy();
+#else
+    busy=busy||lcd_waiting_frame||receiving_stream||video.active||video.ready||video.busy;
+#endif
+    if(busy)return pm_radio_rejected(PM_RADIO_BUSY);
+    return pm_radio_interference_get(true);
+}
 static void log_usb_snapshot(void){
     static bool was_connected;
     static uint32_t last_ms;
@@ -209,6 +228,7 @@ static void log_usb_snapshot(void){
 #endif
     if(connected)for(unsigned n=0;n<16;n++){int ch=getchar_timeout_us(0);if(ch<0)break;pm_usb_control_input(ch);}
     pm_usb_control_poll(connected);
+    pm_usb_control_service_radio(connected,usb_radio_query);
     if(connected && !was_connected)pm_net_rx_snapshot();
     pm_stats_usb_poll(connected);
     if(!connected){was_connected=false;return;}

@@ -18,3 +18,6 @@ void sleep_ms(unsigned milliseconds);
 uint64_t time_us_64(void);
 
 static inline int getchar_timeout_us(uint32_t timeout){(void)timeout;return -1;}
+
+uint get_core_num(void);
+uint __get_current_exception(void);

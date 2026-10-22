@@ -1,0 +1,38 @@
+{
+  "id": "INTERFERENCE-GET-20261022",
+  "title": "Read-only typed radio interference query over existing USB owner",
+  "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
+  "implementer": "interference GET worker",
+  "design_artifacts": [
+    "docs/changes/INTERFERENCE-GET-20261022.md"
+  ],
+  "design_commit": "ddcef9936a1b9181af0349b85699dd41e8e028b0",
+  "status": "in_progress",
+  "stages": {
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "ddcef9936a1b9181af0349b85699dd41e8e028b0"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "in_progress",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}

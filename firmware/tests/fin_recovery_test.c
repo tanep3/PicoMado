@@ -89,6 +89,12 @@ int cyw43_arch_wifi_connect_async(const char *a,const char *b,uint32_t c){(void)
 int cyw43_wifi_link_status(cyw43_t *s,int i){(void)s;(void)i;return CYW43_LINK_UP;}
 int cyw43_tcpip_link_status(cyw43_t *s,int i){(void)s;(void)i;return matrix_running&&matrix.armed&&matrix.link_down?CYW43_LINK_DOWN:CYW43_LINK_UP;}
 int cyw43_wifi_pm(cyw43_t *s,uint32_t v){(void)s;assert(v==CYW43_NONE_PM);return 0;}
+uint get_core_num(void){return 0;}
+uint __get_current_exception(void){return 0;}
+int cyw43_ioctl(cyw43_t *s,uint32_t command,size_t length,uint8_t *buffer,uint32_t interface){
+    (void)s;(void)command;(void)length;(void)buffer;(void)interface;
+    assert(!"unrequested radio GET in existing application fixture");return -1;
+}
 int cyw43_wifi_get_pm(cyw43_t *s,uint32_t *v){(void)s;*v=CYW43_NONE_PM;return 0;}
 void cyw43_arch_lwip_begin(void){assert(lock_depth==0);lock_depth=1;}
 void cyw43_arch_lwip_end(void){
