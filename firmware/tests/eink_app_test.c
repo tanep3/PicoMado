@@ -71,8 +71,14 @@ int cyw43_wifi_pm(cyw43_t *s,uint32_t value){assert(lwip_depth==1 && s==&cyw43_s
 uint get_core_num(void){return 0;}
 uint __get_current_exception(void){return 0;}
 int cyw43_ioctl(cyw43_t *s,uint32_t command,size_t length,uint8_t *buffer,uint32_t interface){
-    (void)s;(void)command;(void)length;(void)buffer;(void)interface;
-    assert(!"unrequested radio GET in existing application fixture");return -1;
+    // Only the approved startup settings are expected in this full-main fixture.
+    assert(s==&cyw43_state&&interface==CYW43_ITF_STA&&state==WIFI&&lwip_depth==1);
+    uint32_t value;
+    if(command==0x1a9){assert(length==4);memcpy(&value,buffer,4);assert(value==3);return 0;}
+    if(command==0x1a6){assert(length==4);value=3;memcpy(buffer,&value,4);return 0;}
+    assert(length==13&&!memcmp(buffer,"roam_off",9));
+    if(command==0x20f){assert(buffer[9]==1&&!buffer[10]&&!buffer[11]&&!buffer[12]);return 0;}
+    assert(command==0x20c);value=1;memcpy(buffer,&value,4);return 0;
 }
 int cyw43_wifi_get_pm(cyw43_t *s,uint32_t *value){assert(lwip_depth==1 && s==&cyw43_state);*value=CYW43_NONE_PM;return 0;}
 void cyw43_arch_poll(void){}
