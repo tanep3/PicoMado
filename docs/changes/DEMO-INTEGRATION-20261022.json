@@ -9,10 +9,36 @@
     "docs/changes/EEX1-RESTORE-20261022.md"
   ],
   "stages": {
-    "design": {"state": "verified", "evidence": [{"kind": "commit", "commit": "c702221"}]},
-    "implementation": {"state": "not_started", "evidence": []},
-    "independent_verification": {"state": "not_started", "evidence": []},
-    "operational_application": {"state": "not_started", "evidence": []},
-    "effectiveness_confirmation": {"state": "not_started", "evidence": []}
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "c702221"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-21/task/latency-eex1-restore-20261022/final-check/check.json",
+          "SHA256": "40917f0f3fb0b557ce908585699252edccdb5c6e82a35f5f260ff0c460f2f747"
+        }
+      ]
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
   }
 }
