@@ -1,0 +1,10 @@
+# D-01 独立レビュー後の追加契約
+
+`6ee47e1` は大きなparse/renderの隔離と240件の回帰を確認したが、次の2点を是正するまでD-01全体を受入済みとしない。
+
+1. FetchJobを現在のlogical session epochに束縛する。prepare前とapply時の両方でincarnation/settingsに加えてsessionを照合する。weather/radarのsession_resetは旧in-flightを取消し、必要な再取得を妨げる残留待機を消す。旧sessionのprepared結果を新sessionへ適用せず、両pluginで再接続→旧結果拒否→新job計画を検証する。
+2. weatherのnative E-ink生成もprepareで完成させる。現在の`eink_frame_for`によるLCD比較用の再renderとE-inkの全描画をapply区間に残さない。取得セットの日別LCD/E-ink画素を不変cacheとしてprepareし、applyは現在のlatest/pinned browseに対応する画素を選ぶだけとする。セットIDだけで異なるsnapshotを混同せず、保持cacheは現在latestと閲覧中snapshotに限定して有界にする。cacheを永続snapshotへ入れない。再起動時の復元cache生成はサービス公開前に行う。
+
+受入：実組込みの両pluginで旧sessionを拒否し、新取得が可能なこと。E-ink端末の実App apply中にfull render関数が0回で、返る3813Bが既存native描画と一致すること。SUB中にprepareが完了しても閲覧snapshotと新latestを混同しないこと。正常/error/設定変更/削除/取消しと既存fetch回帰を維持する。
+
+2点の実装と追加3試験を含む245件のunit回帰が成功した。検証範囲、画素cacheの容量と残るD-02の境界は[検証記録](../verification/fetch-completion-isolation-verification.md#独立レビューの2点への修正)を参照する。実機の遅延解消や全逸脱の完了は意味しない。

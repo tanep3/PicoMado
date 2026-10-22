@@ -45,7 +45,7 @@ LAN宛先への到達は、本環境で既に利用できるsubnet routingに依
 
 ## 証拠の参照先
 
-- [接続技術ガイド](../../docs/home-away-connectivity-technical-guide.md)
+- [接続技術ガイド](../../docs/guides/home-away-connectivity-technical-guide.md)
 - [実機検証の経過](../../firmware/verification-2026-10-12.md)
 - [2026-10-11の別実験](results-2026-10-11-tailsocks.md)
 - ファーム担当の照合報告: 作業領域 `task-5/away-lan-physical-test.md`。CDCの資格情報は非出力。

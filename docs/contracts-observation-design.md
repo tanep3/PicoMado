@@ -1,6 +1,6 @@
 # 共通契約と観測の段階的整理（2026-10-20）
 
-本書は既存の [共通カーネル要件](requirements/kernel.md#プラグイン-web-画面と責務境界) と [遷移設計](system-design-draft.md#2-遷移を契約で組み立てる) の実装補足である。soukoban の読み取り専用 Query、遅延候補、純粋な遷移、外部 Effect という既決方針を維持する。プラグインの内容生成を共通コードへ移す設計ではない。
+本書は既存の [共通カーネル要件](requirements/kernel.md#プラグイン-web-画面と責務境界) と [遷移設計](history/system-design-draft.md#2-遷移を契約で組み立てる) の実装補足である。soukoban の読み取り専用 Query、遅延候補、純粋な遷移、外部 Effect という既決方針を維持する。プラグインの内容生成を共通コードへ移す設計ではない。
 
 ## 着手前の保存と適合状況
 
@@ -56,11 +56,11 @@ Pico は既存 trace の32件キューを共用する。EV1 有効後は通常�
 
 | 追跡項目 | 修正範囲・完了条件 |
 | --- | --- |
-| D-01 取得完了の重い処理 | `6c9fe32`を独立受入済み。組込みweather/radarのprepare/apply、session照合、native画素事前生成。未知拡張の同期defaultは別。 [検証](fetch-completion-isolation-verification.md)。 |
-| D-02 全状態の同期保存 | `a6c7cf4`まで独立受入済み。保存後公開を維持し、一時query/ACK/browse/配信/時計を分離、表示identityと成功prefixを保持。全JSON保存・永続writer待ちは残る。[検証](application-live-state-verification.md)。 |
-| D-03 共通Appの風刺画固有処理 | A `53cb612`は独立受入済み。B `52d8fdd`でplugin所有の期限/保護/再開と、共通の保存→明示公開→外部finishを実装し全体294/273件成功、独立43試験で受入済み・追加指摘なし。[検証](plugin-maintenance-verification.md)。 |
-| D-04 E-inkの描画中受信 | `bae0575`まで独立受入済み。最新pending、世代/CRC/metadata、描画中同一token再送のdispatch時合流を0/2ボタンで確認。実パネルは未受入。[検証](eink-pending-frame-verification.md)。 |
-| D-05 実用的な切替追跡 | 収集/保存/因果解析と是正`1cbb992`をソフトウェア検証し、5是正を独立確認済み。実USB/IRQ/RF/物理描画、server socket等の未採取境界は残りD05全体の実機受入は未完了。[最新照合](refactor-final-acceptance-20261020.md)。 |
+| D-01 取得完了の重い処理 | `6c9fe32`を独立受入済み。組込みweather/radarのprepare/apply、session照合、native画素事前生成。未知拡張の同期defaultは別。 [検証](verification/fetch-completion-isolation-verification.md)。 |
+| D-02 全状態の同期保存 | `a6c7cf4`まで独立受入済み。保存後公開を維持し、一時query/ACK/browse/配信/時計を分離、表示identityと成功prefixを保持。全JSON保存・永続writer待ちは残る。[検証](verification/application-live-state-verification.md)。 |
+| D-03 共通Appの風刺画固有処理 | A `53cb612`は独立受入済み。B `52d8fdd`でplugin所有の期限/保護/再開と、共通の保存→明示公開→外部finishを実装し全体294/273件成功、独立43試験で受入済み・追加指摘なし。[検証](verification/plugin-maintenance-verification.md)。 |
+| D-04 E-inkの描画中受信 | `bae0575`まで独立受入済み。最新pending、世代/CRC/metadata、描画中同一token再送のdispatch時合流を0/2ボタンで確認。実パネルは未受入。[検証](verification/eink-pending-frame-verification.md)。 |
+| D-05 実用的な切替追跡 | 収集/保存/因果解析と是正`1cbb992`をソフトウェア検証し、5是正を独立確認済み。実USB/IRQ/RF/物理描画、server socket等の未採取境界は残りD05全体の実機受入は未完了。[最新照合](history/refactor-final-acceptance-20261020.md)。 |
 
 既存挙動は [採用済み通信・Pico設定](../firmware/adopted-protocol-and-configuration.md) を比較基準とする。
 
@@ -94,7 +94,7 @@ Pico は既存 trace の32件キューを共用する。EV1 有効後は通常�
 
 ### 実機からの観測契約へのフィードバック
 
-[2026-10-20の手押し結果](manual-switch-analysis-20261020.md)では、4操作の正の入力→描画事実を得た一方、動画中のsource queue欠測885件により採取全体はincompleteだった。C-03の有界・非待機・通常機能独立と、C-08の欠測を成功にしない方針を維持し、source境界・排出・cold startの不足を[修正前契約](observation-runtime-gap-contract.md)と[検証条件](observation-runtime-gap-verification.md)で具体化した。
+[2026-10-20の手押し結果](investigations/manual-switch-analysis-20261020.md)では、4操作の正の入力→描画事実を得た一方、動画中のsource queue欠測885件により採取全体はincompleteだった。C-03の有界・非待機・通常機能独立と、C-08の欠測を成功にしない方針を維持し、source境界・排出・cold startの不足を[修正前契約](design/observation-runtime-gap-contract.md)と[検証条件](verification/observation-runtime-gap-verification.md)で具体化した。
 
 入力受付・TCP COPY受理・output呼出し・実linkoutput・kernel受理・対向API受付・物理描画を区別する。今回測れていないserver Network／Pico RX・TCP境界をcoverage済みとせず、根因の仮説を実装へ先取りしない。runtimeコードはこのフィードバックでは変更していない。
 

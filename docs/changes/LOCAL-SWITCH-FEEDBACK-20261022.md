@@ -2,7 +2,7 @@
 
 2026-10-22 のユーザー訂正により開始閾値を400 msへ変更した。通常切替とSUBで共通。過去の200 msの再現記録は当時値として保持し、現行境界は399/400 msとする。詳細は[閾値変更](SWITCH-FEEDBACK-400MS-20261022.md)。
 
-基準は `6db62d8`（LCD PR155候補 `77c40a06…90e9` と同じ製品コード）。根治調査とは独立した入力へのフィードバック。既存の[局所/サーバ世代](../system-design-draft.md)、[E-ink pending](../eink-pending-frame-contract.md)、[採用済み通信](../../firmware/adopted-protocol-and-configuration.md)を保つ。実機・USB・サーバ・SSHは変更しない。独立受入済みE-ink NODELAY差分 `34b4849` も既存成果として継承し、LCDのPR155 overlay・診断flags・個別設定を保持する。
+基準は `6db62d8`（LCD PR155候補 `77c40a06…90e9` と同じ製品コード）。根治調査とは独立した入力へのフィードバック。既存の[局所/サーバ世代](../history/system-design-draft.md)、[E-ink pending](../design/eink-pending-frame-contract.md)、[採用済み通信](../../firmware/adopted-protocol-and-configuration.md)を保つ。実機・USB・サーバ・SSHは変更しない。独立受入済みE-ink NODELAY差分 `34b4849` も既存成果として継承し、LCDのPR155 overlay・診断flags・個別設定を保持する。
 
 ## 要件と意味
 

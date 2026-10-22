@@ -43,4 +43,4 @@
 
 ## 記録の所在
 
-作業フォルダ `endpoint-preparation/` のfinal-host-tests.log、final-sanitizer-results.json、final-sdk-result.json、final-candidate-analysis.json、flash-result.json/flash.log、post-flash-followup-summary.jsonに根拠を保存。UF2/実端末config/生USBはGit管理外。参照仕様・出典の限界は[接続先交換の説明](../docs/eex1-endpoint-discovery.md)。Android仕様は担当者の文脈から再現された引継ぎで、当方が元commitから抽出・照合したものではない。
+作業フォルダ `endpoint-preparation/` のfinal-host-tests.log、final-sanitizer-results.json、final-sdk-result.json、final-candidate-analysis.json、flash-result.json/flash.log、post-flash-followup-summary.jsonに根拠を保存。UF2/実端末config/生USBはGit管理外。参照仕様・出典の限界は[接続先交換の説明](../docs/design/eex1-endpoint-discovery.md)。Android仕様は担当者の文脈から再現された引継ぎで、当方が元commitから抽出・照合したものではない。

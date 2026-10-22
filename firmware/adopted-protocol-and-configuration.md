@@ -49,7 +49,7 @@ LCDは160×80 RGB565BE/25600B、E-inkの通信画像は250×122 mono1/3813B（ce
 
 ## 隔離リファクタリング後の照合
 
-`52d8fdd`までの通常通信・Pico設定を上記の比較基準と照合した。[最終照合](../docs/refactor-final-acceptance-20261020.md)に受入済み/レビュー待ち/実機未検証を区別する。D04の描画中pendingと同一token再送の合流は`bae0575`で独立受入済みだが、本番や実機へ未反映。任意の観測sidecarは通常domain処理とwire互換を維持し、不正metadataは相関不明とする。固有のnative API operation factを新設したとはしない。上記の過去の動画実測値をこのcandidateの実機性能として転用しない。
+`52d8fdd`までの通常通信・Pico設定を上記の比較基準と照合した。[最終照合](../docs/history/refactor-final-acceptance-20261020.md)に受入済み/レビュー待ち/実機未検証を区別する。D04の描画中pendingと同一token再送の合流は`bae0575`で独立受入済みだが、本番や実機へ未反映。任意の観測sidecarは通常domain処理とwire互換を維持し、不正metadataは相関不明とする。固有のnative API operation factを新設したとはしない。上記の過去の動画実測値をこのcandidateの実機性能として転用しない。
 
 ## ローカル切替案内（実装準備）
 

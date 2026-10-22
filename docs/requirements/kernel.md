@@ -18,7 +18,7 @@ Web/API と Pico の端末通信は自宅 LAN と Tailnet 内に限定し、イ�
 
 ## プラグイン Web 画面と責務境界
 
-2026-10-18追加の時計もこの共通契約に従う。初版４種の記述に対する追加範囲と、保存済み順序・選択・端末別有効化を変更しない移行は [時計要件](plugins/clock.md) を参照する。2026-10-20現在の実装適合、逸脱、共通メニューの未実装は [対応確認](../implementation-conformance-20261020.md) に記し、実装上の不足を要件の撤回として扱わない。
+2026-10-18追加の時計もこの共通契約に従う。初版４種の記述に対する追加範囲と、保存済み順序・選択・端末別有効化を変更しない移行は [時計要件](plugins/clock.md) を参照する。2026-10-20現在の実装適合、逸脱、共通メニューの未実装は [対応確認](../history/implementation-conformance-20261020.md) に記し、実装上の不足を要件の撤回として扱わない。
 
 2026-10-20 の責務確認：サーバがプラグインのドメイン状態・規則・内容を所有し、Pico は受信した端末 API を検証・振分け・実行して結果を返す。Pico にプラグイン ID やサーバの業務手順を持たせない。端末の接続・表示世代・物理入力・非同期ハード処理に必要なローカル状態は維持する。観測は共通の受信・判断・遷移・出力・完了／拒否の境界に置き、満杯や切断で通常処理を待たせず、欠測を区別する。具体的な段階移行・互換性・受入条件は [契約と観測の設計](../contracts-observation-design.md) に記す。
 
@@ -66,7 +66,7 @@ TCP 上のメッセージは長さと種別を判別できるフレーミング�
 
 SSID とパスワードのペアを複数登録し、端末設定のネットワーク項目で家／外出先テザリングを選べるようにする。秘密値は Git 管理外に置き、`config.sample` などに実値を書かない。自宅は Pi5 の自宅 LAN アドレスへの direct TCP、外出先は Pico からスマートフォンの TailSocks SOCKS5 に接続して Pi5 へ進むプロファイル方針が了承された。当初実験はTailnet IPv4宛で、2026-10-13の本環境では既存 subnet routing を使う LAN 宛先 `192.168.0.120:16153` でも成功した。両プロファイルは同じPiサービスでも経路が異なり、宛先IPが同じ場合もある。Tailnet参加だけでLAN到達を保証せず、別環境ではTailSocks側の経路利用とアクセス許可・対象待受を確認する。Wi-Fi の選択・再試行とメニュー操作は本書の「起動・接続とボタン操作」、設定の保存方式や失敗後の扱いは U-18。
 
-**実測済みの範囲。** [接続技術ガイド](../home-away-connectivity-technical-guide.md) と [2026-10-11 の実験記録](../../experiments/tether-tailnet/results-2026-10-11-tailsocks.md) によると、非 root の Android 16 上の TailSocks v4.9.1 で、Pico → スマートフォンのテザリング側 `10.101.65.232:48115`（SOCKS5 認証）→ Pi5 Tailnet `100.64.0.9` の接続が成功した。Pi5 は TailSocks ノード `100.64.0.18` からの着信として観測した。同じ Pico 起点の持続 TCP 上で Pi5 の PUSH と Pico の ACK も成功した。これらの値は試験時のアドレス・ポートであり、特にテザリング側 IP は固定保証がない。SOCKS5 が指定された TCP を中継した結果で、スマートフォンのホットスポット全体を透過的に VPN 化したものではない。
+**実測済みの範囲。** [接続技術ガイド](../guides/home-away-connectivity-technical-guide.md) と [2026-10-11 の実験記録](../../experiments/tether-tailnet/results-2026-10-11-tailsocks.md) によると、非 root の Android 16 上の TailSocks v4.9.1 で、Pico → スマートフォンのテザリング側 `10.101.65.232:48115`（SOCKS5 認証）→ Pi5 Tailnet `100.64.0.9` の接続が成功した。Pi5 は TailSocks ノード `100.64.0.18` からの着信として観測した。同じ Pico 起点の持続 TCP 上で Pi5 の PUSH と Pico の ACK も成功した。これらの値は試験時のアドレス・ポートであり、特にテザリング側 IP は固定保証がない。SOCKS5 が指定された TCP を中継した結果で、スマートフォンのホットスポット全体を透過的に VPN 化したものではない。
 
 **製品取り込み時の実測。** LCD１台で自宅direct TCPのHello・画像ACKを確認した。2026-10-13はAWAYのTailSocks METHOD/AUTH/CONNECTとACTIVE/READY、LAN宛先のWebSocket Hello・受信ACK・描画ACKを照合し、既存LAN待受だけで成功した。[今回の検証記録](../../experiments/tether-tailnet/results-2026-10-13-picomado-away-lan.md)。既存subnet routingに依存する結果で、追加listenerやネットワーク設定変更は不要だった。
 

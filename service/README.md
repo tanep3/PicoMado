@@ -22,7 +22,7 @@ The outbox cap of 1,024 effects, 4 KiB control-message cap, 64 KiB WebSocket bin
 ## Verification
 
 TCP accept order guards against delayed older Hello messages replacing a newer
-session. See [the invariant, regression coverage, and limitations](../docs/hello-accept-order.md).
+session. See [the invariant, regression coverage, and limitations](../docs/design/hello-accept-order.md).
 
 From the repository root:
 
@@ -126,13 +126,13 @@ Caricature saves explicit per-stage model settings and exposes an automatic-gene
 
 Open `/plugins/caricature` to choose a news topic and drawing style, start news or custom-text generation, and review job status. The bundled topics include `最新Yahooニュース`; existing saved choices remain selected when a new topic is added. The `画像に見出しを付ける` checkbox starts OFF. When enabled, its exact heading instruction is included in newly accepted image jobs only. The `詳細設定` control contains model, DPID, threshold and retry settings. Changes to these settings do not regenerate saved images.
 
-プロンプトと見出し指示は `prompt_templates/news.txt`、`image.txt`、`heading.txt` で編集できます。[日本語の編集手順](../docs/caricature-prompts.md)を参照してください。
+プロンプトと見出し指示は `prompt_templates/news.txt`、`image.txt`、`heading.txt` で編集できます。[日本語の編集手順](../docs/guides/caricature-prompts.md)を参照してください。
 
 情報取得・作画テイストの候補は「詳細設定」内の入口から専用管理画面へ進み、名前と文面の編集・追加・確認付き削除を行えます。配布時のデフォルトは別途表示・コピーできます。候補は SQLite に永続保存され、次の生成から再起動不要で反映されます。
 
 The latest image and a JST month calendar appear below the generation controls. The latest image and selected-day details display the archived half-size color WebP; older works without a WebP use their saved PNG. Calendar thumbnails retain the small PNG. Use `前の月` and `次の月`, then select a date to inspect every saved work, its news summary and source links or its custom text. Expanded generation settings stay open across the two-second UI refresh. A saved work can be shown temporarily on an online terminal currently displaying the caricature plugin. This leaves the shared latest work and immutable archive in place. The archive and settings live under PicoMado's existing plugin data and SQLite state; updating the executable does not require copying or clearing them. Install or restart of the running user service is a separate operator step.
 
-New caricature originals are archived as half-width/half-height color WebP at lossy quality 90 after the full generated PNG has supplied the LCD and E-ink variants. The selected calendar day offers a protection mode for multiple images, with a separate release action. Three JST calendar months determine expiry candidates. Both archive deletion and staging-folder cleanup are OFF by default; enabling either requires a binary built with `caricature-retention-delete` and `PICOMADO_CARICATURE_DELETE=1` in its environment. See [storage and retention design](../docs/caricature-storage-retention.md).
+New caricature originals are archived as half-width/half-height color WebP at lossy quality 90 after the full generated PNG has supplied the LCD and E-ink variants. The selected calendar day offers a protection mode for multiple images, with a separate release action. Three JST calendar months determine expiry candidates. Both archive deletion and staging-folder cleanup are OFF by default; enabling either requires a binary built with `caricature-retention-delete` and `PICOMADO_CARICATURE_DELETE=1` in its environment. See [storage and retention design](../docs/design/caricature-storage-retention.md).
 
 On the LCD, press the submenu button while viewing caricature to browse saved images. Up steps to older images and Down steps to newer ones; neither wraps at the end. Power cancels and restores the image visible at entry. Press submenu again to keep the image currently visible on that device until the next generation. Browsing and confirmed display are device specific; reconnecting ends a browse session.
 
