@@ -4,6 +4,7 @@
 #define main pm_firmware_entry
 #include "../src/main.c"
 #undef main
+#include "normal_usb_stubs.h"
 uint8_t test_flash_sector[4096];
 cyw43_t cyw43_state;
 static uint32_t clock_ms=1000;
@@ -14,6 +15,7 @@ static bool physical_busy,result_ready,result_ok;
 static unsigned draw_calls;
 static uint8_t drawn_pixels[3813];
 static uint64_t rendered_ack_frame;
+uint64_t time_us_64(void){return (uint64_t)clock_ms*1000;}
 absolute_time_t get_absolute_time(void){return clock_ms;}
 uint32_t to_ms_since_boot(absolute_time_t t){return (uint32_t)t;}
 void stdio_init_all(void){}
@@ -29,6 +31,7 @@ void restore_interrupts(uint32_t n){(void)n;}
 void flash_range_erase(uint32_t o,size_t n){(void)o;(void)n;}
 void flash_range_program(uint32_t o,const uint8_t *p,size_t n){(void)o;(void)p;(void)n;}
 const char *pm_display_capability(void){return "eink";}
+void pm_display_feedback(pm_display_feedback_action a){(void)a;}
 void pm_display_init(void){}
 void pm_display_status(const char *a,const char *b){assert(a&&b);}
 bool pm_display_frame(uint8_t *p,size_t n){assert(p&&n==3813&&!physical_busy);memcpy(drawn_pixels,p,n);draw_calls++;physical_busy=true;return true;}

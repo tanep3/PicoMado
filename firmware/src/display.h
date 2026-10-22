@@ -14,6 +14,13 @@ void pm_display_standby(void);
 void pm_display_wake(void);
 void pm_display_reference_pattern(void);
 
+/* Local presentation only: never creates remote receipt/rendered results.
+ * REPLACE cancels unstarted hint work when the real image is ready; RESTORE
+ * is for an acknowledged no-op and restores the preceding display if needed. */
+typedef enum { PM_DISPLAY_FEEDBACK_SHOW, PM_DISPLAY_FEEDBACK_REPLACE,
+               PM_DISPLAY_FEEDBACK_RESTORE } pm_display_feedback_action;
+void pm_display_feedback(pm_display_feedback_action action);
+
 // E-ink advances one bounded stage per main-loop poll; no BUSY sleep loop.
 void pm_display_poll(void);
 bool pm_display_busy(void);

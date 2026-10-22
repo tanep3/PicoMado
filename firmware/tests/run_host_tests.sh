@@ -61,6 +61,14 @@ build lcd-bus -DPM_TRACE_ENABLE=1 -DPM_NORMAL_BUILD=1 -DPM_LCD_FRAME_CS_HOLD=1 \
     -DPM_LCD_CONTROL_SPI_BAUD=20000000 -DPM_TEST_NORMAL_SPI_BAUD=20000000 \
     -Itests/stubs tests/lcd_bus_test.c src/lcd.c src/core.c src/video.c src/trace.c src/rx_stats.c
 run lcd-bus
+for trace in 0 1; do
+    build "lcd-feedback-$trace" -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=$trace -DPM_LCD_FRAME_CS_HOLD=1 \
+        -Itests/stubs tests/lcd_feedback_test.c src/lcd.c src/core.c
+    run "lcd-feedback-$trace"
+done
+build lcd-feedback-separate -DPM_NORMAL_BUILD=1 -DPM_LCD_FRAME_CS_HOLD=0 \
+    -Itests/stubs tests/lcd_feedback_test.c src/lcd.c src/core.c
+run lcd-feedback-separate
 build backlight -DPM_NORMAL_BUILD=1 -DPM_LCD_FRAME_CS_HOLD=1 \
     -DPM_LCD_CONTROL_SPI_BAUD=20000000 -Itests/stubs \
     tests/backlight_test.c src/display.c src/lcd.c src/core.c
@@ -78,11 +86,37 @@ for polarity in 1 0; do
     run "backlight-$polarity"
 done
 
+build switch-feedback tests/switch_feedback_test.c src/core.c
+run switch-feedback
+python3 tests/input_types_test.py
+build button-bindings tests/button_bindings_test.c src/core.c
+run button-bindings
 build input tests/input_test.c src/core.c
 run input
+build input-sampling tests/input_sampling_test.c src/core.c
+run input-sampling
+cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 -DPM_TEST_REAL_USB_CONTROL=1 \
+    '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="E-ink_1"' \
+    -Idevices/E-ink_1 -Isrc -Itests/app_stubs tests/input_sampling_app_test.c \
+    src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c -o "$work/input-sampling-app"
+run input-sampling-app
+cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
+    -Idevices/E-ink_1 -Isrc -Itests/stubs tests/input_sampling_feedback_test.c \
+    src/core.c src/display_eink.c -o "$work/input-sampling-feedback"
+for phase in 0 1 2 3 4 5 6; do run input-sampling-feedback "$phase"; done
 build eink-pending tests/eink_pending_test.c src/core.c
 run eink-pending
 for device in E-ink_0 E-ink_1; do
+    for trace in 0 1; do
+        cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_TRACE_ENABLE=$trace \
+            -I"devices/$device" -Isrc -Itests/stubs tests/eink_feedback_test.c src/display_eink.c -o "$work/eink-feedback-$device-$trace"
+        run "eink-feedback-$device-$trace"
+        cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=$trace \
+            '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
+            -I"devices/$device" -Isrc -Itests/app_stubs tests/switch_feedback_cancel_test.c src/core.c src/video.c src/trace.c src/rx_stats.c \
+            -o "$work/switch-cancel-$device-$trace"
+        for route in 0 1 2; do run "switch-cancel-$device-$trace" "$route"; done
+    done
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
         -I"devices/$device" -Isrc -Itests/stubs tests/eink_test.c src/display_eink.c \
         -o "$work/eink-$device"
@@ -99,11 +133,14 @@ cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
     -I"$work/absent-panel" -Isrc -Itests/stubs tests/eink_test.c src/display_eink.c \
     -o "$work/eink-absent"
 run eink-absent
+cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
+    -I"$work/absent-panel" -Isrc -Itests/stubs tests/eink_feedback_test.c src/display_eink.c -o "$work/eink-feedback-absent"
+run eink-feedback-absent
 
 for device in E-ink_0 E-ink_1; do
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 \
         '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
-        -I"devices/$device" -Isrc -Itests/app_stubs tests/eink_app_test.c src/core.c src/video.c \
+        -I"devices/$device" -Isrc -Itests/app_stubs tests/eink_app_test.c src/core.c src/video.c src/trace.c \
         -o "$work/eink-app-$device"
     run "eink-app-$device"
 done
@@ -118,7 +155,36 @@ for device in sample-a E-ink_0 E-ink_1; do
         -I"devices/$device" -Isrc -Itests/app_stubs tests/control_reply_test.c src/core.c src/video.c src/trace.c src/rx_stats.c \
         -o "$work/control-$device"
     run "control-$device"
+    cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 \
+        '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
+        -I"devices/$device" -Isrc -Itests/app_stubs tests/switch_feedback_app_test.c src/core.c src/video.c src/trace.c src/rx_stats.c \
+        -o "$work/switch-app-$device"
+    run "switch-app-$device"
 done
+
+build switch-app-trace-off -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=0 \
+    '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
+    -Itests/app_stubs tests/switch_feedback_app_test.c src/core.c src/video.c src/trace.c src/rx_stats.c
+run switch-app-trace-off
+
+# Normal operation transport exists with every optional diagnostic disabled.
+for device in sample-a E-ink_0 E-ink_1; do
+    for trace in 0 1; do
+        cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=$trace \
+            '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
+            -I"devices/$device" -Isrc -Itests/app_stubs tests/normal_usb_api_test.c src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c \
+            -o "$work/normal-usb-$device-$trace"
+        run "normal-usb-$device-$trace"
+    done
+done
+build normal-usb-restricted -DPM_INPUT_OPERATIONS_MASK=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=0 \
+    '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
+    -Itests/app_stubs tests/normal_usb_api_test.c src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c
+run normal-usb-restricted
+build normal-usb-ap2 -DPM_ACK_PATH_PROBE=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 \
+    '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
+    -Itests/app_stubs tests/normal_usb_api_test.c src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c src/ack_probe.c
+run normal-usb-ap2
 
 # Exercise the same production LCD parser and functional deadlines without diagnostics.
 build control-trace-off -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=0 \

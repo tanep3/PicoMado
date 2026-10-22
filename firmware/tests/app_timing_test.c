@@ -10,6 +10,7 @@
 #define main pm_firmware_entry
 #include PM_APP_MAIN_SOURCE
 #undef main
+#include "normal_usb_stubs.h"
 
 uint8_t test_flash_sector[4096];
 cyw43_t cyw43_state;
@@ -25,10 +26,12 @@ static bool sta_on,server_ready,welcome_available;
 static bool usb_connected;
 static bool drop_during_retry;
 uint64_t time_us_64(void){return (uint64_t)clock_ms*1000;}
-#if PM_TRACE_ENABLE
+#if PM_TRACE_ENABLE || defined(PM_TEST_REAL_USB_CONTROL)
 static bool trace_output;static char trace_text[32768];static size_t trace_used;
+static size_t trace_write_cap=SIZE_MAX;
 size_t pm_trace_usb_write(const char *p,size_t n){
     if(!trace_output)return 0;
+    if(n>trace_write_cap)n=trace_write_cap;
     assert(trace_used+n<sizeof trace_text);
     memcpy(trace_text+trace_used,p,n);trace_used+=n;trace_text[trace_used]=0;return n;
 }
@@ -74,7 +77,13 @@ void flash_range_program(uint32_t offset,const uint8_t *p,size_t n){
     memcpy(test_flash_sector,p,n);clock_ms+=2;
 }
 const char *pm_display_capability(void){return PM_DISPLAY_CAPABILITY;}
+static unsigned feedback_shows,feedback_restores,feedback_replaces,input_sends;
 void pm_display_init(void){}
+void pm_display_feedback(pm_display_feedback_action a){
+    if(a==PM_DISPLAY_FEEDBACK_SHOW){assert(input_sends);feedback_shows++;}
+    else if(a==PM_DISPLAY_FEEDBACK_RESTORE)feedback_restores++;
+    else feedback_replaces++;
+}
 void pm_display_status(const char *a,const char *b){
     assert(a && b);last_lcd_one=a;last_lcd_two=b;clock_ms+=20;
 }
@@ -120,6 +129,7 @@ bool pm_net_send(uint8_t kind,const char *j){
 #ifdef PM_CAUSAL_FIXTURE
     if(wire_observer)wire_observer(kind,j);
 #endif
+    if(kind==7 || kind==14 || kind==15 || kind==16)input_sends++;
     if(kind==1){hello_count++;welcome_available=true;}
     if(kind==5)heartbeat_count++;
     if(kind==8){frame_receipts++;clock_ms++;}
@@ -165,7 +175,14 @@ int cyw43_wifi_link_status(cyw43_t *s,int i){assert(s==&cyw43_state && i==0);ret
 int cyw43_tcpip_link_status(cyw43_t *s,int i){assert(s==&cyw43_state && i==0);return ip_link;}
 
 static bool released(void){
-    for(unsigned i=0;i<input_count();i++)if(buttons[i].raw || buttons[i].stable)return false;
+    for(unsigned i=0;i<input_count();i++){
+        if(buttons[i].raw || buttons[i].stable)return false;
+#ifdef PM_BUTTON_MAX_SAMPLE_GAP_MS
+        // A cancelled sample stream must finish release qualification before
+        // the fixture starts another physical gesture.
+        if(buttons[i].release_required)return false;
+#endif
+    }
     return true;
 }
 static void press_after_release(int index){if(pressed<0 && released())pressed=index;}

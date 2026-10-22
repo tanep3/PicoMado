@@ -17,6 +17,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sdk", type=Path, required=True)
     parser.add_argument("--baseline-net", type=Path, required=True)
+    parser.add_argument("--baseline-lcd-nodelay", action="store_true",
+                        help="baseline already contains the LCD-only Nagle fix")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -51,7 +53,9 @@ def main():
             for device in ["sample-a", "E-ink_0", "E-ink_1"]:
                 label = f"app-{variant}-{source}-{device}"
                 binary = args.out / label
-                extra = [f'-DPM_NET_SOURCE="{baseline}"', "-DPM_EXPECT_LCD_NODELAY=0"] if before else []
+                extra = [f'-DPM_NET_SOURCE="{baseline}"',
+                         f"-DPM_EXPECT_LCD_NODELAY={int(args.baseline_lcd_nodelay)}",
+                         "-DPM_EXPECT_EINK_NODELAY=0"] if before else []
                 command = cc + sanitizers + ["-DPM_USE_SAMPLE_CONFIG=1", "-Idevices/" + device,
                     "-Isrc", "-Itests/net_stubs", "-Itests/app_stubs", "-I."] + extra + [
                     "tests/net_nagle_test.c", "src/ws_accept.c", "-o", binary]
@@ -60,13 +64,14 @@ def main():
                 run(label, [binary, flags_path])
                 flags[source, device] = flags_path
 
-        # The new application assertion must fail on the unfixed LCD source.
-        label = "regression-before-" + variant
-        binary = args.out / label
-        run("compile-" + label, cc + sanitizers + ["-DPM_USE_SAMPLE_CONFIG=1",
-            "-Idevices/sample-a", "-Isrc", "-Itests/net_stubs", "-Itests/app_stubs", "-I.",
-            f'-DPM_NET_SOURCE="{baseline}"', "tests/net_nagle_test.c", "src/ws_accept.c", "-o", binary])
-        run(label, [binary, args.out / (label + ".flags")], expected_failure=True)
+        # Both existing E-ink baselines must fail the new connect-time contract.
+        for device in ["E-ink_0", "E-ink_1"]:
+            label = "regression-before-" + variant + "-" + device
+            binary = args.out / label
+            run("compile-" + label, cc + sanitizers + ["-DPM_USE_SAMPLE_CONFIG=1",
+                "-Idevices/" + device, "-Isrc", "-Itests/net_stubs", "-Itests/app_stubs", "-I.",
+                f'-DPM_NET_SOURCE="{baseline}"', "tests/net_nagle_test.c", "src/ws_accept.c", "-o", binary])
+            run(label, [binary, args.out / (label + ".flags")], expected_failure=True)
 
         # Compile the actual installed tcp_out.c, not a copied Nagle model.
         label = "sdk-output-" + variant
@@ -77,7 +82,7 @@ def main():
             lwip / "core/stats.c", "-Wl,--gc-sections", "-o", binary])
         for source in ["before", "after"]:
             for device in ["sample-a", "E-ink_0", "E-ink_1"]:
-                expected_output = int(source == "after" and device == "sample-a")
+                expected_output = int(source == "after" or (args.baseline_lcd_nodelay and device == "sample-a"))
                 run(f"sdk-{variant}-{source}-{device}",
                     [binary, flags[source, device], expected_output])
 

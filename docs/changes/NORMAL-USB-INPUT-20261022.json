@@ -1,0 +1,50 @@
+{
+  "design_artifacts": [
+    "docs/changes/NORMAL-USB-INPUT-20261022.md"
+  ],
+  "design_commit": "fc25aacabc8ec69de52ad83830be246d61ed79dc",
+  "id": "NORMAL-USB-INPUT-20261022",
+  "implementer": "normal-usb-input worker",
+  "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
+  "stages": {
+    "design": {
+      "evidence": [
+        {
+          "commit": "fc25aacabc8ec69de52ad83830be246d61ed79dc",
+          "kind": "commit"
+        }
+      ],
+      "state": "verified"
+    },
+    "effectiveness_confirmation": {
+      "evidence": [],
+      "state": "not_started"
+    },
+    "implementation": {
+      "evidence": [
+        {
+          "SHA256": "349484751bf32500025fb91be1e782015b3376ad7ee1e75f743fdf7bbcf503f5",
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-18/task/picomado-usb-input-20261022/work/.gate/check.json"
+        }
+      ],
+      "state": "verified"
+    },
+    "independent_verification": {
+      "evidence": [
+        {
+          "SHA256": "95cdc3d1ac3515dee0a80d5f27c820f4b9146a739e958d26bcaed8cead3384fd",
+          "kind": "review",
+          "path": "/home/tane/Documents/Codex/2026-10-18/task/picomado-usb-input-20261022/work/firmware/build/E-ink_1/review.json"
+        }
+      ],
+      "state": "verified"
+    },
+    "operational_application": {
+      "evidence": [],
+      "state": "not_started"
+    }
+  },
+  "status": "in_progress",
+  "title": "Normal terminal operation API and GPIO/USB adapters"
+}

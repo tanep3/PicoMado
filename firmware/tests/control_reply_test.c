@@ -14,12 +14,16 @@ bool pm_display_take_result(bool *ok){if(!panel_result)return false;panel_result
 static unsigned serial;
 static void setup(void){
  net_send_rejected=display_frame_rejected=false;
+#if !defined(PM_TEST_OLD_FIRMWARE) || !PM_TEST_OLD_FIRMWARE
+ pm_switch_reset(&switching);
+ feedback_shows=feedback_restores=feedback_replaces=input_sends=0;
+#endif
  defaults();state=ACTIVE;network_stage=PM_NET_READY;wifi_enabled=false;
  incarnation=session_epoch=display_epoch=1;owner_epoch=42;sub_mode=false;
  pending_standby=pending_sub_cancel=pending_render_ack=have_display=await_selection=false;
  checking_frame=true;frame_receipts=frame_renders=0;pm_reset(&assembly);
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD && (!defined(PM_TEST_OLD_FIRMWARE) || !PM_TEST_OLD_FIRMWARE)
- pm_video_reset(&video);receiving_stream=false;
+ pm_video_reset(&video);receiving_stream=false;lcd_waiting_frame=false;
 #endif
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
  drawing=panel_standby=false;panel_result=false;

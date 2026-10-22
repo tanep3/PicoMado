@@ -1,6 +1,7 @@
 #include "trace.h"
 #include "lcd.h"
 #include "lcd_transform.h"
+#include "switch_bitmap.h"
 #include <string.h>
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
@@ -18,6 +19,7 @@
 #define DC PM_LCD_PIN_DC
 #define RES PM_LCD_PIN_RESET
 static uint8_t local_pixels[PM_IMAGE_BYTES];
+static bool feedback_visible,cached_pixels;
 #ifndef PM_LCD_CONTROL_SPI_BAUD
 #define PM_LCD_CONTROL_SPI_BAUD 1000000u
 #endif
@@ -110,10 +112,27 @@ void pm_lcd_backlight(bool on) {
 #endif
 }
 
-static void transfer_pixels(uint8_t *pixels) {
+/* The feedback uses a 320-byte scanline, leaving local_pixels as the last
+ * non-feedback wire image. No full-frame RAM buffer or input-frame mutation. */
+static int write_frame_payload(const uint8_t *pixels,bool feedback){
+    if(!feedback)return spi_write_blocking(spi0,pixels,PM_IMAGE_BYTES);
+    uint8_t row[PM_W*2];int total=0;
+    for(unsigned y=0;y<PM_H;y++){
+        for(unsigned x=0;x<PM_W;x++){
+            unsigned sx=PM_LCD_ROTATE_180?PM_W-1-x:x;
+            unsigned sy=PM_LCD_ROTATE_180?PM_H-1-y:y;
+            uint16_t c=pm_switch_bitmap_ink(sx,sy,PM_W,PM_H)?0xffff:0;
+            if(PM_LCD_COMPENSATE_INVERT_BGR)c=pm_panel_compensate(c);
+            row[x*2]=(uint8_t)(c>>8);row[x*2+1]=(uint8_t)c;
+        }
+        int n=spi_write_blocking(spi0,row,sizeof row);if(n<0)return n;total+=n;
+    }
+    return total;
+}
+static void transfer_frame(uint8_t *pixels,bool feedback) {
     pm_trace_event(PM_TRACE_SPI_BEGIN,pm_trace_current_frame(),0,0);
 #if defined(PM_LCD_CAPTURE_ENABLE) && PM_LCD_CAPTURE_ENABLE
-    pm_lcd_capture_before_transfer(pixels, PM_IMAGE_BYTES);
+    if(!feedback)pm_lcd_capture_before_transfer(pixels, PM_IMAGE_BYTES);
 #endif
     const uint8_t x[]={PM_LCD_X_OFFSET>>8,PM_LCD_X_OFFSET,
                        (PM_LCD_X_OFFSET+PM_W-1)>>8,PM_LCD_X_OFFSET+PM_W-1};
@@ -128,7 +147,7 @@ static void transfer_pixels(uint8_t *pixels) {
         frame_command(0x2a); frame_data(x, sizeof x);
         frame_command(0x2b); frame_data(y, sizeof y);
         frame_command(0x2c);
-        last_transfer_bytes = frame_data(pixels, PM_IMAGE_BYTES);
+        gpio_put(DC,1);last_transfer_bytes = write_frame_payload(pixels,feedback);
         // SDK write_blocking already waits for BSY. Explicitly guard CS release
         // at the transaction boundary as well; never cut off the last pixel.
         while (spi_is_busy(spi0)) tight_loop_contents();
@@ -143,16 +162,29 @@ static void transfer_pixels(uint8_t *pixels) {
     const bool switch_baud = control_baud != frame_baud;
     last_frame_baud = switch_baud ? spi_set_baudrate(spi0, frame_baud)
                                   : spi_get_baudrate(spi0);
-    last_transfer_bytes = data(pixels, PM_IMAGE_BYTES);
+    gpio_put(DC,1);gpio_put(CS,0);
+    last_transfer_bytes = write_frame_payload(pixels,feedback);gpio_put(CS,1);
     if (switch_baud) spi_set_baudrate(spi0, control_baud);
     pm_trace_event(PM_TRACE_SPI_END,pm_trace_current_frame(),last_transfer_bytes,last_frame_baud);
 }
+static void transfer_pixels(uint8_t *pixels){transfer_frame(pixels,false);}
 void pm_lcd_draw(uint8_t *pixels) {
     uint64_t started=pm_stats_clock();
     pm_lcd_transform(pixels,PM_W*PM_H,
                      PM_LCD_ROTATE_180,PM_LCD_COMPENSATE_INVERT_BGR);
     transfer_pixels(pixels);
+    if(pixels!=local_pixels)memcpy(local_pixels,pixels,sizeof local_pixels);
+    cached_pixels=true;feedback_visible=false;
     pm_stats_note(PM_STAT_DRAW,started);
+}
+void pm_lcd_switch_feedback(bool show,bool restore){
+    if(show){
+        if(!feedback_visible){transfer_frame(NULL,true);feedback_visible=true;}
+    }else if(restore && feedback_visible){
+        if(cached_pixels)transfer_pixels(local_pixels); /* already transformed */
+        feedback_visible=false;
+    }
+    /* REPLACE leaves visible pixels until the real frame replaces them. */
 }
 
 static void dot(unsigned x, unsigned y, uint16_t c) {

@@ -1,0 +1,44 @@
+{
+  "id": "INPUT-CONTINUITY-20261022",
+  "title": "Cancel physical gestures after untrusted sampling gaps",
+  "status": "in_progress",
+  "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
+  "implementer": "input-continuity worker",
+  "design_commit": "0fffc9b41c2b315adfa1d42faf65585db6f81515",
+  "design_artifacts": [
+    "docs/changes/INPUT-CONTINUITY-20261022.md"
+  ],
+  "stages": {
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "0fffc9b41c2b315adfa1d42faf65585db6f81515"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-19/task-2/input-continuity-fix-20261022/work/.gate/check.json",
+          "SHA256": "51a8a649c1879fc0545dcbf22f4c950e4a532d920a0d0660f64940ab654b73d5"
+        }
+      ]
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}

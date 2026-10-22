@@ -4,13 +4,16 @@
 #if PM_EVENT_STREAM && !PM_TRACE_ENABLE
 #error "Event stream requires the bounded trace backend"
 #endif
-#if PM_TRACE_ENABLE
 #include <stdbool.h>
 #include <string.h>
 #include "pico/stdlib.h"
 #include "hardware/sync.h"
 // Same-core main/IRQ producers, main consumer. No waiting or IRQ printf.
+#if PM_TRACE_ENABLE
 #define RECORDS 32u
+#else
+#define RECORDS 2u
+#endif
 #define TEXT_CAP 144u
 #define LINE_CAP 192u
 #define SLOW_US 50000u
@@ -25,8 +28,10 @@ typedef struct {
 } record;
 static record queue[RECORDS];
 static unsigned head,tail,count;
+#if PM_TRACE_ENABLE
 static uint32_t dropped;
 static uint64_t frame_context;
+#endif
 #if PM_EVENT_STREAM
 #define OBSERVATION_KIND (UINT32_MAX-1u)
 static pm_observation_status observation;
@@ -98,6 +103,7 @@ static int observation_line(const record *r,char *out){
 #endif
 static char pending[LINE_CAP];
 static size_t pending_length,pending_offset;
+#if PM_TRACE_ENABLE
 static const char *const names[]={"button","frame_start","crc_ok","receipt_begin","receipt_end",
     "spi_begin","spi_end","render_begin","render_end","tcp_write","tcp_output","slow_poll","slow_loop"};
 uint64_t pm_trace_clock(void){return time_us_64();}
@@ -141,7 +147,7 @@ int pm_logf(const char *format,...){
     if((size_t)n>=sizeof text && dropped<UINT32_MAX)dropped++;
     restore_interrupts(irq);return n;
 }
-#if PM_ACK_PATH_PROBE || PM_USB_BUTTON_SIM || PM_EVENT_STREAM
+#endif
 // Frozen probe export shares the ordinary line queue: partial USB writes from
 // different producers must never interleave within a line. Never evict here.
 bool pm_trace_try_line(const char *line,size_t length){
@@ -158,14 +164,17 @@ bool pm_trace_try_line(const char *line,size_t length){
 #endif
     restore_interrupts(irq);return true;
 }
-#endif
+extern size_t pm_trace_usb_write(const char *bytes,size_t length) __attribute__((weak));
 static size_t flush_one(size_t cap){
     // At most one bounded record/write per call. Keep partial output; never wait.
     if(!pending_length){
         uint32_t irq=save_and_disable_interrupts();
         if(!count){restore_interrupts(irq);return 0;}
         record saved=queue[head];head=(head+1)%RECORDS;count--;
-        uint32_t lost=dropped;restore_interrupts(irq);
+#if PM_TRACE_ENABLE
+        uint32_t lost=dropped;
+#endif
+        restore_interrupts(irq);
         record *r=&saved;
         int n;
         #if PM_EVENT_STREAM
@@ -173,10 +182,14 @@ static size_t flush_one(size_t cap){
         else
 #endif
         if(r->kind==UINT32_MAX)n=snprintf(pending,sizeof pending,"%s",r->data.text);
+#if PM_TRACE_ENABLE
         else n=snprintf(pending,sizeof pending,
             "timing us=%llu event=%s frame=%llu a=%ld b=%lu dropped=%lu\n",
             (unsigned long long)r->us,names[r->kind],(unsigned long long)r->data.event.frame,
             (long)r->data.event.a,(unsigned long)r->data.event.b,(unsigned long)lost);
+#else
+        else return 0;
+#endif
         if(n<=0)return 0;
         pending_length=(size_t)n<sizeof pending?(size_t)n:sizeof pending-1;
         pending_offset=0;
@@ -184,7 +197,7 @@ static size_t flush_one(size_t cap){
     size_t left=pending_length-pending_offset;
     if(left>cap)left=cap;
     if(!left)return 0;
-    size_t written=pm_trace_usb_write(pending+pending_offset,left);
+    size_t written=pm_trace_usb_write?pm_trace_usb_write(pending+pending_offset,left):0;
     if(written>left)written=left;
     pending_offset+=written;
 #if PM_EVENT_STREAM
@@ -302,5 +315,4 @@ void pm_stats_usb_poll(bool connected){
     }else if(!pm_rx_emit(stats.epoch)){stats.reporting=false;}
 #endif
 }
-#endif
 #endif

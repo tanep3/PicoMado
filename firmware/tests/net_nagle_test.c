@@ -11,6 +11,9 @@
 #ifndef PM_EXPECT_LCD_NODELAY
 #define PM_EXPECT_LCD_NODELAY 1
 #endif
+#ifndef PM_EXPECT_EINK_NODELAY
+#define PM_EXPECT_EINK_NODELAY 1
+#endif
 #include PM_NET_SOURCE
 
 cyw43_t cyw43_state;
@@ -26,7 +29,8 @@ static size_t sent_size;
 static const pm_profile home={"test","test","192.0.2.1",false,NULL,NULL,NULL,0};
 static const pm_profile away={"test","test","192.0.2.1",true,"198.51.100.2","test","test",1080};
 static unsigned expected_flags(void){
-    return PM_DISPLAY_TYPE==PM_DISPLAY_LCD && PM_EXPECT_LCD_NODELAY ? TF_NODELAY : 0;
+    return ((PM_DISPLAY_TYPE==PM_DISPLAY_LCD && PM_EXPECT_LCD_NODELAY) ||
+            (PM_DISPLAY_TYPE==PM_DISPLAY_EINK && PM_EXPECT_EINK_NODELAY)) ? TF_NODELAY : 0;
 }
 uint64_t time_us_64(void){return 1000000;}
 uint32_t get_rand_32(void){return 0x12345678;}

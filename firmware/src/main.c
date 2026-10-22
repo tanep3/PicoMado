@@ -3,6 +3,7 @@
 #include "usb_control.h"
 #include "device_api.h"
 #include "input_rules.h"
+#include "switch_feedback.h"
 #include "observation.h"
 #if PM_EVENT_STREAM
 #include "observation_json.h"
@@ -11,9 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "pico/stdlib.h"
-#if PM_ACK_PATH_PROBE || PM_USB_BUTTON_SIM || PM_EVENT_STREAM
 #include "pico/rand.h"
-#endif
 #include "pico/cyw43_arch.h"
 #include "pico/unique_id.h"
 #include "pico/stdio_usb.h"
@@ -82,6 +81,11 @@ static uint32_t wifi_pm_readback;
 static pm_token last_rendered;
 static pm_token pending_render_token;
 static bool pending_render_ack;
+static pm_switch_feedback switching;
+#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
+static bool lcd_waiting_frame;
+static pm_token lcd_waiting_token;
+#endif
 // Physical pixels may outlive their invalidated token during normal recovery.
 static bool retained_pixels;
 #if PM_EVENT_STREAM
@@ -93,7 +97,12 @@ static pm_eink_pending pending_frame;
 
 static pm_assembly assembly;
 static void reset_assembly(void){
+#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
+    if(lcd_waiting_frame)pm_switch_forget(&switching,lcd_waiting_token);
+    lcd_waiting_frame=false;
+#endif
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+    if(pending_frame.phase==PM_EINK_READY)pm_switch_forget(&switching,pending_frame.frame.token);
     if(pending_frame.phase!=PM_EINK_EMPTY)
         pm_observe(PM_OB_FRAME,1,PM_OB_CANCELLED,0,0,pending_frame.frame.token.session_epoch,pending_frame.frame.token.frame_id,0,0);
     else
@@ -198,9 +207,7 @@ static void log_usb_snapshot(void){
 #if PM_ACK_PATH_PROBE
     pm_ack_probe_live(session_epoch,state==ACTIVE);
 #endif
-#if PM_ACK_PATH_PROBE || PM_USB_BUTTON_SIM || PM_EVENT_STREAM
     if(connected)for(unsigned n=0;n<16;n++){int ch=getchar_timeout_us(0);if(ch<0)break;pm_usb_control_input(ch);}
-#endif
     pm_usb_control_poll(connected);
     if(connected && !was_connected)pm_net_rx_snapshot();
     pm_stats_usb_poll(connected);
@@ -266,6 +273,7 @@ static void store_settings(void) {
     restore_interrupts(irq);
 }
 static void invalidate_display_context(void){
+    pm_switch_reset(&switching);pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
     if(pending_render_ack)pm_ack_probe_note(PM_AP_PENDING_CLEAR,9,pending_render_token.session_epoch,pending_render_token.frame_id,(uint32_t)state,0,0,0);
     owner_epoch++;reset_assembly();have_display=false;pending_render_ack=false;
 }
@@ -375,6 +383,7 @@ static void retry_with_image(bool keep_image){
     // A failed server/proxy session does not invalidate a healthy Wi-Fi/IP link.
     if(wifi_was_up)pm_net_close();else wifi_off();
     if(keep_image){
+        pm_display_feedback(PM_DISPLAY_FEEDBACK_RESTORE);
         retained_pixels=true;
         // Invalidate ownership immediately but keep the last valid pixels on
         // glass during backoff. No old token may be drawn after reconnect.
@@ -511,6 +520,22 @@ static bool send_simple(uint8_t kind,const char *type){
 #endif
     return ok;
 }
+static bool send_button_input(uint8_t kind,const char *type,uint64_t accepted_us){
+    bool ok=send_simple(kind,type);
+    if(ok){
+        pm_token scope={incarnation,session_epoch,display_epoch,owner_epoch,
+                        have_display?last_rendered.frame_id:0};
+        pm_switch_sent(&switching,scope,accepted_us,kind!=7);
+    }else pm_switch_cancel(&switching);
+    if(kind==7 || !ok)pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
+    return ok;
+}
+/* Keep cancellation in the model and adapter on one path. The adapter alone
+ * knows whether identical text is already visible or preparation is pending. */
+static void prioritize_received_image(void){
+    if(pm_switch_cancel_hint_for_image(&switching))
+        pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
+}
 static uint64_t observed_parent(const char *j){
 #if PM_EVENT_STREAM
     uint64_t operation;
@@ -555,6 +580,7 @@ static bool video_mode(void){return video.active;}
 static void poll_video(void){
     if(state!=ACTIVE || !video.active)return;
     if(await_selection || pending_standby){video.ready=false;return;}
+    if(video.ready && !pm_switch_eligible(&switching,video.token))return;
     if(!pm_token_current(video.context,incarnation,session_epoch,display_epoch,owner_epoch)){
         pm_video_reset(&video);return;
     }
@@ -569,6 +595,7 @@ static void poll_video(void){
         pm_observe(PM_OB_DISPLAY,1,ok?PM_OB_COMPLETED:PM_OB_ERROR,draw_op,0,drawing.session_epoch,drawing.frame_id,1,1);
         if(!ok){pm_video_reset(&video);retry();return;}
         pm_video_finish_draw(&video,video_now_us());retained_pixels=false;have_display=true;last_rendered=video.last_rendered;
+        pm_switch_complete(&switching,drawing);
     }
     now=video_now_us();
     if(!video.rendered || now-last_video_status_us<1000000u)return;
@@ -651,6 +678,7 @@ static pm_api_result dispatch_pending_eink(void){
     if(!allowed || !pm_token_current(pending_frame.frame.token,incarnation,session_epoch,display_epoch,owner_epoch)){
         reset_assembly();return PM_API_REJECTED;
     }
+    if(!pm_switch_eligible(&switching,pending_frame.frame.token))return PM_API_PENDING;
     pm_eink_frame next;
     if(!pm_eink_pending_take(&pending_frame,!drawing && !pm_display_busy(),allowed,
         incarnation,session_epoch,display_epoch,owner_epoch,&next))return PM_API_PENDING;
@@ -675,6 +703,47 @@ static pm_api_result dispatch_pending_eink(void){
     pm_observe(PM_OB_DISPLAY,1,accepted?PM_OB_PENDING:PM_OB_ERROR,op,0,t.session_epoch,t.frame_id,0,0);
     if(!accepted){retry();return PM_API_ERROR;}
     drawing=true;drawing_token=t;return PM_API_PENDING;
+}
+#endif
+#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
+static pm_api_result finish_lcd_image(pm_token t){
+    if(!pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch))return PM_API_REJECTED;
+    if(!pm_switch_eligible(&switching,t)){
+        lcd_waiting_token=t;lcd_waiting_frame=true;return PM_API_PENDING;
+    }
+    lcd_waiting_frame=false;
+    if(!have_display || !pm_token_equal(last_rendered,t)) {
+#if PM_DIAGNOSTIC_BOOT
+        size_t nonzero=0;
+        for(size_t i=0;i<PM_IMAGE_BYTES;i++)if(assembly.pixels[i])nonzero++;
+        pm_logf("frame %llu: nonzero bytes %u/%u\n",
+               (unsigned long long)t.frame_id,(unsigned)nonzero,(unsigned)PM_IMAGE_BYTES);
+        pm_display_reference_pattern();sleep_ms(500);
+#endif
+#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
+        if(recover_transport_failure())return PM_API_ERROR;
+#endif
+        pm_trace_frame_context(t.frame_id);
+        pm_ack_probe_note(PM_AP_DRAW_BEGIN,0,t.session_epoch,t.frame_id,0,0,0,0);
+        uint64_t draw_op=pm_observe(PM_OB_DISPLAY,1,PM_OB_DISPATCHED,0,0,t.session_epoch,t.frame_id,0,0);
+        bool drawn=pm_display_frame(assembly.pixels,PM_IMAGE_BYTES);
+        pm_trace_frame_context(0);
+        pm_ack_probe_note(PM_AP_DRAW_END,0,t.session_epoch,t.frame_id,drawn,0,0,0);
+        pm_observe(PM_OB_DISPLAY,1,drawn?PM_OB_COMPLETED:PM_OB_ERROR,draw_op,0,t.session_epoch,t.frame_id,1,0);
+        if(!drawn){retry();return PM_API_ERROR;}
+        retained_pixels=false;have_display=true;last_rendered=t;
+#if PM_DIAGNOSTIC_STAGE
+        pm_logf("diag frame_spi_complete=%llu\n",(unsigned long long)t.frame_id);
+#endif
+#if PM_DIAGNOSTIC_BOOT
+        pm_logf("lcd SPI complete: frame %llu\n",(unsigned long long)t.frame_id);
+#endif
+    }
+    pm_switch_complete(&switching,t);
+    if(pending_render_ack)pm_ack_probe_note(PM_AP_PENDING_REPLACED,9,pending_render_token.session_epoch,pending_render_token.frame_id,(uint32_t)t.frame_id,(uint32_t)(t.frame_id>>32),0,0);
+    pending_render_token=t;pending_render_ack=true;
+    pm_ack_probe_note(PM_AP_PENDING_SET,9,t.session_epoch,t.frame_id,0,0,0,0);
+    return PM_API_COMPLETED;
 }
 #endif
 static pm_api_result receive_chunk(pm_token t,uint64_t offset,const uint8_t *bytes,size_t count){
@@ -705,6 +774,8 @@ static pm_api_result receive_chunk(pm_token t,uint64_t offset,const uint8_t *byt
 #endif
     pm_ack_probe_note(PM_AP_FRAME_CHECK,0,t.session_epoch,t.frame_id,0,0,0,0);
     if(!pm_token_current(t,incarnation,session_epoch,display_epoch,owner_epoch))return PM_API_REJECTED;
+    pm_switch_receive(&switching,t);
+    prioritize_received_image();
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
     if(receiving_stream){
         pm_diag_frame_done();
@@ -719,33 +790,7 @@ static pm_api_result receive_chunk(pm_token t,uint64_t offset,const uint8_t *byt
     }
     pm_eink_pending_reset(&pending_frame);
 #else
-    if(!have_display || !pm_token_equal(last_rendered,t)) {
-#if PM_DIAGNOSTIC_BOOT
-        size_t nonzero=0;
-        for(size_t i=0;i<PM_IMAGE_BYTES;i++)if(assembly.pixels[i])nonzero++;
-        pm_logf("frame %llu: nonzero bytes %u/%u\n",
-               (unsigned long long)t.frame_id,(unsigned)nonzero,(unsigned)PM_IMAGE_BYTES);
-        pm_display_reference_pattern();sleep_ms(500);
-#endif
-#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
-        if(recover_transport_failure())return PM_API_ERROR;
-#endif
-        pm_trace_frame_context(t.frame_id);
-        pm_ack_probe_note(PM_AP_DRAW_BEGIN,0,t.session_epoch,t.frame_id,0,0,0,0);
-        uint64_t draw_op=pm_observe(PM_OB_DISPLAY,1,PM_OB_DISPATCHED,0,0,t.session_epoch,t.frame_id,0,0);
-        bool drawn=pm_display_frame(assembly.pixels,PM_IMAGE_BYTES);
-        pm_trace_frame_context(0);
-        pm_ack_probe_note(PM_AP_DRAW_END,0,t.session_epoch,t.frame_id,drawn,0,0,0);
-        pm_observe(PM_OB_DISPLAY,1,drawn?PM_OB_COMPLETED:PM_OB_ERROR,draw_op,0,t.session_epoch,t.frame_id,1,0);
-        if(!drawn){retry();return PM_API_ERROR;}
-        retained_pixels=false;have_display=true;last_rendered=t;
-#if PM_DIAGNOSTIC_STAGE
-        pm_logf("diag frame_spi_complete=%llu\n",(unsigned long long)t.frame_id);
-#endif
-#if PM_DIAGNOSTIC_BOOT
-        pm_logf("lcd SPI complete: frame %llu\n",(unsigned long long)t.frame_id);
-#endif
-    }
+    return finish_lcd_image(t);
 #endif
     if(pending_render_ack)pm_ack_probe_note(PM_AP_PENDING_REPLACED,9,pending_render_token.session_epoch,pending_render_token.frame_id,(uint32_t)t.frame_id,(uint32_t)(t.frame_id>>32),0,0);
     pending_render_token=t;pending_render_ack=true;
@@ -802,9 +847,13 @@ static pm_api_result api_input_result(uint8_t kind,const char *j){
         bool has_epoch=number(j,"display_epoch",&epoch);
         if((contextual && (!has_epoch || !number(j,"incarnation",&reply_inc) ||
              !number(j,"session_epoch",&reply_session) || reply_inc!=incarnation || reply_session!=session_epoch)) ||
-           (kind==10 && !has_epoch) || (has_epoch && epoch<display_epoch)){
+           (kind==10 && !has_epoch)){
             pm_logf("net reply kind=%u current=%llu result=stale\n",kind,(unsigned long long)display_epoch);return PM_API_REJECTED;
         }
+        if(pm_switch_reply(&switching,epoch,has_epoch))
+            pm_display_feedback(PM_DISPLAY_FEEDBACK_RESTORE);
+        prioritize_received_image();
+        if(has_epoch && epoch<display_epoch)return PM_API_REJECTED;
         // A matching reply may arrive after FrameStart or between its chunks.
         // Only a genuinely newer generation invalidates an assembly.
         bool keep=assembly.active && (!has_epoch || epoch==display_epoch);
@@ -865,10 +914,14 @@ static pm_api_result api_frame(uint8_t kind,const char *j){
             return PM_API_REJECTED;
         reset_assembly();
 #endif
+#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
+        if(lcd_waiting_frame)pm_switch_forget(&switching,lcd_waiting_token);
+        lcd_waiting_frame=false;
+#endif
         if(!header || !pm_start(&assembly,t,w,h,PM_PIXEL_FORMAT_NAME,len,crc))reset_assembly();
         else {
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
-            receiving_stream=false;
+            lcd_waiting_frame=false;receiving_stream=false;
             if(strstr(j,"\"stream\"")){
                 uint64_t fps,sequence,generation;
                 if(!number(j,"fps",&fps) || fps<1 || fps>30 || !number(j,"sequence",&sequence)
@@ -938,6 +991,7 @@ static void poll_display(void){
         if(drawn && state==ACTIVE && !await_selection && !panel_standby &&
            pm_token_current(drawing_token,incarnation,session_epoch,display_epoch,owner_epoch)){
             have_display=true;last_rendered=drawing_token;
+            pm_switch_complete(&switching,drawing_token);
             if(pending_render_ack)pm_ack_probe_note(PM_AP_PENDING_REPLACED,9,pending_render_token.session_epoch,pending_render_token.frame_id,(uint32_t)drawing_token.frame_id,(uint32_t)(drawing_token.frame_id>>32),0,0);
             pending_render_token=drawing_token;pending_render_ack=true;
             pm_ack_probe_note(PM_AP_DRAW_END,0,drawing_token.session_epoch,drawing_token.frame_id,drawn,0,0,0);
@@ -948,7 +1002,7 @@ static void poll_display(void){
     if(panel_standby && !pm_display_busy()){panel_standby=false;standby();}
 }
 #endif
-static void apply_local_input(pm_input_transition t){
+static bool apply_local_input(pm_input_transition t,uint64_t accepted_us){
     if(t.clear_retained)retained_pixels=false;
     switch(t.action){
     case PM_INPUT_WAKE:start_wifi();break;
@@ -964,34 +1018,63 @@ static void apply_local_input(pm_input_transition t){
     case PM_INPUT_STANDBY:standby();break;
     case PM_INPUT_POWER:
         /* Completion is fed back before applying post-send local state. */
-        if(!send_simple(7,"power")){retry();return;}
+        if(!send_button_input(7,"power",accepted_us)){retry();return false;}
         if(sub_mode){pending_sub_cancel=true;await_selection=true;reset_assembly();}
         else {pending_standby=true;await_selection=true;started_ms=now_ms();reset_assembly();}
         break;
-    case PM_INPUT_SUB:send_simple(14,"enter_sub");break;
+    case PM_INPUT_SUB:return send_button_input(14,"enter_sub",accepted_us);
     case PM_INPUT_UP:case PM_INPUT_DOWN:
         if(t.await_before_send){await_selection=true;reset_assembly();}
-        send_simple(t.action==PM_INPUT_UP?15:16,t.action==PM_INPUT_UP?"up":"down");break;
-    case PM_INPUT_IGNORE:break;
+        return send_button_input(t.action==PM_INPUT_UP?15:16,t.action==PM_INPUT_UP?"up":"down",accepted_us);
+    case PM_INPUT_IGNORE:return false;
     }
+    return true;
 }
-static void button_with_origin(unsigned i,bool long_press,unsigned origin){
-#if PM_DIAGNOSTIC_STAGE
-    pm_logf("diag button=%u state=%u\n",i,(unsigned)state);
+static void poll_switch_feedback(void){
+    if(state!=ACTIVE || pending_standby){
+        if(switching.waiting || switching.hint_requested)
+            pm_display_feedback(PM_DISPLAY_FEEDBACK_REPLACE);
+        pm_switch_cancel(&switching);return;
+    }
+    prioritize_received_image();
+#if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
+    if(lcd_waiting_frame && pm_switch_eligible(&switching,lcd_waiting_token))
+        (void)finish_lcd_image(lcd_waiting_token);
 #endif
+    if(pm_switch_request_hint(&switching,time_us_64()))
+        pm_display_feedback(PM_DISPLAY_FEEDBACK_SHOW);
+}
+#ifndef PM_INPUT_OPERATIONS_MASK
+#define PM_INPUT_OPERATIONS_MASK PM_OPERATION_MASK
+#endif
+_Static_assert((PM_INPUT_OPERATIONS_MASK&~PM_OPERATION_MASK)==0,"unsupported operation capability bits");
+/* This is the one application operation API. Adapters supply a completed
+ * semantic operation; only GPIO/SIM adapters interpret physical gestures. */
+static pm_input_result perform_operation(pm_operation operation,unsigned origin,bool long_press){
+    bool blocked=false;
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+    blocked=panel_standby;
+#endif
+    pm_input_plan plan=pm_input_decide((pm_input_view){state,sub_mode,PM_INPUT_OPERATIONS_MASK,blocked},operation);
+    if(plan.result!=PM_INPUT_READY)return plan.result;
+    unsigned i=pm_operation_index(operation);pm_input_transition t=plan.transition;
     uint64_t op=pm_observe(PM_OB_INPUT,(uint16_t)i,PM_OB_RECEIVED,0,0,session_epoch,0,(uint32_t)state,(long_press?1u:0u)|(origin<<1));
-    pm_input_transition t=pm_input_decide((pm_input_view){state,PM_BUTTON_COUNT,sub_mode},i,long_press);
     pm_observe(PM_OB_INPUT,(uint16_t)i,PM_OB_DISPATCHED,op,0,session_epoch,0,t.action,t.await_before_send);
 #if PM_EVENT_STREAM
     uint64_t previous=input_operation;input_operation=op;
 #endif
-    apply_local_input(t);
+    bool ok=apply_local_input(t,time_us_64());
 #if PM_EVENT_STREAM
     input_operation=previous;
 #endif
-    pm_observe(PM_OB_INPUT,(uint16_t)i,PM_OB_COMPLETED,op,0,session_epoch,0,(uint32_t)state,t.action);
+    pm_observe(PM_OB_INPUT,(uint16_t)i,ok?PM_OB_COMPLETED:PM_OB_ERROR,op,0,session_epoch,0,(uint32_t)state,t.action);
+    return ok?PM_INPUT_DISPATCHED:PM_INPUT_FAILED;
 }
-static void button(unsigned i,bool long_press){button_with_origin(i,long_press,0);}
+static pm_input_result usb_operation(pm_operation operation){return perform_operation(operation,2,false);}
+static void button_with_origin(unsigned i,bool long_press,unsigned origin){
+    pm_operation operation;if(pm_operation_from_index(i,&operation))(void)perform_operation(operation,origin,long_press);
+}
+static inline void button(unsigned i,bool long_press){button_with_origin(i,long_press,0);}
 #if PM_DIAGNOSTIC_STAGE
 static void diagnostic_hold(uint32_t duration_ms,bool watch_buttons){
     static const char *names[PM_BUTTON_COUNT]={"SUB","UP","POWER","DOWN"};
@@ -1011,6 +1094,8 @@ static void poll_local_inputs(uint32_t now,bool allowed){
     bool connected=stdio_usb_connected();
     /* Gate must open before a committed detached simulator can run. */
     pm_ack_probe_usb_state(connected);
+    /* Timestamp the GPIO scan after display work, not the pre-display loop. */
+    now=now_ms();
     bool raw[4]={false};unsigned physical=0;
     for(unsigned i=0;i<input_count();i++){
         raw[i]=!gpio_get(button_pins[i]);
@@ -1020,12 +1105,13 @@ static void poll_local_inputs(uint32_t now,bool allowed){
     if(!allowed)return;
     for(unsigned i=0;i<input_count();i++){
         bool was_pressed=buttons[i].stable;
-        int event=pm_button_input_step(&buttons[i],PM_BUTTON_COUNT,i,raw[i],now,settings.long_ms,state==STANDBY);
+        pm_operation operation;bool long_press;
+        bool event=pm_button_sampled_binding_step(&buttons[i],pm_button_binding_at(PM_BUTTON_COUNT,i),raw[i],now,
+            settings.long_ms,state==STANDBY,&operation,&long_press);
         if(!was_pressed && buttons[i].stable)pm_trace_event(PM_TRACE_BUTTON,0,(int32_t)i,(uint32_t)state);
-        if(event>=0){
-            bool long_press=PM_BUTTON_COUNT==2 && (event==0 || event==2);
-            if(state==ACTIVE)pm_ack_probe_button(session_epoch,display_epoch,owner_epoch,(unsigned)event,long_press);
-            button((unsigned)event,long_press);
+        if(event){
+            if(state==ACTIVE)pm_ack_probe_button(session_epoch,display_epoch,owner_epoch,pm_operation_index(operation),long_press);
+            (void)perform_operation(operation,0,long_press);
         }
     }
     if(synthetic.valid){
@@ -1044,13 +1130,10 @@ static void finish_loop(uint64_t started){
 }
 int main(void){
     stdio_init_all();
-#if PM_ACK_PATH_PROBE || PM_USB_BUTTON_SIM || PM_EVENT_STREAM
     uint64_t control_boot=((uint64_t)get_rand_32()<<32)|get_rand_32();
     pm_ack_probe_init_boot(control_boot);
     pm_usb_control_init(control_boot,input_count());
-#else
-    pm_ack_probe_init();
-#endif
+    pm_usb_control_set_operations(PM_INPUT_OPERATIONS_MASK,usb_operation);
     bool net_ok=pm_net_init();
 #if PM_AWAY_EEX1
     pm_endpoint_client_init(&endpoint_client,pm_endpoint_sdk_io());
@@ -1107,9 +1190,7 @@ int main(void){
         bool draining=panel_standby;
         poll_display();
         if(draining){
-#if PM_USB_BUTTON_SIM || PM_ACK_PATH_PROBE || PM_EVENT_STREAM
             poll_local_inputs(now,false);log_usb_snapshot();
-#endif
             finish_loop(loop_started);sleep_ms(5);continue;
         }
 #endif
@@ -1212,6 +1293,7 @@ int main(void){
                 if(wifi_enabled)start_server();else start_wifi();
             }
         }
+        poll_switch_feedback();
         finish_loop(loop_started);sleep_ms(state==ACTIVE && video_mode()?1u:5u);
     }
 }

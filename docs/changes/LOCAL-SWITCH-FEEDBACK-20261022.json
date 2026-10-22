@@ -1,0 +1,54 @@
+{
+  "id": "LOCAL-SWITCH-FEEDBACK-20261022",
+  "title": "200 ms local switch feedback",
+  "status": "in_progress",
+  "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
+  "implementer": "local-switch-feedback worker",
+  "design_commit": "228236fdefbb0588d2ab5703269c3cdc6f5b3b95",
+  "design_artifacts": [
+    "docs/changes/LOCAL-SWITCH-FEEDBACK-20261022.md"
+  ],
+  "stages": {
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "228236fdefbb0588d2ab5703269c3cdc6f5b3b95"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-18/task/picomado-input-feedback-20261022/work/.gate/check.json",
+          "SHA256": "074e271dc37ffb4b9c8cc1a59890134d138d4e50ece409abaad9af3747cddf0d"
+        }
+      ]
+    },
+    "independent_verification": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "review",
+          "path": "/home/tane/Documents/Codex/2026-10-18/task/picomado-input-feedback-20261022/normal-flash-20261022/workflow-parent-acceptance.json",
+          "SHA256": "b9610556217f1f1acaef86abebf8a9389544476b3cbe36f018570c7a8ef931cc"
+        }
+      ]
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  },
+  "implementation_commit": "38bd24d09e923f05feb359079bcd8c114a355b08",
+  "review_findings": [
+    "P2-01: corrected in 38bd24d; independent re-review pending"
+  ]
+}
