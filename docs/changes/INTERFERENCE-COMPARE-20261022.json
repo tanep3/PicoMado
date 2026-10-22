@@ -6,15 +6,20 @@
   "design_artifacts": [
     "docs/changes/INTERFERENCE-COMPARE-20261022.md"
   ],
-  "design_commit": "",
+  "design_commit": "140ad7e3f6f4ec13711889650c8adf4536621796",
   "status": "in_progress",
   "stages": {
     "design": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "140ad7e3f6f4ec13711889650c8adf4536621796"
+        }
+      ]
     },
     "implementation": {
-      "state": "not_started",
+      "state": "in_progress",
       "evidence": []
     },
     "independent_verification": {

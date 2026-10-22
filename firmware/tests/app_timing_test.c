@@ -18,6 +18,9 @@ static unsigned radio_core,radio_exception,radio_ioctl_calls;
 static int radio_sdk_result;
 static uint32_t radio_sdk_value=UINT32_MAX;
 static size_t radio_copy_bytes=4;
+static unsigned radio_write_calls;static int radio_write_result;
+static uint32_t radio_last_written;static bool radio_write_applies=true,radio_after_override;
+static int radio_after_result;static uint32_t radio_after_value;
 uint get_core_num(void){return radio_core;}
 uint __get_current_exception(void){return radio_exception;}
 static jmp_buf finished;
@@ -170,9 +173,16 @@ int cyw43_wifi_get_pm(cyw43_t *s,uint32_t *value){
     return pm_read_result;
 }
 int cyw43_ioctl(cyw43_t *s,uint32_t command,size_t length,uint8_t *buffer,uint32_t interface){
-    assert(s==&cyw43_state&&command==0x1a6&&length==4&&interface==CYW43_ITF_STA);
+    assert(s==&cyw43_state&&length==4&&interface==CYW43_ITF_STA);
     assert(lwip_depth==1&&!radio_core&&!radio_exception&&sta_on);
-    uint32_t initial;memcpy(&initial,buffer,4);assert(initial==UINT32_MAX);
+    uint32_t initial;memcpy(&initial,buffer,4);
+    if(command==0x1a9){
+        assert(initial<=4);radio_write_calls++;radio_last_written=initial;
+        if(radio_write_applies)radio_sdk_value=initial;
+        if(radio_after_override){radio_sdk_result=radio_after_result;radio_sdk_value=radio_after_value;}
+        return radio_write_result;
+    }
+    assert(command==0x1a6&&initial==UINT32_MAX);
     radio_ioctl_calls++;if(!radio_sdk_result)memcpy(buffer,&radio_sdk_value,radio_copy_bytes);
     return radio_sdk_result;
 }
