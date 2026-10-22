@@ -203,12 +203,21 @@ static void check_wifi_pm(void){
 }
 static pm_radio_read usb_radio_query(void){
     if(!pm_radio_thread_context())return pm_radio_rejected(PM_RADIO_CONTEXT);
-    bool available=wifi_enabled&&(state==SERVER||state==SESSION||state==ACTIVE);
+    bool available=wifi_enabled&&state==ACTIVE&&have_display&&
+        cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)==CYW43_LINK_UP;
+    if(!available)return pm_radio_rejected(PM_RADIO_UNAVAILABLE);
+    // Existing switch/display ownership excludes known work before synchronous
+    // IOCTL entry. New input arriving DURING it can still be delayed: use only
+    // one explicit query while the device is idle, not alongside user actions.
+    bool busy=switching.waiting||switching.sent!=switching.replied||await_selection||
+        pending_standby||pending_sub_cancel||pending_render_ack||assembly.active;
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
-    available=available&&!panel_standby;
+    busy=busy||panel_standby||drawing||pending_frame.phase!=PM_EINK_EMPTY||pm_display_busy();
+#else
+    busy=busy||lcd_waiting_frame||receiving_stream||video.active||video.ready||video.busy;
 #endif
-    available=available&&cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)==CYW43_LINK_UP;
-    return pm_radio_interference_get(available);
+    if(busy)return pm_radio_rejected(PM_RADIO_BUSY);
+    return pm_radio_interference_get(true);
 }
 static void log_usb_snapshot(void){
     static bool was_connected;

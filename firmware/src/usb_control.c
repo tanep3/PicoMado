@@ -84,16 +84,17 @@ void pm_usb_control_service_radio(bool connected,pm_radio_reader reader){
     if(!connected||!ctl.radio_pending)return;
     pm_radio_read read=reader?reader():pm_radio_rejected(PM_RADIO_UNAVAILABLE);
     char *reply=ctl.replies[ctl.radio_slot];
-    pm_interference_mode mode;uint32_t value;
-    if(pm_radio_observed(read,&mode)&&pm_interference_value(mode,&value))
-        snprintf(reply,REPLY,"radio interference b=%llx status=observed rc=0 raw=%08lx mode=%lu\n",
+    pm_interference_candidate mode;uint32_t value;
+    if(pm_radio_transport_candidate(read,&mode)&&pm_interference_candidate_value(mode,&value))
+        snprintf(reply,REPLY,"radio interference b=%llx status=transport_returned rc=0 raw=%08lx candidate=%lu cdc_status=unverified\n",
             (unsigned long long)ctl.boot,(unsigned long)read.raw,(unsigned long)value);
     else if(read.status==PM_RADIO_UNKNOWN)
-        snprintf(reply,REPLY,"radio interference b=%llx status=unknown rc=%d raw=%08lx\n",
+        snprintf(reply,REPLY,"radio interference b=%llx status=unknown rc=%d raw=%08lx cdc_status=unverified\n",
             (unsigned long long)ctl.boot,read.sdk_result,(unsigned long)read.raw);
     else
-        snprintf(reply,REPLY,"radio interference b=%llx status=%s rc=%d\n",
-            (unsigned long long)ctl.boot,pm_radio_status_name(read.status),read.sdk_result);
+        snprintf(reply,REPLY,"radio interference b=%llx status=%s rc=%d cdc_status=%s\n",
+            (unsigned long long)ctl.boot,pm_radio_status_name(read.status),read.sdk_result,
+            read.status==PM_RADIO_SDK_ERROR?"unverified":"not_read");
     ctl.radio_pending=false;
 }
 static void input_reply(uint64_t id,pm_operation operation,pm_input_result result){

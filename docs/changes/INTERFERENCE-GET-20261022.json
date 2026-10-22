@@ -6,7 +6,7 @@
   "design_artifacts": [
     "docs/changes/INTERFERENCE-GET-20261022.md"
   ],
-  "design_commit": "19f8ece6054bf1fb08cdb7b71b7d9dc55274ea08",
+  "design_commit": "ddcef9936a1b9181af0349b85699dd41e8e028b0",
   "status": "in_progress",
   "stages": {
     "design": {
@@ -14,7 +14,7 @@
       "evidence": [
         {
           "kind": "commit",
-          "commit": "19f8ece6054bf1fb08cdb7b71b7d9dc55274ea08"
+          "commit": "ddcef9936a1b9181af0349b85699dd41e8e028b0"
         }
       ]
     },
