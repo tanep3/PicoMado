@@ -29,8 +29,19 @@
       ]
     },
     "independent_verification": {
-      "state": "not_started",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "review",
+          "path": "/home/tane/Documents/Codex/2026-10-21/task/latency-eex1-restore-20261022/shipping-worktree/firmware/build/PicoMado-lcd1/review.json",
+          "SHA256": "fefd78592328651f3a5e28ef819b6c9f167784d1b27f23c58fd8a3cf970b91aa"
+        },
+        {
+          "kind": "review",
+          "path": "/home/tane/Documents/Codex/2026-10-21/task/latency-eex1-restore-20261022/shipping-worktree/firmware/build/E-ink_1/review.json",
+          "SHA256": "031ca60c7a7f02da8eb4435616438c326f5b577e7e31c3711d6671688c3272a1"
+        }
+      ]
     },
     "operational_application": {
       "state": "not_started",
