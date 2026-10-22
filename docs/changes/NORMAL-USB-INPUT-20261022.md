@@ -47,3 +47,7 @@ USB parserは語彙を型へ変換し、mainが登録した正式な操作handle
 仕様コミット後に限定実装し、host/root回帰と個体別ARM build、設定/SDK/PR155/Nagle/設定sector非包含・RAM/stackを確認する。ここでの結果はソフトウェア検証で、実機の操作・タイミング・表示効果を認定しない。元の200 ms候補と通常書込み資料はそのworktreeで保持し、新候補の承認を流用しない。
 
 独立設計確認 `independent-design-review-20261022/DESIGN-REVIEW.md` のC01–C18を回帰の比較軸にする。ID下限の指摘D4は仕様 `170864a` とCAPSの `last_request_id`、同boot再接続とUINT64_MAXの回帰で扱う。共通入口の不正操作拒否は画像保持/owner/送信等の副作用より前に行う。
+
+## Physical sampling continuity correction
+
+[INPUT-CONTINUITY-20261022](INPUT-CONTINUITY-20261022.md) owns the scoped GPIO sampling-quality correction. It preserves the shared semantic operation API and the diagnostic virtual-signal source.
