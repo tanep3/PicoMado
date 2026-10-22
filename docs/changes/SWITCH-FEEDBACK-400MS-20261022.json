@@ -21,8 +21,14 @@
       ]
     },
     "implementation": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-18/task/picomado-feedback-400ms-20261022/gate-release/check.json",
+          "SHA256": "a0d12ec483e0e31f148e1b6e47bc3d37f030a4ce7b4a29256ceaa3a555f4e695"
+        }
+      ]
     },
     "independent_verification": {
       "state": "not_started",
