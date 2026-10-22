@@ -61,8 +61,9 @@ typedef struct {
     bool on_press,short_wakes,long_wakes;
 } pm_button_binding;
 const pm_button_binding *pm_button_binding_at(unsigned count,unsigned index);
-/* Physical samples: cancel across untrusted gaps, then require a released
- * debounce before rearming. The virtual signal entry below retains its owner
+/* Physical hold samples: cancel untrusted gaps, then require a released
+ * debounce before rearming. Direct on_press bindings use the original FSM.
+ * The virtual signal entry below retains its owner
  * supplied continuity (diagnostic SIM); both use the same gesture FSM. */
 bool pm_button_sampled_binding_step(pm_button *button,const pm_button_binding *binding,
     bool pressed,uint32_t now_ms,uint32_t long_ms,bool standby,

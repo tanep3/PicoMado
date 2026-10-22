@@ -48,6 +48,19 @@ int main(void){
         for(unsigned at=0;at<=1900;at+=5){int op=observe(&b,key,true,at,1800,true);if(op>=0){assert(key==1&&op==2);events++;}}
         assert(events==(key==1?1u:0u));
     }
+    // Direct operations do not derive meaning from elapsed hold time. Slow
+    // video cadence must not leave every key permanently release-required.
+    const unsigned cadences[]={5,20,35,36,40,50,100};
+    for(unsigned c=0;c<sizeof cadences/sizeof cadences[0];c++)for(unsigned key=0;key<4;key++){
+        b=(pm_button){0};events=0;
+        for(unsigned at=0;at<1200;at+=cadences[c]){
+            pm_operation actual;bool held;
+            if(pm_button_sampled_binding_step(&b,pm_button_binding_at(4,key),at>=100&&at<500,at,1800,false,&actual,&held)){
+                assert(pm_operation_index(actual)==key&&!held);events++;
+            }
+        }
+        assert(events==1&&!b.release_required);
+    }
     // Invalid input cannot mutate the sampler or gesture.
     pm_button before=b;pm_operation op;bool held;
     assert(!pm_button_sampled_binding_step(&b,NULL,true,9999,1800,false,&op,&held));assert(!memcmp(&before,&b,sizeof b));

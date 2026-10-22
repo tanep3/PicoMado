@@ -4,17 +4,22 @@
   "status": "in_progress",
   "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
   "implementer": "input-continuity worker",
-  "design_commit": "",
+  "design_commit": "c7e00cf2e6d61f650c24a256affc0824d6b670ff",
   "design_artifacts": [
     "docs/changes/INPUT-CADENCE-20261022.md"
   ],
   "stages": {
     "design": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "c7e00cf2e6d61f650c24a256affc0824d6b670ff"
+        }
+      ]
     },
     "implementation": {
-      "state": "not_started",
+      "state": "in_progress",
       "evidence": []
     },
     "independent_verification": {

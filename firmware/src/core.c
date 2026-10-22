@@ -124,6 +124,10 @@ bool pm_button_sampled_binding_step(pm_button *b,const pm_button_binding *bindin
                          bool pressed,uint32_t now,uint32_t long_ms,bool standby,
                          pm_operation *operation,bool *long_press){
     if(!b||!binding||!operation||!long_press||!pm_operation_valid(binding->short_operation))return false;
+    // Direct press bindings never synthesize another operation from hold time.
+    // Preserve their original debounce/edge behavior under sparse sampling.
+    if(binding->on_press)
+        return pm_button_binding_step(b,binding,pressed,now,long_ms,standby,operation,long_press);
     bool gap=b->sample_seen&&(uint32_t)(now-b->sampled_ms)>PM_BUTTON_MAX_SAMPLE_GAP_MS;
     b->sampled_ms=now;b->sample_seen=true;
     if(gap){
