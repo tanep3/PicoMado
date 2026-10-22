@@ -1,0 +1,34 @@
+{
+  "id": "SWITCH-FEEDBACK-400MS-20261022",
+  "title": "Delay shared local switch hint to400ms without other behavior changes",
+  "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
+  "implementer": "switch feedback worker",
+  "design_artifacts": [
+    "docs/changes/LOCAL-SWITCH-FEEDBACK-20261022.md",
+    "docs/changes/SWITCH-FEEDBACK-400MS-20261022.md"
+  ],
+  "design_commit": "pending",
+  "status": "in_progress",
+  "stages": {
+    "design": {
+      "state": "in_progress",
+      "evidence": []
+    },
+    "implementation": {
+      "state": "in_progress",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}
