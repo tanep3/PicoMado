@@ -1,0 +1,18 @@
+{
+  "id": "DEMO-INTEGRATION-20261022",
+  "title": "Restore mandatory EEX1 and integrate LCD and E-ink demo firmware",
+  "status": "in_progress",
+  "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
+  "implementer": "firmware integration worker",
+  "design_commit": "c702221",
+  "design_artifacts": [
+    "docs/changes/EEX1-RESTORE-20261022.md"
+  ],
+  "stages": {
+    "design": {"state": "verified", "evidence": [{"kind": "commit", "commit": "c702221"}]},
+    "implementation": {"state": "not_started", "evidence": []},
+    "independent_verification": {"state": "not_started", "evidence": []},
+    "operational_application": {"state": "not_started", "evidence": []},
+    "effectiveness_confirmation": {"state": "not_started", "evidence": []}
+  }
+}
