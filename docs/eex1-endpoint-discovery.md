@@ -4,7 +4,7 @@ Androidアプリは別プロジェクト `/home/tane/dev/Android/endpoint-exchan
 
 ## 実装範囲
 
-製品LCDのAWAY接続はEEX1でSOCKS接続先を取得する必須経路とする。HOMEのdirect TCPは維持する。実機用LCDビルドはEEX1を既定ONとし、明示的なOFF構成を拒否する。固定接続の試験は書込み不能なsample/unbound構成へ分離する。他端末の設定・有効プラグイン・選択・共通並び順は変更しない。Wi-Fi/SOCKS認証情報とPi宛先は既存profileのまま使い、取得IP/portだけを今回の接続へ適用する。自動取得値はRAMのみで、手動設定やflash保存値を上書きしない。USBは引き続きログ専用である。
+製品LCD/E-inkのAWAY接続はEEX1でSOCKS接続先を取得する必須経路とする。HOMEのdirect TCPは維持する。実機用ビルドはEEX1を既定ONとし、明示的なOFF構成を拒否する。固定接続の試験は書込み不能なsample/unbound構成へ分離する。他端末の設定・有効プラグイン・選択・共通並び順は変更しない。Wi-Fi/SOCKS認証情報とPi宛先は既存profileのまま使い、取得IP/portだけを今回の接続へ適用する。自動取得値はRAMのみで、手動設定やflash保存値を上書きしない。USBは引き続きログ専用である。
 
 取得はUDP観測(adapter)、純粋なcodec/交換状態機械、endpoint選択、TCP/SOCKSの副作用に分離。`endpoint_policy`はSDK非依存の固定/Gateway/Exchange契約。今回mainへ接続する方式はExchangeであり、gatewayをSOCKSサーバと同一視しない。gatewayは探索Dの送信先候補として使い、limited broadcastにも同じDを送る。
 
