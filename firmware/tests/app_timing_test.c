@@ -175,7 +175,14 @@ int cyw43_wifi_link_status(cyw43_t *s,int i){assert(s==&cyw43_state && i==0);ret
 int cyw43_tcpip_link_status(cyw43_t *s,int i){assert(s==&cyw43_state && i==0);return ip_link;}
 
 static bool released(void){
-    for(unsigned i=0;i<input_count();i++)if(buttons[i].raw || buttons[i].stable)return false;
+    for(unsigned i=0;i<input_count();i++){
+        if(buttons[i].raw || buttons[i].stable)return false;
+#ifdef PM_BUTTON_MAX_SAMPLE_GAP_MS
+        // A cancelled sample stream must finish release qualification before
+        // the fixture starts another physical gesture.
+        if(buttons[i].release_required)return false;
+#endif
+    }
     return true;
 }
 static void press_after_release(int index){if(pressed<0 && released())pressed=index;}

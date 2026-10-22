@@ -4,17 +4,22 @@
   "status": "in_progress",
   "owner": "parent thread 01a1570e-43cf-74e4-b507-318bfec760c5",
   "implementer": "input-continuity worker",
-  "design_commit": "",
+  "design_commit": "0fffc9b41c2b315adfa1d42faf65585db6f81515",
   "design_artifacts": [
     "docs/changes/INPUT-CONTINUITY-20261022.md"
   ],
   "stages": {
     "design": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "0fffc9b41c2b315adfa1d42faf65585db6f81515"
+        }
+      ]
     },
     "implementation": {
-      "state": "not_started",
+      "state": "in_progress",
       "evidence": []
     },
     "independent_verification": {

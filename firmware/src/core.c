@@ -56,7 +56,7 @@ bool pm_chunk(pm_assembly *a, pm_token token, uint32_t offset,
 
 bool pm_button_step(pm_button *b, bool pressed, uint32_t now_ms) {
     if (pressed != b->raw) { b->raw = pressed; b->changed_ms = now_ms; }
-    if (pressed != b->stable && (uint32_t)(now_ms - b->changed_ms) >= 35) {
+    if (pressed != b->stable && (uint32_t)(now_ms - b->changed_ms) >= PM_BUTTON_DEBOUNCE_MS) {
         b->stable = pressed;
         return pressed;
     }
@@ -119,6 +119,27 @@ bool pm_button_binding_step(pm_button *b,const pm_button_binding *binding,bool p
         }
     }
     return false;
+}
+bool pm_button_sampled_binding_step(pm_button *b,const pm_button_binding *binding,
+                         bool pressed,uint32_t now,uint32_t long_ms,bool standby,
+                         pm_operation *operation,bool *long_press){
+    if(!b||!binding||!operation||!long_press||!pm_operation_valid(binding->short_operation))return false;
+    bool gap=b->sample_seen&&(uint32_t)(now-b->sampled_ms)>PM_BUTTON_MAX_SAMPLE_GAP_MS;
+    b->sampled_ms=now;b->sample_seen=true;
+    if(gap){
+        /* No action, including a short release, survives an unobserved interval.
+         * Keep only the new raw fact; do not invent a stable pressed level. */
+        *b=(pm_button){.raw=pressed,.changed_ms=now,.sampled_ms=now,
+            .sample_seen=true,.release_required=true};
+        return false;
+    }
+    if(b->release_required){
+        if(pressed!=b->raw){b->raw=pressed;b->changed_ms=now;}
+        if(!pressed&&(uint32_t)(now-b->changed_ms)>=PM_BUTTON_DEBOUNCE_MS)
+            b->release_required=false;
+        return false;
+    }
+    return pm_button_binding_step(b,binding,pressed,now,long_ms,standby,operation,long_press);
 }
 int pm_button_input_step(pm_button *b,unsigned count,unsigned index,bool pressed,
                          uint32_t now,uint32_t long_ms,bool standby){

@@ -13,7 +13,7 @@ static void drain(void){for(unsigned i=0;i<1200;i++){pm_usb_control_poll(true);p
 static void text(const char *line){for(const char *p=line;*p;p++)pm_usb_control_input(*p);pm_usb_control_input('\n');}
 static void command(const char *line){text(line);drain();}
 static void begin(void){
-    drain();setup();clock_ms=6000000;pressed=-1;usb_connected=true;
+    drain();setup();memset(buttons,0,sizeof buttons);clock_ms=6000000;pressed=-1;usb_connected=true;
     trace_output=true;trace_write_cap=SIZE_MAX;trace_used=0;trace_text[0]=0;
     wire_count=0;wire_observer=wire;
 #if PM_ACK_PATH_PROBE
@@ -54,7 +54,7 @@ int main(void){
 #if PM_BUTTON_COUNT > 0
     begin();pressed=0;poll_local_inputs(clock_ms,true);clock_ms+=35;poll_local_inputs(clock_ms,true);
 #if PM_BUTTON_COUNT == 2
-    clock_ms+=settings.long_ms;poll_local_inputs(clock_ms,true);
+    for(unsigned held=0;held<settings.long_ms;held+=5){clock_ms+=5;poll_local_inputs(clock_ms,true);}
 #endif
     assert(wire_count==1&&wire_kind==14);char physical[768];snprintf(physical,sizeof physical,"%s",wire_json);
     begin();command("INPUT DO 22 1 SUB");assert(wire_count==1&&!strcmp(wire_json,physical));
@@ -99,7 +99,7 @@ int main(void){
     begin();unsigned power_key=PM_BUTTON_COUNT==4?2:1;
     pressed=(int)power_key;poll_local_inputs(clock_ms,true);clock_ms+=35;poll_local_inputs(clock_ms,true);
 #if PM_BUTTON_COUNT == 2
-    clock_ms+=settings.long_ms;poll_local_inputs(clock_ms,true);
+    for(unsigned held=0;held<settings.long_ms;held+=5){clock_ms+=5;poll_local_inputs(clock_ms,true);}
 #endif
     assert(wire_count==1&&wire_kind==7&&buttons[power_key].stable);
     command("INPUT DO 22 1 UP");assert(wire_count==2&&wire_kind==15&&buttons[power_key].stable);

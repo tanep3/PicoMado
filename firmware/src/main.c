@@ -1094,6 +1094,8 @@ static void poll_local_inputs(uint32_t now,bool allowed){
     bool connected=stdio_usb_connected();
     /* Gate must open before a committed detached simulator can run. */
     pm_ack_probe_usb_state(connected);
+    /* Timestamp the GPIO scan after display work, not the pre-display loop. */
+    now=now_ms();
     bool raw[4]={false};unsigned physical=0;
     for(unsigned i=0;i<input_count();i++){
         raw[i]=!gpio_get(button_pins[i]);
@@ -1104,7 +1106,7 @@ static void poll_local_inputs(uint32_t now,bool allowed){
     for(unsigned i=0;i<input_count();i++){
         bool was_pressed=buttons[i].stable;
         pm_operation operation;bool long_press;
-        bool event=pm_button_binding_step(&buttons[i],pm_button_binding_at(PM_BUTTON_COUNT,i),raw[i],now,
+        bool event=pm_button_sampled_binding_step(&buttons[i],pm_button_binding_at(PM_BUTTON_COUNT,i),raw[i],now,
             settings.long_ms,state==STANDBY,&operation,&long_press);
         if(!was_pressed && buttons[i].stable)pm_trace_event(PM_TRACE_BUTTON,0,(int32_t)i,(uint32_t)state);
         if(event){

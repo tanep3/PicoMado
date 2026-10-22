@@ -42,7 +42,17 @@ bool pm_token_equal(pm_token a, pm_token b);
 bool pm_token_current(pm_token token, uint64_t incarnation, uint64_t session,
                       uint64_t display, uint64_t owner);
 
-typedef struct { bool raw, stable; uint32_t changed_ms; uint32_t held_ms; bool wake_reported, wake_armed; uint32_t press_long_ms; bool long_reported; } pm_button;
+#define PM_BUTTON_DEBOUNCE_MS 35u
+#define PM_BUTTON_MAX_SAMPLE_GAP_MS PM_BUTTON_DEBOUNCE_MS
+typedef struct {
+    bool raw, stable;
+    uint32_t changed_ms, held_ms;
+    bool wake_reported, wake_armed;
+    uint32_t press_long_ms;
+    bool long_reported;
+    uint32_t sampled_ms;
+    bool sample_seen, release_required;
+} pm_button;
 bool pm_button_step(pm_button *button, bool pressed, uint32_t now_ms);
 
 // GPIO gesture bindings are data. The processor works for any layout length.
@@ -51,6 +61,12 @@ typedef struct {
     bool on_press,short_wakes,long_wakes;
 } pm_button_binding;
 const pm_button_binding *pm_button_binding_at(unsigned count,unsigned index);
+/* Physical samples: cancel across untrusted gaps, then require a released
+ * debounce before rearming. The virtual signal entry below retains its owner
+ * supplied continuity (diagnostic SIM); both use the same gesture FSM. */
+bool pm_button_sampled_binding_step(pm_button *button,const pm_button_binding *binding,
+    bool pressed,uint32_t now_ms,uint32_t long_ms,bool standby,
+    pm_operation *operation,bool *long_press);
 bool pm_button_binding_step(pm_button *button,const pm_button_binding *binding,
     bool pressed,uint32_t now_ms,uint32_t long_ms,bool standby,
     pm_operation *operation,bool *long_press);

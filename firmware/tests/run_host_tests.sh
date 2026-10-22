@@ -93,6 +93,17 @@ build button-bindings tests/button_bindings_test.c src/core.c
 run button-bindings
 build input tests/input_test.c src/core.c
 run input
+build input-sampling tests/input_sampling_test.c src/core.c
+run input-sampling
+cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 -DPM_TEST_REAL_USB_CONTROL=1 \
+    '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="E-ink_1"' \
+    -Idevices/E-ink_1 -Isrc -Itests/app_stubs tests/input_sampling_app_test.c \
+    src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c -o "$work/input-sampling-app"
+run input-sampling-app
+cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
+    -Idevices/E-ink_1 -Isrc -Itests/stubs tests/input_sampling_feedback_test.c \
+    src/core.c src/display_eink.c -o "$work/input-sampling-feedback"
+for phase in 0 1 2 3 4 5 6; do run input-sampling-feedback "$phase"; done
 build eink-pending tests/eink_pending_test.c src/core.c
 run eink-pending
 for device in E-ink_0 E-ink_1; do
