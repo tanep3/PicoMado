@@ -26,7 +26,7 @@ LCDは160×80 RGB565BE/25600B、E-inkの通信画像は250×122 mono1/3813B（ce
 | --- | --- | --- |
 | ネットワーク | `pico_cyw43_arch_lwip_threadsafe_background`。callbackのRXをSDK lock内でcopy/consumeし、描画前に解放。RX32768B、アプリworkspace18006B。 | ARM mapと動的高水位を別確認。 |
 | Wi-Fi PM | join開始時`CYW43_NONE_PM`要求。join後に戻り値/readbackを記録。 | `start_wifi/check_wifi_pm`。要求を実設定成功とみなさない。 |
-| LCD TCP | 新規PCBのconnect前にNagle無効。LCDのHOME/AWAY/再接続のみ、E-inkは維持。 | `net.c`、[NODELAY検証](nagle-candidate-verification-2026-10-19.md)。旧正常版でもNagle有効。これだけで間欠遅延の原因・解消としない。 |
+| TCP_NODELAY | 共通`net.c`で新規PCBのconnect前にNagle無効。LCD/E-inkのHOME/AWAY/再接続に適用。 | LCDの[NODELAY検証](nagle-candidate-verification-2026-10-19.md)とE-inkの後続適用を区別する。旧版でもNagle有効だった期間があり、これだけで間欠遅延の原因・解消としない。 |
 | LCD SPI | 通常20MHz要求、制御と画素同速、窓指定から25600B完了までCS保持。125MHzでは実15.625MHzになり得るのでSDK読戻しを使う。40MHzは未採用。 | GPIO、offset24、回転・色・gammaを変更しない。 |
 | 入力・個体 | LCD4、E-ink0/2ボタン。config.h/board-idのbindingと秘密はGit外。通常main stack4096B。 | LCDピン・35ms安定判定、E-ink SPI1/4MHz等はREADME/プリセットが正本。長押し閾値は端末設定。 |
 | 通常ログ | trace ON、LCD stats ON/verbose OFF。stdio stdout/deadlock timeoutは両方0。固定RAM、1回1record・部分write。 | SDK既定500ms待ちをこのビルドへ当てはめない。処理時間0の保証でもない。 |
