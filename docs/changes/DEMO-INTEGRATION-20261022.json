@@ -19,8 +19,14 @@
       ]
     },
     "implementation": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-21/task/latency-eex1-restore-20261022/readback-integrated-check/check.json",
+          "SHA256": "6ebcb146104125cd8f510552673b2e900b30cad5a2f4d3b84d16282c52e61e24"
+        }
+      ]
     },
     "independent_verification": {
       "state": "not_started",
