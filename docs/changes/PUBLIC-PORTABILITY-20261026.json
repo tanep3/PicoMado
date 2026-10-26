@@ -1,0 +1,32 @@
+{
+  "id": "PUBLIC-PORTABILITY-20261026",
+  "title": "Portable public setup and verified hardware profiles",
+  "owner": "parent thread 01a17217-ba4c-76ec-9c07-ca50f54160db",
+  "implementer": "public portability task",
+  "design_artifacts": [
+    "docs/changes/PUBLIC-PORTABILITY-20261026.md"
+  ],
+  "status": "in_progress",
+  "stages": {
+    "design": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "implementation": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}
