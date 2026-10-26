@@ -12,7 +12,6 @@
 #define PM_AWAY_PROXY_PASSWORD "EXAMPLE_PASSWORD"
 
 // Device hardware. Only this 160x80 RGB565 ST7735S LCD is implemented.
-#include "pico_w_lcd_160x80_4.h"
 
 // Individual wiring: leave 0 unless BLK is connected.
 #define PM_LCD_BLK_CONNECTED 0

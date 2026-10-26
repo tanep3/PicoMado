@@ -66,9 +66,13 @@ endif()
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tools/validate_hardware_profile.py"
   --config "${PM_CONFIG_FILE}" --profile "${PM_PROFILE_HEADER}" --compiler "${CMAKE_C_COMPILER}"
-  RESULT_VARIABLE PM_PROFILE_VALID OUTPUT_QUIET ERROR_QUIET)
+  RESULT_VARIABLE PM_PROFILE_VALID OUTPUT_VARIABLE PM_PROFILE_STYLE ERROR_QUIET)
 if(NOT PM_PROFILE_VALID EQUAL 0)
   message(FATAL_ERROR "Device hardware differs from the selected verified profile")
+endif()
+string(STRIP "${PM_PROFILE_STYLE}" PM_PROFILE_STYLE)
+if(NOT PM_PROFILE_STYLE STREQUAL "profile" AND NOT PM_PROFILE_STYLE STREQUAL "legacy")
+  message(FATAL_ERROR "Unknown hardware configuration style")
 endif()
 file(STRINGS "${PM_CONFIG_FILE}" PM_ID_LINES REGEX "^[ \t]*#define[ \t]+PM_DEVICE_ID[ \t]+")
 list(LENGTH PM_ID_LINES PM_ID_LINE_COUNT)
@@ -154,6 +158,10 @@ option(PM_EVENT_STREAM "Generic bounded boundary events over the existing USB ow
 option(PM_STREAM_DIAGNOSTICS "Bounded stream diagnostics; never changes playback policy" OFF)
 add_library(picomado_core STATIC src/core.c src/button_sim.c src/video.c src/endpoint_policy.c src/eex_wire.c src/eex_exchange.c src/endpoint_client.c)
 target_compile_options(picomado_core PRIVATE -fstack-usage)
+if(PM_PROFILE_STYLE STREQUAL "profile")
+  # Absolute tracked path: no quoted-include lookup in the device directory.
+  target_compile_options(picomado_core PUBLIC -include "${PM_PROFILE_HEADER}")
+endif()
 target_include_directories(picomado_core PUBLIC ${PM_DEVICE_DIR} ${CMAKE_CURRENT_LIST_DIR}/profiles ${CMAKE_CURRENT_LIST_DIR}/src)
 target_compile_definitions(picomado_core PUBLIC ${PM_SAMPLE_DEFINE} PM_STREAM_DIAGNOSTICS=$<BOOL:${PM_STREAM_DIAGNOSTICS}>)
 

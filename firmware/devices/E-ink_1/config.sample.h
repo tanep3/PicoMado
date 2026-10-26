@@ -11,7 +11,6 @@
 #define PM_AWAY_PROXY_USER "EXAMPLE"
 #define PM_AWAY_PROXY_PASSWORD "EXAMPLE"
 
-#include "pico_w_eink_250x122_2.h"
 
 #define PM_DIAGNOSTIC_BOOT 0
 #define PM_DIAGNOSTIC_STAGE 0
