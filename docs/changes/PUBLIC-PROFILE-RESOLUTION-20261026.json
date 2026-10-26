@@ -18,8 +18,14 @@
       ]
     },
     "implementation": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-26/task/picomado-public-profile-resolution-gate/check.json",
+          "SHA256": "f8bce1bd4195017309774f3145cf8667d9dc1358974beb8bca135167e8b81882"
+        }
+      ]
     },
     "independent_verification": {
       "state": "not_started",
