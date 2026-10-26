@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 work=$(mktemp -d /tmp/picomado-usb-tx.XXXXXX)
 trap 'rm -rf -- "$work"' EXIT
-base=(-std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -Isrc)
+base=(-std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -Iprofiles -Isrc)
 if [[ ${SANITIZE:-0} == 1 ]]; then base+=(-g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie); fi
 buildrun(){ local name=$1;shift;cc "${base[@]}" "$@" -o "$work/$name";"$work/$name"; }
 buildrun button-sim -Idevices/sample-a tests/button_sim_test.c src/core.c src/button_sim.c

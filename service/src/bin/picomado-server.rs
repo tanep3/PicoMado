@@ -144,4 +144,31 @@ mod tests {
         let absent = home.join(".config/PicoMado");
         assert!(!absent.exists()); // Validation never creates or migrates user data.
     }
+
+    #[test]
+    fn explicit_config_keeps_existing_data_unchanged() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("existing");
+        let data = root.join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let database = data.join("picomado.db");
+        std::fs::write(&database, b"existing database fixture").unwrap();
+        let config_path = temp.path().join("custom.toml");
+        std::fs::write(
+            &config_path,
+            format!(
+                "bind = '127.0.0.1:16153'\ndatabase_path = '{}'\nplugins_root = '{}'\n",
+                database.display(),
+                root.display()
+            ),
+        )
+        .unwrap();
+        let config = Config::load(&config_path).unwrap();
+        assert_eq!(config.database_path, database);
+        assert_eq!(
+            std::fs::read(&database).unwrap(),
+            b"existing database fixture"
+        );
+        assert!(!root.join("clock").exists());
+    }
 }

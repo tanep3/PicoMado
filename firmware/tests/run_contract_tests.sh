@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 work=$(mktemp -d /tmp/picomado-contract.XXXXXX)
 trap 'rm -rf -- "$work"' EXIT
-base=(-std=gnu11 -Wall -Wextra -Werror -Isrc)
+base=(-std=gnu11 -Wall -Wextra -Werror -Iprofiles -Isrc)
 if [[ ${SANITIZE:-0} == 1 ]]; then base+=(-g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie); fi
 cc "${base[@]}" tests/device_contract_test.c -o "$work/device"
 "$work/device"
