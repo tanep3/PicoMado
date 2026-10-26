@@ -4,6 +4,8 @@ Pico W と小型画面で、サーバから届く時計、天気などを表示�
 
 - [対応している基板・画面・ボタン](docs/guides/hardware-support.md)
 - [設定と復旧](docs/guides/first-setup.md)
+- [プラグインを作る入口](docs/guides/plugin-author.md)
+- [安定版と復旧の手順](docs/guides/release-and-recovery.md)
 - [開発時の確認方法](AGENTS.md)
 
 ソースコードのライセンスは [MIT](LICENSE) です。フォントなど第三者の素材は[別の権利表示](service/assets/NOTO-COPYRIGHT)に従います。動画や素材を公開するときは、それぞれの利用条件も確認してください。
