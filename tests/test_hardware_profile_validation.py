@@ -56,6 +56,26 @@ class HardwareProfileValidation(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.check(legacy+'#undef PM_LCD_PIN_CS\n#define PM_LCD_PIN_CS 17\n')
 
+    def test_conditional_indirect_include_rejected_independent_of_build_flags(self):
+        (self.root/'override.h').write_text('#undef PM_LCD_PIN_CS\n#define PM_LCD_PIN_CS 5\n')
+        base = f'#include "{self.name}.h"\n'
+        for flag in ('PM_NORMAL_BUILD', 'PM_TRACE_ENABLE', 'PM_USB_BUTTON_SIM'):
+            with self.subTest(flag=flag), self.assertRaisesRegex(ValueError, 'conditional'):
+                self.check(base+f'#if {flag}\n#include "override.h"\n#endif\n')
+        legacy = self.profile.read_text().replace('#pragma once\n', '')
+        with self.assertRaisesRegex(ValueError, 'conditional'):
+            self.check(legacy+'#if PM_NORMAL_BUILD\n#define PM_LCD_PIN_CS 5\n#endif\n')
+        self.profile.write_text(self.profile.read_text()+'#if PM_NORMAL_BUILD\n#define PM_LCD_PIN_CS 5\n#endif\n')
+        with self.assertRaisesRegex(ValueError, 'conditional'):
+            self.check(base)
+
+    def test_spliced_or_commented_extra_include_is_rejected(self):
+        base = f'#include "{self.name}.h"\n'
+        for extra in ('#\\\ninclude "override.h"\n', '#include/*comment*/"override.h"\n'):
+            with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, 'include'):
+                self.check(base+extra)
+        self.check(base+'#define PM_HOME_SSID "https://example.invalid/*literal*/"\n')
+
     def test_only_documented_optional_hardware_can_vary(self):
         self.check(f'#include "{self.name}.h"\n#define PM_LCD_BLK_CONNECTED 1\n#define PM_LCD_BLK_ACTIVE_HIGH 0\n')
         with self.assertRaises(ValueError):
