@@ -9,8 +9,13 @@
   "status": "in_progress",
   "stages": {
     "design": {
-      "state": "not_started",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "f9d4e03"
+        }
+      ]
     },
     "implementation": {
       "state": "not_started",
@@ -28,5 +33,6 @@
       "state": "not_started",
       "evidence": []
     }
-  }
+  },
+  "design_commit": "f9d4e03"
 }
