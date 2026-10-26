@@ -18,8 +18,14 @@
       ]
     },
     "implementation": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-26/task/picomado-public-profile-guard-gate/check.json",
+          "SHA256": "4c3a11e24b07ce78e042f3f65297e9c13afc0bc22e9b2573f5906ef358d59ef4"
+        }
+      ]
     },
     "independent_verification": {
       "state": "not_started",
