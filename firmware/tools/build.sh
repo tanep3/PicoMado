@@ -33,8 +33,11 @@ if [[ $sample == ON ]]; then board_file="$root/devices/$device/board-id.sample.t
 if [[ $unbound == ON ]]; then board=0000000000000000; sample=UNBOUND;
 else board=$(tr -d '\r\n' < "$board_file"); fi
 if [[ $panel == ON ]]; then sample=UNBOUND-PANEL; fi
+profile=$(tr -d '\r\n' < "$root/devices/$device/profile.txt")
+case "$profile" in pico_w_lcd_160x80_4|pico_w_eink_250x122_0|pico_w_eink_250x122_2) ;; *) echo 'unverified hardware profile' >&2; exit 2;; esac
+profile_hash=$(sha256sum "$root/profiles/$profile.h" | cut -d' ' -f1)
 hash=$(sha256sum "$build_dir/$device.uf2" | cut -d' ' -f1)
-printf '%s %s %s %s\n' "$sample" "$device" "$board" "$hash" > "$build_dir/manifest.txt"
+printf '%s %s %s %s %s %s\n' "$sample" "$device" "$board" "$hash" "$profile" "$profile_hash" > "$build_dir/manifest.txt"
 printf 'UF2: %s\n' "$build_dir/$device.uf2"
 
 if [[ $sample == OFF && $unbound == OFF ]]; then

@@ -1,3 +1,5 @@
+> 公開用の新規導入は [最初の設定手順](../docs/guides/first-setup.md) と [user-service 設定](deploy/README.md) を参照してください。以下には過去の固定環境の検証記録も残しています。
+
 # PicoMado service library
 
 > Current development entry: [AGENTS](../AGENTS.md). Run the root gate before builds. New artifact staging uses `tools/project_gate.py record`; deployment requires `preflight` and parent approval. Direct cargo install/cmake/picotool commands below are historical/manual bypass paths, not substitutes for this gate.

@@ -3,8 +3,8 @@ Description=PicoMado Rust server
 
 [Service]
 Type=simple
-WorkingDirectory=/home/tane/.config/PicoMado
-ExecStart=/home/tane/bin/picomado-server --config /home/tane/.config/PicoMado/config.toml
+WorkingDirectory=%h/.config/PicoMado
+ExecStart=%h/.cargo/bin/picomado-server --config %h/.config/PicoMado/config.toml
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

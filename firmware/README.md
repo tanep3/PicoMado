@@ -1,3 +1,5 @@
+> 新規導入は [ハード対応表](../docs/guides/hardware-support.md) と [初回設定](../docs/guides/first-setup.md) を参照してください。現在は検証済み Pico W プロファイルだけをビルドできます。
+
 # PicoMado firmware (LCD / E-ink)
 
 > Current development entry: [AGENTS](../AGENTS.md). Run the root gate before builds. New artifact staging uses `tools/project_gate.py record`; deployment requires `preflight` and parent approval. Direct cargo install/cmake/picotool commands below are historical/manual bypass paths, not substitutes for this gate.

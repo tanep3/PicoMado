@@ -1,33 +1,7 @@
-# PicoMado user-service layout
+# ユーザーごとのサーバ設定
 
-> Current development entry: [AGENTS](../../AGENTS.md). Run the root gate before builds. New artifact staging uses `tools/project_gate.py record`; deployment requires `preflight` and parent approval. Direct cargo install/cmake/picotool commands below are historical/manual bypass paths, not substitutes for this gate.
+[最初の設定手順](../../docs/guides/first-setup.md)に従い、`config.toml` の例示 IP を自分の LAN アドレスへ変更します。`database_path` と `plugins_root` の `~/` は実行ユーザーの HOME へ展開されます。明示した旧 `/home/tane/...` の組合せも読めます。既存の設定、DB、各 plugin の `data/` と `cache/` は自動移動・上書きしません。
 
+`picomado.service` は systemd **user** unit の例です。実行ファイルを `~/.cargo/bin/picomado-server` に置く例なので、別の場所へ入れたら `ExecStart` を自分のパスへ変更します。`%h` は systemd がそのユーザーのホームへ展開します。設定ディレクトリを先に作り、動かす前にファイルを確認してください。このテンプレートの配置やサービス操作は自動では行いません。
 
-`config.toml` is the non-secret server setting file installed at
-`/home/tane/.config/PicoMado/config.toml`. The common transactional SQLite
-database is `/home/tane/.config/PicoMado/data/picomado.db`; it currently holds
-device records, settings, outbox state, and plugin snapshot metadata. This is
-PicoMado's own database, separate from the older player service.
-
-Each registered built-in plugin receives its own `data/` and `cache/` under
-`/home/tane/.config/PicoMado/<plugin>/`:
-
-| Plugin | Durable content directory | Replaceable fetch/render cache |
-| --- | --- | --- |
-| YouTube | `youtube/data/` | `youtube/cache/` |
-| Caricature | `caricature/data/` | `caricature/cache/` |
-| Weather | `weather/data/` | `weather/cache/` |
-| Rain radar | `rain-radar/data/` | `rain-radar/cache/` |
-| Clock | `clock/data/` (settings in SQLite) | `clock/cache/` (unused) |
-
-The current weather and radar adapters render in memory and keep their latest
-transactional snapshot in the common DB. No downloaded assets are written to
-these plugin directories yet. Future plugin-owned files belong in their own
-directory; no plugin artifact goes into a common cache folder. The server
-creates missing directories and leaves existing files untouched. Logs go to
-the user journal, not to the data tree.
-
-`picomado.service` is the user unit template. Install the crate from
-`service/` using the existing Cargo install root (`/home/tane`), then copy the
-template config and unit only when their destinations are absent. The unit
-uses `/home/tane/bin/picomado-server` and reads the installed config.
+DB は `plugins_root/data/picomado.db`、各 plugin の永続素材は `<plugin>/data/`、取り直せる素材は `<plugin>/cache/` に置きます。フォントのライセンスは [NOTO-COPYRIGHT](../assets/NOTO-COPYRIGHT) を参照してください。

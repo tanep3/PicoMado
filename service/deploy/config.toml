@@ -1,3 +1,4 @@
-bind = "192.168.0.120:16153"
-database_path = "/home/tane/.config/PicoMado/data/picomado.db"
-plugins_root = "/home/tane/.config/PicoMado"
+# Replace this example address with your computer's LAN address.
+bind = "192.0.2.20:16153"
+database_path = "~/.config/PicoMado/data/picomado.db"
+plugins_root = "~/.config/PicoMado"

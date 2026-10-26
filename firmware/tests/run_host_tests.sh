@@ -4,7 +4,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 work=$(mktemp -d /tmp/picomado-host.XXXXXX)
 trap 'rm -rf -- "$work"' EXIT
-base=(-std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -Idevices/sample-a -Isrc)
+base=(-std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -Idevices/sample-a -Iprofiles -Isrc)
 build() { local name=$1; shift; cc "${base[@]}" "$@" -o "$work/$name"; }
 run() { local name=$1; shift; "$work/$name" "$@"; printf 'PASS %s %s\n' "$name" "$*"; }
 build core tests/core_test.c src/core.c
@@ -51,9 +51,17 @@ run net
 build net-stats -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 -DPM_TRACE_VERBOSE=0 \
     -Itests/net_stubs -Itests/app_stubs -I. tests/net_socks_test.c src/ws_accept.c src/trace.c src/rx_stats.c
 run net-stats
+# A -> B -> A must not leak dimensions, input layout or device identity.
+profile_a=$(cc -dM -E -Iprofiles -Idevices/sample-a -include config.sample.h -x c /dev/null)
+profile_b=$(cc -dM -E -Iprofiles -Idevices/E-ink_1 -include config.sample.h -x c /dev/null)
+profile_a_again=$(cc -dM -E -Iprofiles -Idevices/sample-a -include config.sample.h -x c /dev/null)
+[[ $profile_a == "$profile_a_again" && $profile_a != "$profile_b" ]] || { echo 'profile A-B-A isolation failed' >&2; exit 1; }
+[[ $profile_a == *'#define PM_DISPLAY_WIDTH 160'* && $profile_a == *'#define PM_BUTTON_COUNT 4'* &&
+   $profile_b == *'#define PM_DISPLAY_WIDTH 250'* && $profile_b == *'#define PM_BUTTON_COUNT 2'* ]] || { echo 'profile dimensions/input mismatch' >&2; exit 1; }
+echo 'PASS hardware profile A-B-A isolation'
 for device in sample-a E-ink_0 E-ink_1; do
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
-        -I"devices/$device" -Isrc -Itests/net_stubs -Itests/app_stubs -I. \
+        -I"devices/$device" -Iprofiles -Isrc -Itests/net_stubs -Itests/app_stubs -I. \
         tests/net_nagle_test.c src/ws_accept.c -o "$work/net-nagle-$device"
     run "net-nagle-$device" "$work/net-nagle-$device.flags"
 done
@@ -80,7 +88,7 @@ for polarity in 1 0; do
         -e "s/^#define PM_LCD_BLK_ACTIVE_HIGH 1/#define PM_LCD_BLK_ACTIVE_HIGH $polarity/" \
         devices/sample-a/config.sample.h > "$work/config-$polarity/config.sample.h"
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
-        -I"$work/config-$polarity" -Isrc -Itests/stubs -DPM_NORMAL_BUILD=1 \
+        -I"$work/config-$polarity" -Iprofiles -Isrc -Itests/stubs -DPM_NORMAL_BUILD=1 \
         -DPM_LCD_FRAME_CS_HOLD=1 -DPM_LCD_CONTROL_SPI_BAUD=20000000 \
         tests/backlight_test.c src/display.c src/lcd.c src/core.c -o "$work/backlight-$polarity"
     run "backlight-$polarity"
@@ -97,7 +105,7 @@ build input-sampling tests/input_sampling_test.c src/core.c
 run input-sampling
 cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 -DPM_TEST_REAL_USB_CONTROL=1 \
     '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="E-ink_1"' \
-    -Idevices/E-ink_1 -Isrc -Itests/app_stubs tests/input_sampling_app_test.c \
+    -Idevices/E-ink_1 -Iprofiles -Isrc -Itests/app_stubs tests/input_sampling_app_test.c \
     src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c -o "$work/input-sampling-app"
 run input-sampling-app
 build input-video-cadence -DPM_NORMAL_BUILD=1 -DPM_TEST_REAL_USB_CONTROL=1 \
@@ -105,7 +113,7 @@ build input-video-cadence -DPM_NORMAL_BUILD=1 -DPM_TEST_REAL_USB_CONTROL=1 \
     -Itests/app_stubs tests/input_video_cadence_test.c src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c
 run input-video-cadence
 cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
-    -Idevices/E-ink_1 -Isrc -Itests/stubs tests/input_sampling_feedback_test.c \
+    -Idevices/E-ink_1 -Iprofiles -Isrc -Itests/stubs tests/input_sampling_feedback_test.c \
     src/core.c src/display_eink.c -o "$work/input-sampling-feedback"
 for phase in 0 1 2 3 4 5 6; do run input-sampling-feedback "$phase"; done
 build eink-pending tests/eink_pending_test.c src/core.c
@@ -113,20 +121,20 @@ run eink-pending
 for device in E-ink_0 E-ink_1; do
     for trace in 0 1; do
         cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_TRACE_ENABLE=$trace \
-            -I"devices/$device" -Isrc -Itests/stubs tests/eink_feedback_test.c src/display_eink.c -o "$work/eink-feedback-$device-$trace"
+            -I"devices/$device" -Iprofiles -Isrc -Itests/stubs tests/eink_feedback_test.c src/display_eink.c -o "$work/eink-feedback-$device-$trace"
         run "eink-feedback-$device-$trace"
         cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=$trace \
             '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
-            -I"devices/$device" -Isrc -Itests/app_stubs tests/switch_feedback_cancel_test.c src/core.c src/video.c src/trace.c src/rx_stats.c \
+            -I"devices/$device" -Iprofiles -Isrc -Itests/app_stubs tests/switch_feedback_cancel_test.c src/core.c src/video.c src/trace.c src/rx_stats.c \
             -o "$work/switch-cancel-$device-$trace"
         for route in 0 1 2; do run "switch-cancel-$device-$trace" "$route"; done
     done
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
-        -I"devices/$device" -Isrc -Itests/stubs tests/eink_test.c src/display_eink.c \
+        -I"devices/$device" -Iprofiles -Isrc -Itests/stubs tests/eink_test.c src/display_eink.c \
         -o "$work/eink-$device"
     run "eink-$device"
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_TRACE_ENABLE=1 \
-        -I"devices/$device" -Isrc -Itests/stubs tests/eink_test.c src/display_eink.c \
+        -I"devices/$device" -Iprofiles -Isrc -Itests/stubs tests/eink_test.c src/display_eink.c \
         -o "$work/eink-trace-$device"
     run "eink-trace-$device"
 done
@@ -134,17 +142,17 @@ mkdir -p "$work/absent-panel"
 sed 's/^#define PM_EINK_PANEL_CONNECTED 1/#define PM_EINK_PANEL_CONNECTED 0/' \
     devices/E-ink_1/config.sample.h > "$work/absent-panel/config.sample.h"
 cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
-    -I"$work/absent-panel" -Isrc -Itests/stubs tests/eink_test.c src/display_eink.c \
+    -I"$work/absent-panel" -Iprofiles -Isrc -Itests/stubs tests/eink_test.c src/display_eink.c \
     -o "$work/eink-absent"
 run eink-absent
 cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 \
-    -I"$work/absent-panel" -Isrc -Itests/stubs tests/eink_feedback_test.c src/display_eink.c -o "$work/eink-feedback-absent"
+    -I"$work/absent-panel" -Iprofiles -Isrc -Itests/stubs tests/eink_feedback_test.c src/display_eink.c -o "$work/eink-feedback-absent"
 run eink-feedback-absent
 
 for device in E-ink_0 E-ink_1; do
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 \
         '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
-        -I"devices/$device" -Isrc -Itests/app_stubs tests/eink_app_test.c src/core.c src/video.c src/trace.c \
+        -I"devices/$device" -Iprofiles -Isrc -Itests/app_stubs tests/eink_app_test.c src/core.c src/video.c src/trace.c \
         -o "$work/eink-app-$device"
     run "eink-app-$device"
 done
@@ -156,12 +164,12 @@ printf 'PASS eink-legacy-order\n'
 for device in sample-a E-ink_0 E-ink_1; do
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 \
         '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
-        -I"devices/$device" -Isrc -Itests/app_stubs tests/control_reply_test.c src/core.c src/video.c src/trace.c src/rx_stats.c \
+        -I"devices/$device" -Iprofiles -Isrc -Itests/app_stubs tests/control_reply_test.c src/core.c src/video.c src/trace.c src/rx_stats.c \
         -o "$work/control-$device"
     run "control-$device"
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 \
         '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
-        -I"devices/$device" -Isrc -Itests/app_stubs tests/switch_feedback_app_test.c src/core.c src/video.c src/trace.c src/rx_stats.c \
+        -I"devices/$device" -Iprofiles -Isrc -Itests/app_stubs tests/switch_feedback_app_test.c src/core.c src/video.c src/trace.c src/rx_stats.c \
         -o "$work/switch-app-$device"
     run "switch-app-$device"
 done
@@ -176,7 +184,7 @@ for device in sample-a E-ink_0 E-ink_1; do
     for trace in 0 1; do
         cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=$trace \
             '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
-            -I"devices/$device" -Isrc -Itests/app_stubs tests/normal_usb_api_test.c src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c \
+            -I"devices/$device" -Iprofiles -Isrc -Itests/app_stubs tests/normal_usb_api_test.c src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c \
             -o "$work/normal-usb-$device-$trace"
         run "normal-usb-$device-$trace"
     done

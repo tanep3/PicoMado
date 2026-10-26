@@ -24,10 +24,17 @@ if [[ ! $expected =~ ^[[:xdigit:]]{16}$ ]]; then
   echo 'invalid board ID binding' >&2
   exit 2
 fi
-read -r mode built_device built_board built_hash < "$manifest"
+read -r mode built_device built_board built_hash built_profile built_profile_hash < "$manifest"
+profile=$(tr -d '\r\n' < "$root/devices/$device/profile.txt")
+case "$profile" in pico_w_lcd_160x80_4|pico_w_eink_250x122_0|pico_w_eink_250x122_2) ;; *) echo 'unverified hardware profile' >&2; exit 2;; esac
+profile_file="$root/profiles/$profile.h"
+profile_board=$(tr -d '\r\n' < "$root/profiles/$profile.board")
+if [[ $profile_board != pico_w ]]; then echo 'unverified MCU board' >&2; exit 2; fi
+profile_hash=$(sha256sum "$profile_file" | cut -d' ' -f1)
 actual_hash=$(sha256sum "$image" | cut -d' ' -f1)
 if [[ $mode != OFF || $built_device != "$device" ||
-      ${built_board^^} != ${expected^^} || $built_hash != "$actual_hash" ]]; then
+      ${built_board^^} != ${expected^^} || $built_hash != "$actual_hash" || $built_profile != "$profile" ||
+      $built_profile_hash != "$profile_hash" ]]; then
   echo 'UF2 manifest does not match the selected device and image' >&2
   exit 2
 fi
@@ -36,7 +43,7 @@ python3 "$root/../tools/project_gate.py" preflight --candidate "$build_dir/candi
   --device "$device" --board-id "$expected_file" --config "$config"
 if [[ ${3-} == --verify-only ]]; then exit 0; fi
 image_info=$(picotool info -a "$image")
-if ! grep -Eq '^[[:space:]]*pico_board:[[:space:]]*pico_w[[:space:]]*$' <<< "$image_info"; then
+if ! grep -Eq "^[[:space:]]*pico_board:[[:space:]]*${profile_board}[[:space:]]*$" <<< "$image_info"; then
   echo 'selected UF2 is not a Pico W build' >&2
   exit 2
 fi
