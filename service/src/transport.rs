@@ -1588,14 +1588,16 @@ mod tests {
                 )
                 .unwrap();
             let client = reqwest::Client::new();
-            for plugin in ["caricature", "rain-radar", "clock", "youtube", "weather"] {
+            for plugin in ["caricature", "rain-radar", "clock"].into_iter()
+                .chain(crate::plugins::DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
+                .chain(["youtube", "weather"]) {
                 let d = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).unwrap().view().devices.remove(0);
                 let response=client.put(format!("http://{address}/api/devices/desk/plugins/{plugin}"))
                     .header("Content-Type","application/json").body(serde_json::to_vec(&serde_json::json!({"incarnation":d.incarnation,"expected_revision":d.enabled_revision,"enabled":false})).unwrap()).send().await.unwrap();
                 assert!(response.status().is_success());
                 let view: serde_json::Value =
                     serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
-                if plugin == "caricature" || plugin == "rain-radar" || plugin == "clock" {
+                if plugin == "caricature" || plugin == "rain-radar" || plugin == "clock" || plugin == "my-words" {
                     assert_eq!(view["devices"][0]["selected"], "youtube");
                     continue;
                 }
@@ -2481,8 +2483,8 @@ mod tests {
             .set_order(
                 1,
                 ["weather", "rain-radar", "youtube", "caricature", "clock"]
-                    .map(str::to_owned)
-                    .to_vec(),
+                    .into_iter().chain(crate::plugins::DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
+                    .map(str::to_owned).collect(),
             )
             .unwrap();
         let (slow_tx, mut slow_rx) = tokio::sync::mpsc::channel(16);
