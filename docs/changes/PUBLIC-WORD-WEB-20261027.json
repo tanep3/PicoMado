@@ -1,0 +1,53 @@
+{
+  "id": "PUBLIC-WORD-WEB-20261027",
+  "title": "Editable word plugin from Web UI through device delivery",
+  "owner": "parent thread 01a17217-ba4c-76ec-9c07-ca50f54160db",
+  "implementer": "main integration task",
+  "cause": "Word tutorial lacked editable Web UI and persistent live updates",
+  "introduction_cause": "The prior tutorial treated an embedded static frame as a complete plugin",
+  "escape_cause": "Prior acceptance covered selection and transport but not editing through the UI",
+  "deliverables": [
+    "revisioned web editing",
+    "durable validated phrase and image",
+    "selected LCD refresh",
+    "bilingual end-to-end tutorial and isolated tests"
+  ],
+  "dependencies": [
+    "Existing managed plugin command and delivery aggregate",
+    "No production deployment"
+  ],
+  "design_artifacts": [
+    "docs/changes/PUBLIC-WORD-WEB-20261027.md"
+  ],
+  "design_commit": "f4e28d5",
+  "domain_authority": "docs/changes/PUBLIC-WORD-WEB-20261027.md",
+  "standard": "development/standard/v1/standard.md",
+  "status": "in_progress",
+  "stages": {
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "f4e28d5"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}
