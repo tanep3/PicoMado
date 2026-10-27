@@ -1,6 +1,6 @@
 # PicoMado をカスタマイズする
 
-PicoMado は画面、ボタン、Pico W の役割を組み合わせた自作端末です。現在の通常ビルドは[実機確認済みの構成](hardware-support.md)だけを受け付けます。このガイドは、その構成から自分の一台へ広げる際の変更場所を示します。新しい構成を「動作確認済み」と呼ぶのは、対応するビルド、ホスト試験、配線確認、実機表示・入力確認が終わってからです。
+PicoMado は画面、ボタン、Pico W の役割を組み合わせた自作端末です。現在の通常ビルドは登録済みのハードウェアプロファイルを使います。各構成のビルド・実機確認状況は[対応表](hardware-support.md)で確認できます。このガイドは、その構成から自分の一台へ広げる際の変更場所を示します。新しい構成を「動作確認済み」と呼ぶのは、対応するビルド、ホスト試験、配線確認、実機表示・入力確認が終わってからです。
 
 ## まず、どの層を変えるか
 
@@ -12,11 +12,11 @@ PicoMado は画面、ボタン、Pico W の役割を組み合わせた自作端�
 | GPIO や同じ種類のボタン配線を変える | `firmware/profiles/*.h` と検査・ビルド導線 | 新しい追跡済み profile と検証が必要。個体 `config.h` では上書きできない |
 | 画面の寸法・制御器、ボタン数・操作方法、マイコンを変える | profile、ファームのドライバ／入力、サーバの描画・通信 | コードと契約の変更が必要。profile の数字だけでは動かない |
 
-`config.h` へ画面・SPI・ボタンのマクロや `#include`、条件分岐を追加しても、[profile 検査](../../firmware/tools/validate_hardware_profile.py)が拒否します。既存の profile を実測なしに書き換えて「確認済み」の名前を流用せず、新しい構成として区別してください。
+`config.h` へ画面・SPI・ボタンのマクロや `#include`、条件分岐を追加しても、[profile 検査](../../firmware/tools/validate_hardware_profile.py)が拒否します。既存の登録済み profile を書き換えて元の名前のまま扱わず、新しい構成として区別してください。
 
 ## Pico 2 W にしたい
 
-Pico W 用 profile の `.board` は `pico_w` です。`firmware/CMakeLists.txt`、`firmware/tools/build.sh`、`flash.sh` も Pico W と三つの検証済み profile に限定しています。Pico 2 W は名前を `profile.txt` に書くだけではビルドできません。Pico SDK のボード指定、CYW43 とネットワーク、Flash ID・UF2 照合、メモリとタイミングを Pico 2 W で確認し、ボード固有の profile と受入試験を設計する必要があります。画面とサーバの通信契約を維持できる部分は再利用できますが、実機移植は未実施です。
+Pico W 用 profile の `.board` は `pico_w` です。`firmware/CMakeLists.txt`、`firmware/tools/build.sh`、`flash.sh` も Pico W と三つの登録済み profile に限定しています。Pico 2 W は名前を `profile.txt` に書くだけではビルドできません。Pico SDK のボード指定、CYW43 とネットワーク、Flash ID・UF2 照合、メモリとタイミングを Pico 2 W で確認し、ボード固有の profile と受入試験を設計する必要があります。画面とサーバの通信契約を維持できる部分は再利用できますが、実機移植は未実施です。
 
 ## 別の画面やサイズにしたい
 
@@ -35,7 +35,7 @@ ESP32 には Pico SDK と Pico W の CYW43、SPI、USB CDC、Flash ID、UF2、�
 ## 新しい構成を確認する順序
 
 1. 実物の型番、電圧、配線、画素形式、操作方法を記録し、既存 profile との差分を明確にする。コードを変える場合は[開発工程](../development-process.md)に沿って変更 ID と契約を先に定める。
-2. 新しい profile と必要なドライバ・サーバ描画・入力の変更を行う。`firmware/CMakeLists.txt`、`firmware/tools/build.sh`、`flash.sh` の許可リストは、検証した構成だけが通るように更新する。検査を無効化して通さない。
+2. 新しい profile と必要なドライバ・サーバ描画・入力の変更を行う。`firmware/CMakeLists.txt`、`firmware/tools/build.sh`、`flash.sh` の許可リストは、対象構成と検査段階を記録したうえで更新する。実機受入は別に確認し、検査を無効化して通さない。
 3. `python3 tools/project_gate.py check` を通し、対象構成のホスト試験とビルド成果物の照合を行う。現行ソースの gate 証拠は別 PC にそのまま移せないため、[初回設定の説明](first-setup.md#5-ビルドできる配布物か確認する)も確認する。
 4. 所有者が適切な事前確認と退避の後、電源・GND・GPIO、初回表示、ボタン、HOME 接続、各プラグインの画像、復旧を実機で確認する。ビルド成功と実機受入は分けて記録する。
 
