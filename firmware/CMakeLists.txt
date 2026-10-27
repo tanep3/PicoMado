@@ -69,9 +69,9 @@ endif()
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/tools/validate_hardware_profile.py"
   --config "${PM_CONFIG_FILE}" --profile "${PM_PROFILE_HEADER}" --compiler "${CMAKE_C_COMPILER}"
-  RESULT_VARIABLE PM_PROFILE_VALID OUTPUT_VARIABLE PM_PROFILE_STYLE ERROR_QUIET)
+  RESULT_VARIABLE PM_PROFILE_VALID OUTPUT_VARIABLE PM_PROFILE_STYLE ERROR_VARIABLE PM_PROFILE_ERROR)
 if(NOT PM_PROFILE_VALID EQUAL 0)
-  message(FATAL_ERROR "Invalid or inconsistent hardware profile/config; run validate_hardware_profile.py for details")
+  message(FATAL_ERROR "Invalid hardware profile/config: ${PM_PROFILE_ERROR}")
 endif()
 string(STRIP "${PM_PROFILE_STYLE}" PM_PROFILE_STYLE)
 if(NOT PM_PROFILE_STYLE STREQUAL "profile" AND NOT PM_PROFILE_STYLE STREQUAL "legacy")
