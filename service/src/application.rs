@@ -2444,6 +2444,8 @@ mod tests {
             for id in ["youtube", "caricature", "rain-radar", "clock"] {
                 web_enabled(&mut app, "desk", id, false);
             }
+            #[cfg(feature = "word-tutorial")]
+            web_enabled(&mut app, "desk", "my-words", false);
             app.button(&token, ButtonAction::Sub).unwrap();
             app.button(&token, ButtonAction::Down).unwrap();
             assert_eq!(app.plugin_position(&token).unwrap().index, 1);
@@ -2626,8 +2628,8 @@ mod tests {
         app.set_order(
             1,
             ["weather", "rain-radar", "youtube", "caricature", "clock"]
-                .map(str::to_owned)
-                .to_vec(),
+                .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
+                .map(str::to_owned).collect(),
         )
         .unwrap();
         let first = app.hello("desk", caps(), 1).unwrap();
@@ -2773,8 +2775,8 @@ mod tests {
             app.set_order(
                 1,
                 ["weather", "youtube", "caricature", "rain-radar", "clock"]
-                    .map(str::to_owned)
-                    .to_vec(),
+                    .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
+                    .map(str::to_owned).collect(),
             )
             .unwrap();
         }
@@ -3291,13 +3293,15 @@ mod clock_tests {
             "youtube".into(),
             "caricature".into(),
         ];
+        #[cfg(feature = "word-tutorial")]
+        app.runtime.world.plugin_order.push("clock".into());
         App::persist(&mut app.connection.lock().unwrap(), &app.runtime).unwrap();
         drop(app);
         let mut app = App::open(&path).unwrap();
-        assert_eq!(
-            app.view().order,
-            ["rain-radar", "weather", "youtube", "caricature", "clock"]
-        );
+        let expected = ["rain-radar", "weather", "youtube", "caricature", "clock"]
+            .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
+            .collect::<Vec<_>>();
+        assert_eq!(app.view().order, expected);
         assert_eq!(app.runtime.world.devices["old"].selected, selection);
         assert_eq!(app.runtime.world.devices["old"].enabled, enabled);
         assert_eq!(
