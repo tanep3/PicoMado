@@ -38,7 +38,11 @@ if [[ $mode != OFF || $built_device != "$device" ||
   echo 'UF2 manifest does not match the selected device and image' >&2
   exit 2
 fi
-python3 "$root/../tools/project_gate.py" preflight --candidate "$build_dir/candidate.json" \
+operation_args=()
+if [[ -n ${PM_FIXED_OPERATION:-} ]]; then
+  operation_args=(--operation "$PM_FIXED_OPERATION" --operation-review "${PM_FIXED_OPERATION_REVIEW:?operation review required}")
+fi
+python3 "$root/../tools/project_gate.py" preflight "${operation_args[@]}" --candidate "$build_dir/candidate.json" \
   --review "$build_dir/review.json" --artifact "$image" \
   --device "$device" --board-id "$expected_file" --config "$config"
 if [[ ${3-} == --verify-only ]]; then exit 0; fi

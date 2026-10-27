@@ -178,6 +178,11 @@ def record(args):
 
 
 def preflight(args):
+    if getattr(args, 'operation', None):
+        import fixed_operation
+        print(json.dumps(fixed_operation.verify(ROOT,args,sys.modules[__name__])))
+        return
+    require(not getattr(args, 'operation_review', None), 'operation review requires operation')
     value=json.loads(Path(args.candidate).read_text());report=verify_check(value['check_report'],'ship')
     require(value['subject_digest']==report['subject_digest']and sha(value['check_report'])==value['check_report_SHA256'],'candidate source/receipt changed')
     artifact(args.artifact,value['kind']);require(sha(args.artifact)==value['artifact_SHA256'],'artifact changed')
@@ -205,7 +210,7 @@ def main():
     c=sub.add_parser('record');c.add_argument('--build-receipt',required=True);c.add_argument('--report',default=str(ROOT/'.gate/check.json'));c.add_argument('--artifact',required=True);c.add_argument('--kind',choices=['firmware','server'],required=True);c.add_argument('--out',required=True)
     for flag in ['device','board-id','config']:c.add_argument('--'+flag)
     c=sub.add_parser('build');c.add_argument('--kind',choices=['firmware','server'],required=True);c.add_argument('--build-dir',required=True);c.add_argument('--report',default=str(ROOT/'.gate/check.json'));c.add_argument('--out');c.add_argument('--device');c.add_argument('--mode',choices=['normal','sample','unbound','unbound_panel'],default='normal');c.add_argument('--features',default='');c.add_argument('--no-default-features',action='store_true')
-    c=sub.add_parser('preflight');c.add_argument('--candidate',required=True);c.add_argument('--review',required=True);c.add_argument('--artifact',required=True)
+    c=sub.add_parser('preflight');c.add_argument('--operation');c.add_argument('--operation-review');c.add_argument('--candidate',required=True);c.add_argument('--review',required=True);c.add_argument('--artifact',required=True)
     for flag in ['device','board-id','config']:c.add_argument('--'+flag)
     a=p.parse_args()
     try:

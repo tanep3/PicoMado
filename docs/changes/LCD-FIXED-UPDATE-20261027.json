@@ -1,0 +1,50 @@
+{
+  "id": "LCD-FIXED-UPDATE-20261027",
+  "title": "Fixed LCD firmware USB update operation",
+  "owner": "parent thread 01a17217-ba4c-76ec-9c07-ca50f54160db",
+  "implementer": "LCD operation implementation task",
+  "cause": "Single active change couples firmware operation approval to incomplete publication review",
+  "introduction_cause": "Ship admission models change-wide approval only",
+  "escape_cause": "No separately bound fixed-artifact operation admission",
+  "deliverables": [
+    "Bounded historical LCD operation admission",
+    "negative and ordinary ship regression tests"
+  ],
+  "dependencies": [
+    "Independent gate implementation review and parent acceptance before USB"
+  ],
+  "design_artifacts": [
+    "docs/changes/LCD-FIXED-UPDATE-20261027.md"
+  ],
+  "design_commit": "3454057",
+  "domain_authority": "docs/changes/LCD-FIXED-UPDATE-20261027.md",
+  "standard": "development/standard/v1/standard.md",
+  "status": "in_progress",
+  "stages": {
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "3454057"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "in_progress",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}
