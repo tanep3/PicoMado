@@ -1,0 +1,45 @@
+{
+  "id": "EINK-UPDATE-20261027",
+  "title": "E-ink_1 update and button investigation",
+  "owner": "parent thread 01a17217-ba4c-76ec-9c07-ca50f54160db",
+  "implementer": "E-ink update task",
+  "cause": "E-ink_1 button switching reported inoperative",
+  "introduction_cause": "Not yet established",
+  "escape_cause": "Not yet established",
+  "deliverables": [
+    "Single-device firmware candidate and independently verified update",
+    "Button input investigation and evidence"
+  ],
+  "dependencies": [
+    "Independent review and parent acceptance before USB write"
+  ],
+  "design_artifacts": [
+    "docs/changes/EINK-UPDATE-20261027.md"
+  ],
+  "design_commit": "pending",
+  "domain_authority": "docs/changes/EINK-UPDATE-20261027.md",
+  "standard": "development/standard/v1/standard.md",
+  "status": "in_progress",
+  "stages": {
+    "design": {
+      "state": "in_progress",
+      "evidence": []
+    },
+    "implementation": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}
