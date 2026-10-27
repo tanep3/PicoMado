@@ -1,18 +1,19 @@
-name: observation-domain-gate
+name: tests
 on: [push, pull_request]
 permissions:
   contents: read
 jobs:
-  observation-domain-gate:
+  tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch locked build dependencies
-        run: cargo fetch --locked --manifest-path service/Cargo.toml
-      - name: Same root gate as local development
-        run: python3 tools/project_gate.py check --out .gate
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: observation-gate-evidence
-          path: .gate/*.log
+      - name: Python tests
+        run: |
+          python3 -m unittest discover -s tests -p 'test_hardware_profile_validation.py'
+          python3 -m unittest discover -s tests -p 'test_public_export.py'
+      - name: Firmware host tests
+        run: bash firmware/tests/run_host_tests.sh
+      - name: Firmware USB tests
+        run: bash firmware/tests/run_usb_tx_tests.sh
+      - name: Server tests
+        run: cargo test --locked --all-features --manifest-path service/Cargo.toml
