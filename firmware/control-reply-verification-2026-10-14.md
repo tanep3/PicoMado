@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # ボタン応答と受信画像の競合 — 2026-10-14
 
 受信画像破棄の論理バグは実mainを用いて再現し、修正・回帰・UF2ビルドまで完了した。サーバの応答コンテキスト追加は175試験・clippy・Release後に19:47:48 JSTに本番導入した。LCDは新しいBOOTSEL連絡後、20:53:30 JSTにb817e5a4修正版のload／verify／起動を完了した。write_stallは別事象として原因未確定を維持する。
@@ -74,7 +76,7 @@ LCD/E-inkともRenderedAck後に次の共有再生位置を採用する。端末
 
 サービス全targetは178成功=lib173+binary1+integration4、失敗0・filtered0。従来175=170+1+4に対し、バイナリprotocol/実WebSocketの2件とACK欠落1件を追加した。外部HTTPS opt-in1件だけ従来どおりignored、example2本/host binaryは各0件。遅いE-ink対速いLCDの既存試験を強化し、LCDが4位置進む間E-inkは1pending、描画後は最新位置から復帰することも確認した。clippy全target・fmt・Release（caricature-retention-delete）成功。ファーム26実行PASSにはSDKロック、split >4KiB/NUL binary、描画中のcopy保持、native/旧JSON混在・古い世代・入力割込みが含まれる。旧7cf7e7b mainもLCD/E-ink_0/E-ink_1の3構成で追加context＋JSONフレーム/両ACKを確認。
 
-ユーザーが22:04 JSTにraspi5の192.168.0.120を有線へ移した。22:05の読取りでeth0を確認し、ネット設定は操作していない。21時のWi-Fi記録と22時以降の有線記録を直接の性能比較に使わない。有線の旧本番でも22:15〜18にwrite_stallを再現した。証跡は`task-3/eink-evidence/freeze-20261014/stream-native-v1/`に分離した。
+ユーザーが22:04 JSTにraspi5の192.0.2.120を有線へ移した。22:05の読取りでeth0を確認し、ネット設定は操作していない。21時のWi-Fi記録と22時以降の有線記録を直接の性能比較に使わない。有線の旧本番でも22:15〜18にwrite_stallを再現した。証跡は`task-3/eink-evidence/freeze-20261014/stream-native-v1/`に分離した。
 
 本番サーバは2026-10-14T22:21:53.754188+09:00に反映。SHA256 `629afb3a292ba84c5c95b8bddcc27e5649991d7fece4a9e2a723d845b95867a4`、15105696B、PID105348。unit hash不変、実削除env=1、feature有効、API200と旧風刺画service/timer稼働を確認。旧E-ink_0はsession14/frame7666でReceiptとRendered、heartbeatを確認し、風刺画のみONを維持した。
 
@@ -135,7 +137,7 @@ UF2/config.hは0600・Git除外。E-ink_0/1の10通信マクロはLCDと一致�
 
 ## 経路の確認による比較条件訂正 — 23:06 JST
 
-23:05〜06の読み取りで、実LCDのDHCPアドレス192.168.0.173へ、サーバのbind送信元192.168.0.120を指定した`ip -4 route get`もdev wlan0を返した。eth0のIPv4 routeは空、wlan0に192.168.0.0/24とdefault（metric600）がある。TCP socketは192.168.0.120:16153→LCDである。eth0にIPがあるという22:05確認だけでは、端末向け送信が有線だとは確定できなかった。前半区間の経路は採っていないので、この20分を純粋な有線区間とは記載しない。停止の唯一の原因と断定せず、route-evidence.jsonを保存した。ネット設定変更は禁止のため一切変更していない。
+23:05〜06の読み取りで、実LCDのDHCPアドレス192.168.0.173へ、サーバのbind送信元192.0.2.120を指定した`ip -4 route get`もdev wlan0を返した。eth0のIPv4 routeは空、wlan0に192.168.0.0/24とdefault（metric600）がある。TCP socketは192.0.2.120:16153→LCDである。eth0にIPがあるという22:05確認だけでは、端末向け送信が有線だとは確定できなかった。前半区間の経路は採っていないので、この20分を純粋な有線区間とは記載しない。停止の唯一の原因と断定せず、route-evidence.jsonを保存した。ネット設定変更は禁止のため一切変更していない。
 
 ## 最新LCD継続試験終了 — 23:09 JST
 

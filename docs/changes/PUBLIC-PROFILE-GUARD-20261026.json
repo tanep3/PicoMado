@@ -1,0 +1,44 @@
+{
+  "id": "PUBLIC-PROFILE-GUARD-20261026",
+  "title": "Reject conditional device hardware configuration",
+  "owner": "parent thread 01a17217-ba4c-76ec-9c07-ca50f54160db",
+  "implementer": "public portability task",
+  "design_artifacts": [
+    "docs/changes/PUBLIC-PROFILE-GUARD-20261026.md"
+  ],
+  "status": "in_progress",
+  "stages": {
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "f9d4e03"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-26/task/picomado-public-profile-guard-gate/check.json",
+          "SHA256": "4c3a11e24b07ce78e042f3f65297e9c13afc0bc22e9b2573f5906ef358d59ef4"
+        }
+      ]
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  },
+  "design_commit": "f9d4e03"
+}

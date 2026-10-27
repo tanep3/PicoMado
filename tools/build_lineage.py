@@ -34,6 +34,18 @@ def sdk_snapshot(path):
     visit(root);return dict(root=str(root),repositories=repos)
 
 
+def hardware_profile(root, device):
+    require(device and device.replace('-', '').replace('_', '').isalnum(), 'invalid device')
+    path = Path(root)/'firmware/devices'/device/'profile.txt'
+    name = path.read_text().strip()
+    require(name and name.replace('-', '').replace('_', '').isalnum() and path.read_text() == name+'\n', 'invalid hardware profile name')
+    header = Path(root)/'firmware/profiles'/(name+'.h')
+    board_file = Path(root)/'firmware/profiles'/(name+'.board')
+    require(header.is_file() and board_file.is_file(), 'hardware profile header or board file missing')
+    board = board_file.read_text().strip()
+    require(board == 'pico_w', 'MCU board implementation unavailable: only pico_w is implemented')
+    return name, board, (path, header, board_file)
+
 def cache(path):
     values={}
     for line in Path(path).read_text().splitlines():
@@ -62,16 +74,17 @@ def snapshot(root,kind,build_dir,device=None,mode='normal',features=(),no_defaul
         path=build_dir/'CMakeCache.txt';values=cache(path)
         require(not values.get('CMAKE_C_COMPILER_LAUNCHER')and not values.get('CMAKE_CXX_COMPILER_LAUNCHER'),'CMake compiler launchers require separately modelled provenance')
         require(Path(values['CMAKE_HOME_DIRECTORY']).resolve()==root/'firmware','CMake source root mismatch')
-        require(values['PM_DEVICE']==device and values['PICO_BOARD']=='pico_w','actual device/board flags mismatch')
+        profile,profile_board,profile_files=hardware_profile(root,device)
+        require(values['PM_DEVICE']==device and values['PICO_BOARD']==profile_board,'actual device/board flags mismatch')
         expected=dict(normal=('OFF','OFF','OFF'),sample=('ON','OFF','OFF'),unbound=('OFF','ON','OFF'),unbound_panel=('OFF','ON','ON'))[mode]
         require(tuple(values[n]for n in ['PM_USE_SAMPLE','PM_PREPARE_UNBOUND','PM_PREPARE_UNBOUND_PANEL'])==expected,'actual build-mode flags mismatch')
         config=root/'firmware/devices'/device/('config.sample.h'if mode=='sample'else'config.h')
         board=root/'firmware/devices'/device/('board-id.sample.txt'if mode=='sample'else'board-id.txt')
-        files={str(config):sha(config)}
+        files={str(config):sha(config), **{str(p):sha(p) for p in profile_files}}
         if mode in ['normal','sample']:files[str(board)]=sha(board)
         flags={k:v for k,v in values.items()if k in ['PM_DEVICE','PICO_BOARD','CMAKE_BUILD_TYPE','CMAKE_C_FLAGS','CMAKE_CXX_FLAGS']or(k.startswith(('PM_','PICO_'))and(v in ['ON','OFF']or v.isdecimal()))}
         commands=build_dir/'compile_commands.json';require(commands.is_file(),'actual compile commands missing')
-        return dict(source_root=str(root/'firmware'),build_dir=str(build_dir),mode=mode,device=device,
+        return dict(source_root=str(root/'firmware'),build_dir=str(build_dir),mode=mode,device=device,profile=profile,board=profile_board,
             cache_SHA256=sha(path),compile_commands_SHA256=sha(commands),flags=flags,configuration=files,
             SDK=sdk_snapshot(values['PICO_SDK_PATH']),compiler=tool(values['CMAKE_C_COMPILER']),builder=tool('cmake'),environment=environment)
     manifest=root/'service/Cargo.toml';model=tomllib.loads(manifest.read_text());known=model.get('features',{})
@@ -110,10 +123,11 @@ def run(root,args,gate):
     if args.kind=='firmware':
         require(args.device and args.device.replace('-','').replace('_','').isalnum(),'device required')
         requested_flags=firmware_flags()
+        profile,board,_=hardware_profile(root,args.device)
         use_sample='ON'if args.mode=='sample'else'OFF';unbound='ON'if args.mode in ['unbound','unbound_panel']else'OFF'
         configure=[shutil.which('cmake'),'-S',str(root/'firmware'),'-B',str(build_dir),'-DPM_DEVICE='+args.device,
             '-DPM_USE_SAMPLE='+use_sample,'-DPM_PREPARE_UNBOUND='+unbound,'-DPM_PREPARE_UNBOUND_PANEL='+('ON'if args.mode=='unbound_panel'else'OFF'),
-            '-DPICO_BOARD=pico_w','-DCMAKE_BUILD_TYPE=Release','-DCMAKE_EXPORT_COMPILE_COMMANDS=ON','-DPICO_SDK_FETCH_FROM_GIT=OFF','-DPICO_SDK_SUBMODULE_AUTO_UPDATE=OFF']
+            '-DPICO_BOARD='+board,'-DCMAKE_BUILD_TYPE=Release','-DCMAKE_EXPORT_COMPILE_COMMANDS=ON','-DPICO_SDK_FETCH_FROM_GIT=OFF','-DPICO_SDK_SUBMODULE_AUTO_UPDATE=OFF']
         configure+=['-D'+name+'='+value for name,value in requested_flags.items()]
         with (build_dir.parent/(build_dir.name+'-configure.log')).open('xb')as log:subprocess.run(configure,stdout=log,stderr=subprocess.STDOUT,check=True)
         command=[shutil.which('cmake'),'--build',str(build_dir),'-j4','--verbose'];image=build_dir/(args.device+'.uf2')

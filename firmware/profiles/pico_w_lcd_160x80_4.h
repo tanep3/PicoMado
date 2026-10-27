@@ -1,0 +1,34 @@
+#pragma once
+// Pico W hardware layout. Physical support status: docs/guides/hardware-support.md.
+#define PM_DISPLAY_LCD 1
+#define PM_DISPLAY_EINK 2
+#define PM_DISPLAY_TYPE PM_DISPLAY_LCD
+#define PM_DISPLAY_WIDTH 160
+#define PM_DISPLAY_HEIGHT 80
+#define PM_PIXEL_RGB565BE 1
+#define PM_PIXEL_MONO1 2
+#define PM_PIXEL_FORMAT PM_PIXEL_RGB565BE
+#define PM_PIXEL_FORMAT_NAME "rgb565be"
+#define PM_PIXEL_BYTES 2
+#define PM_LCD_CONTROLLER_ST7735S 1
+#define PM_LCD_CONTROLLER PM_LCD_CONTROLLER_ST7735S
+#define PM_LCD_SPI_INDEX 0
+#define PM_LCD_SPI_BAUD 20000000
+#define PM_LCD_PIN_CS 17
+#define PM_LCD_PIN_SCK 18
+#define PM_LCD_PIN_MOSI 19
+#define PM_LCD_PIN_DC 20
+#define PM_LCD_PIN_RESET 21
+#define PM_LCD_X_OFFSET 0
+#define PM_LCD_Y_OFFSET 24
+#define PM_LCD_MADCTL 0x60
+#define PM_LCD_INVERT 1
+#define PM_LCD_COMPENSATE_INVERT_BGR 1
+#define PM_LCD_ROTATE_180 1
+#define PM_LCD_BLK_PIN 22
+#define PM_BUTTON_COUNT 4
+#define PM_BUTTON_SUB_PIN 12
+#define PM_BUTTON_UP_PIN 13
+#define PM_BUTTON_POWER_PIN 14
+#define PM_BUTTON_DOWN_PIN 15
+#define PM_DISPLAY_CAPABILITY "lcd"

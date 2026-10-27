@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # LCD 黒画面の比較調査（2026-10-12、追加書込み前）
 
 ## 実機の現在値
@@ -21,7 +23,7 @@
 | ネットワーク方式 | `pico_cyw43_arch_lwip_threadsafe_background`。LCD初期化はWi-Fi初期化後 | `pico_cyw43_arch_lwip_poll`。LCD初期化はWi-Fi初期化前 | GPIOは競合しないが順序・ライフサイクル差が残る |
 | USB stdio | 本番は無効 | 有効 | USB GPIOは使わない。自己診断版も有効でLCD表示をユーザー確認済み |
 
-参照: `/home/tane/dev/PicoW/PicoW_Youtube_Player/CMakeLists.txt`、`pico/lcd_display.h`、`pico/pico_player.c`、`docs/diagnostics/BUTTONS_ROTATION.md`、`docs/wiring.md`。既存 YouTube ソースとサービスは読み取りのみ。
+参照: `$HOME/dev/PicoW/PicoW_Youtube_Player/CMakeLists.txt`、`pico/lcd_display.h`、`pico/pico_player.c`、`docs/diagnostics/BUTTONS_ROTATION.md`、`docs/wiring.md`。既存 YouTube ソースとサービスは読み取りのみ。
 
 ホストのGPIO/SPIモックで YouTube の実 `lcd_display.h` と PicoMado の実 `lcd.c` をそれぞれ実行し、初期化、GPIO操作、待ち時間、SPI0設定、全コマンド/データ、合成RGB565フレーム25,600 Bの転送までバイナリtraceを比較した。YouTube経路には実送信器と同じ反転＋R/B補正を事前に適用。両traceは完全一致（SHA256 `4196e917e183dfce8fd3cc2e0e309f957133bd7ada92f3be25dc124f70238e48`）。よって低レベルLCDルーチンを単純コピーするだけでは黒画面の振る舞いは変わらない。主な未検証差分は初期化の時点、起動テストパターンの有無、ネットワークの実行方式、動作中の状態遷移である。
 

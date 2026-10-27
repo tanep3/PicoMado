@@ -1,0 +1,44 @@
+{
+  "id": "PUBLIC-REVIEW-20261026",
+  "title": "Public review correction and release guidance",
+  "owner": "parent thread 01a17217-ba4c-76ec-9c07-ca50f54160db",
+  "implementer": "public portability task",
+  "design_artifacts": [
+    "docs/changes/PUBLIC-REVIEW-20261026.md"
+  ],
+  "status": "in_progress",
+  "stages": {
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "17248dd"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-26/task/picomado-public-review-gate/check.json",
+          "SHA256": "ea22862e3cf1f3627a33221064254d479dae6cc0c98bb4d183be07c780b7e89b"
+        }
+      ]
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  },
+  "design_commit": "17248dd"
+}

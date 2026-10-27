@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "status": "internal_audit_inventory_only",
+  "buildable": false,
+  "standalone_document": false,
+  "not_for_distribution": true,
+  "primary_reader_preview": "Self-contained Japanese README HTML with embedded device photos and YouTube GIF, kept outside this repository; links to omitted guides are noninteractive.",
+  "includes": [
+    "README.md",
+    "README.ja.md",
+    "LICENSE",
+    "docs/publication-manifest.json",
+    "docs/publication-scope.md",
+    "docs/media/picomado-devices.jpg",
+    "docs/media/picomado-youtube.gif",
+    "docs/media/youtube-lcd.jpg",
+    "docs/media/weather-lcd-eink.jpg",
+    "docs/media/rain-radar-lcd-eink.jpg",
+    "docs/media/caricature-lcd-eink.jpg",
+    "docs/media/clock-lcd-eink.jpg",
+    "docs/guides/first-setup.md",
+    "docs/guides/first-setup.en.md",
+    "docs/guides/hardware-support.md",
+    "docs/guides/hardware-support.en.md",
+    "docs/guides/customization.md",
+    "docs/guides/customization.en.md",
+    "docs/guides/release-and-recovery.md",
+    "docs/guides/plugin-author.md",
+    "docs/guides/plugin-author.en.md",
+    "service/README.md",
+    "firmware/README.md",
+    "service/deploy/config.toml"
+  ],
+  "excluded_private_evidence": [
+    "docs/checkpoints/**/*.json",
+    "docs/changes/**/*.json",
+    "repository_git_history"
+  ],
+  "notes": "The listed files are an internal privacy and content inventory. Their relative links are not closed within the archive, so the archive is not a standalone document or source release. Original evidence remains in the private canonical repository. A later buildable public release needs a separately validated source export and a portable gate workflow."
+}

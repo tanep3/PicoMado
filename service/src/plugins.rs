@@ -6,7 +6,10 @@ use std::collections::BTreeMap;
 use crate::content::ContentPlugin;
 use crate::{Engine, Registry};
 
+#[cfg(not(feature = "word-tutorial"))]
 pub const DEFAULT_ORDER: [&str; 5] = ["youtube", "caricature", "weather", "rain-radar", "clock"];
+#[cfg(feature = "word-tutorial")]
+pub const DEFAULT_ORDER: [&str; 6] = ["youtube", "caricature", "weather", "rain-radar", "clock", "my-words"];
 
 /// One registration owns matching rules and content. The application does not
 /// add an ID branch when another plugin is registered.
@@ -47,6 +50,8 @@ pub fn builtins() -> PluginSet {
     set.register(Box::new(crate::weather::WeatherPlugin), Box::new(crate::weather::WeatherContent::default())).expect("unique plugin");
     set.register(Box::new(crate::radar::RadarPlugin), Box::new(crate::radar::RadarContent::default())).expect("unique plugin");
     set.register(Box::new(crate::clock::ClockPlugin), Box::new(crate::clock::ClockContent::default())).expect("unique plugin");
+    #[cfg(feature = "word-tutorial")]
+    set.register(Box::new(crate::word::WordRules), Box::new(crate::word::WordContent)).expect("unique plugin");
     debug_assert_eq!(set.order, DEFAULT_ORDER);
     set
 }
@@ -65,9 +70,20 @@ pub async fn fetch(job: &crate::content::FetchJob) -> Result<Vec<u8>, String> {
 
 /// External adapters are wired only at this composition boundary.
 pub fn executors() -> crate::workers::Executors {
-    // Reuse the existing interpreter read-only, including pepedpid/Pillow.
+    // A user's existing local interpreter remains the default when present.
+    // An explicit override lets a new installation use its own environment.
+    let python = std::env::var_os("PICOMADO_CARICATURE_PYTHON")
+        .map(std::path::PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| {
+            std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .map(|home| home.join("dev/PicoW/PicoW_E-ink_Display/.venv/bin/python"))
+                .filter(|path| path.is_file())
+                .unwrap_or_else(|| "python3".into())
+        });
     let caricature = crate::caricature::executor::CaricatureExecutor {
-        python: "/home/tane/dev/PicoW/PicoW_E-ink_Display/.venv/bin/python".into(),
+        python,
         ..Default::default()
     };
     BTreeMap::from([

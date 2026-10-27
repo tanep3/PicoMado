@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # 時計とV4 E-ink更新（2026-10-18）
 
 ## 調査と設計根拠
@@ -7,7 +9,7 @@
 次の両実装を確認した。
 
 - [Waveshare公式 EPD_2in13_V4.c](https://raw.githubusercontent.com/waveshareteam/e-Paper/master/RaspberryPi_JetsonNano/c/lib/e-Paper/EPD_2in13_V4.c)：`Init`、`Display_Base`、`Display_Partial`、`Sleep`を含む全体。baseは同じ画像を `0x24` と `0x26` の両RAMへ書き `0xf7`、partialは短いハードリセット後にborder `0x80`、RAM `0x24`、更新制御 `0xff`。部分更新にSWRESETやV3 LUTは使わない。
-- `/home/tane/plutopg/Raspberry_Pi_PICO/picoW/e-paper/e-paper_monitor/pico/e_paper.py` の `EPD_2in13_V4_Landscape`：既存の横向きRAM順序・data entry `0x07`・byte-CSと同じV4 base／partialの組合せ。既存通常描画の実績はあるが、部分更新の実機成功記録とは扱わない。
+- `$HOME/plutopg/Raspberry_Pi_PICO/picoW/e-paper/e-paper_monitor/pico/e_paper.py` の `EPD_2in13_V4_Landscape`：既存の横向きRAM順序・data entry `0x07`・byte-CSと同じV4 base／partialの組合せ。既存通常描画の実績はあるが、部分更新の実機成功記録とは扱わない。
 
 公式Web製品／wikiの取得は403／robots制限で完了せず、部分更新時間・連続更新回数の数値を保証する資料は今回取得できなかった。動画のfpsやパネル寿命について推測の数値は採用しない。V4 sourceで確認できる更新手順とBUSY契約だけを使う。
 

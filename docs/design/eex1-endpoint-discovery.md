@@ -1,6 +1,8 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # AWAY接続先のEEX1取得
 
-Androidアプリは別プロジェクト `/home/tane/dev/Android/endpoint-exchange`（SuperTane WSL、引継ぎcommit09f111350773547115ef3ded09f4e54dd913d136）。PicoMadoにはクライアントと参照契約だけを置く。
+Androidアプリは別プロジェクト `$HOME/dev/Android/endpoint-exchange`（SuperTane WSL、引継ぎcommit09f111350773547115ef3ded09f4e54dd913d136）。PicoMadoにはクライアントと参照契約だけを置く。
 
 ## 実装範囲
 

@@ -33,8 +33,13 @@ if [[ $sample == ON ]]; then board_file="$root/devices/$device/board-id.sample.t
 if [[ $unbound == ON ]]; then board=0000000000000000; sample=UNBOUND;
 else board=$(tr -d '\r\n' < "$board_file"); fi
 if [[ $panel == ON ]]; then sample=UNBOUND-PANEL; fi
+profile=$(tr -d '\r\n' < "$root/devices/$device/profile.txt")
+if [[ ! $profile =~ ^[A-Za-z0-9_-]+$ || ! -f $root/profiles/$profile.h || ! -f $root/profiles/$profile.board ]]; then
+  echo 'invalid or missing hardware profile' >&2; exit 2
+fi
+profile_hash=$(sha256sum "$root/profiles/$profile.h" | cut -d' ' -f1)
 hash=$(sha256sum "$build_dir/$device.uf2" | cut -d' ' -f1)
-printf '%s %s %s %s\n' "$sample" "$device" "$board" "$hash" > "$build_dir/manifest.txt"
+printf '%s %s %s %s %s %s\n' "$sample" "$device" "$board" "$hash" "$profile" "$profile_hash" > "$build_dir/manifest.txt"
 printf 'UF2: %s\n' "$build_dir/$device.uf2"
 
 if [[ $sample == OFF && $unbound == OFF ]]; then

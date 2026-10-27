@@ -1,8 +1,10 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # 時計プラグイン検証・反映記録（2026-10-18）
 
 ## 作業範囲
 
-既存リポジトリのHEADは `26b6c87`、着手時の未コミット差分はなし。リポジトリ内／親階層にAGENTS.mdや.agents/skillsは見つからず、`/home/tane/.codex/AGENTS.md` の日本語指定に従った。サービス／プラグイン構造、共通状態、要件・設計、E-inkの現行実装とローカルV4参考コードを確認した。
+既存リポジトリのHEADは `26b6c87`、着手時の未コミット差分はなし。リポジトリ内／親階層にAGENTS.mdや.agents/skillsは見つからず、`$HOME/.codex/AGENTS.md` の日本語指定に従った。サービス／プラグイン構造、共通状態、要件・設計、E-inkの現行実装とローカルV4参考コードを確認した。
 
 書込み可能な作業領域に追跡ファイルだけをコピーし、稼働DB・設定・秘密ファイルを複製せずに検証した。元リポジトリへ反映するときは対象ごとの元ファイルSHAを照合し、並行変更があればコピー前に中止する。ビルド成果物や私有設定はソース差分に含めない。
 
@@ -66,7 +68,7 @@
 - 実行中バイナリSHA-256：`a1edb213288fcb8727cd6ebb6a4a8e4ad1b54b0a07830d25bc8dc8bef5468337`（15,781,648 byte）。候補、インストール先、`/proc/<PID>/exe` が一致。
 - 既存config・systemd unit・drop-inはSHA一致。Cargo登録の機能と他バイナリは変更せず、サーバ実行ファイルだけを原子的に置換した。
 - サービス停止後、SQLite backup APIでDBを整合的に退避し、quick_check=okを確認。退避したのはDB 1,982,464 byteと旧バイナリ15,580,160 byte、最小manifestだけ。画像／動画／全データのコピーは作っていない。
-- 退避先：`/home/tane/.config/PicoMado/data/rollback-clock-20261018T054326Z/`。旧バイナリSHAは `4a52894aaa7eeb65ad7c1a7f2a2daf0fe38c3d8801b485074de59dd82e8385b6`。
+- 退避先：`$HOME/.config/PicoMado/data/rollback-clock-20261018T054326Z/`。旧バイナリSHAは `4a52894aaa7eeb65ad7c1a7f2a2daf0fe38c3d8801b485074de59dd82e8385b6`。
 - 更新直前の停止時DBを正本として比較し、登録incarnation・選択・有効プラグインの差分0。共通順序は `weather → rain-radar → caricature → youtube` を保って時計のみ末尾へ追加した。停止時の選択は E-ink_0＝風刺画、E-ink_1＝天気、LCD＝YouTubeだった。
 - 作業中に利用設定が別操作で変更されることを検知したため、初回読取り時の設定へ戻す操作はしていない。更新直後の差分0を確認後、LCDが時計へ切り替わったことを読取りで確認した。こちらから端末の選択・ON/OFF・時計間隔を書き換えるAPIは呼んでいない。
 - `/`、`/plugins/clock`、`/api/plugins/clock`、`/api/state` はHTTP 200。時計APIは `Asia/Tokyo`、`HH:MM`、60秒更新を返し、登録端末の時計設定は10分・revision 1。

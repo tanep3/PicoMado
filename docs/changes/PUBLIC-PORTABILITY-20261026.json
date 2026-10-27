@@ -1,0 +1,44 @@
+{
+  "id": "PUBLIC-PORTABILITY-20261026",
+  "title": "Portable public setup and verified hardware profiles",
+  "owner": "parent thread 01a17217-ba4c-76ec-9c07-ca50f54160db",
+  "implementer": "public portability task",
+  "design_artifacts": [
+    "docs/changes/PUBLIC-PORTABILITY-20261026.md"
+  ],
+  "status": "in_progress",
+  "stages": {
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "49c8a9a"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-26/task/picomado-public-gate/check.json",
+          "SHA256": "c7f33dc6eaeb80ec6c474c9bf988b21adc12e2c26c15d1a6ac96852961c00812"
+        }
+      ]
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  },
+  "design_commit": "49c8a9a"
+}

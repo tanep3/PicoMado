@@ -1,10 +1,12 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # SDK整合後LCD実機比較（2026-10-21）
 
 SDK 2.3.1の公式gitlinkに揃えたLCDでも、風刺画→雨データの切替で入力から描画完了まで1,496,540µsの遅延を記録した。通知TCPデータはPiに到着していたが、それより前のsequence gapが再送で埋まるまで累積ACKが1,344,373.226µs進まなかった。SDK整合化だけでは間欠遅延の解消を確認できなかった。先行データの元の送信は採取開始前で、欠落の場所・原因は未確定。
 
 ## 書込み・現在状態
 
-[比較候補の記録](sdk-alignment-results-20261021.md)に続き、独立レビュー `/tmp/picomado-sdk-alignment-review-3p1g7x5k/review-outcome.json` の受入れとユーザーのBOOTSEL報告を受けて実施した。証拠rootは `SDK-live-20261021T040833Z`（以下R）、共通親dirは `/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020`。
+[比較候補の記録](sdk-alignment-results-20261021.md)に続き、独立レビュー `/tmp/picomado-sdk-alignment-review-3p1g7x5k/review-outcome.json` の受入れとユーザーのBOOTSEL報告を受けて実施した。証拠rootは `SDK-live-20261021T040833Z`（以下R）、共通親dirは `$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020`。
 
 - 対象LCDのFlash ID E661640843239D21、個別設定、binding、復旧UF2、候補SHAを再照合した。既存flash.shによるload/verify/rebootは1回だけ。2026-10-21 04:09:24 UTCにverify 100%、04:09:40 UTCにUSB再認識とframe1021493の受信・描画ACKを確認。
 - 現在のUF2は `11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485`。設定sectorを書かず、容量対策WIPを混ぜていない。

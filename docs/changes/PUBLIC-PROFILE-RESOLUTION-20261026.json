@@ -1,0 +1,44 @@
+{
+  "id": "PUBLIC-PROFILE-RESOLUTION-20261026",
+  "title": "Pin the actually compiled tracked hardware profile",
+  "owner": "parent thread 01a17217-ba4c-76ec-9c07-ca50f54160db",
+  "implementer": "public portability task",
+  "design_artifacts": [
+    "docs/changes/PUBLIC-PROFILE-RESOLUTION-20261026.md"
+  ],
+  "status": "in_progress",
+  "stages": {
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "f9ddac3"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-26/task/picomado-public-profile-resolution-gate/check.json",
+          "SHA256": "f8bce1bd4195017309774f3145cf8667d9dc1358974beb8bca135167e8b81882"
+        }
+      ]
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  },
+  "design_commit": "f9ddac3"
+}

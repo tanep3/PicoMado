@@ -1,0 +1,62 @@
+{
+  "id": "EINK-UPDATE-20261027",
+  "title": "E-ink_1 update and button investigation",
+  "owner": "parent thread 01a17217-ba4c-76ec-9c07-ca50f54160db",
+  "implementer": "E-ink update task",
+  "cause": "E-ink_1 button switching reported inoperative",
+  "introduction_cause": "Not yet established",
+  "escape_cause": "Not yet established",
+  "deliverables": [
+    "Single-device firmware candidate and independently verified update",
+    "Button input investigation and evidence"
+  ],
+  "dependencies": [
+    "Independent review and parent acceptance before USB write"
+  ],
+  "design_artifacts": [
+    "docs/changes/EINK-UPDATE-20261027.md"
+  ],
+  "design_commit": "81abecd",
+  "domain_authority": "docs/changes/EINK-UPDATE-20261027.md",
+  "standard": "development/standard/v1/standard.md",
+  "status": "in_progress",
+  "stages": {
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "81abecd"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "check",
+          "path": "/home/tane/Documents/Codex/2026-10-27/task-13/picomado/.gate/check.json",
+          "SHA256": "2b3f4936571686d435a4fa0bc4be050759f31375dedaed6aa969b89fec7116d9"
+        }
+      ]
+    },
+    "independent_verification": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "review",
+          "path": "/home/tane/Documents/Codex/2026-10-27/task-13/picomado/firmware/build/E-ink_1/review.json",
+          "SHA256": "474964cec98b70278ae8a2d609eefc41f4c2846befe85e1fd59292b9f5fe0ae3"
+        }
+      ]
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}

@@ -1,7 +1,11 @@
 cmake_minimum_required(VERSION 3.13)
 
 if(NOT DEFINED PICO_SDK_PATH)
-    set(PICO_SDK_PATH "/home/tane/dev/PicoW/pico-sdk")
+    if(DEFINED ENV{PICO_SDK_PATH})
+        set(PICO_SDK_PATH "$ENV{PICO_SDK_PATH}")
+    else()
+        message(FATAL_ERROR "Set PICO_SDK_PATH to your installed Pico SDK")
+    endif()
 endif()
 include(${PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 

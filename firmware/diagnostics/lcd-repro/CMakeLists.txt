@@ -1,12 +1,20 @@
 cmake_minimum_required(VERSION 3.13)
 # Select an installed SDK explicitly. No SDK/tool downloads.
 if(NOT DEFINED PICO_SDK_PATH)
-  set(PICO_SDK_PATH /home/tane/pico/pico-sdk)
+  if(DEFINED ENV{PICO_SDK_PATH})
+    set(PICO_SDK_PATH "$ENV{PICO_SDK_PATH}")
+  else()
+    message(FATAL_ERROR "Set PICO_SDK_PATH to your installed Pico SDK")
+  endif()
 endif()
 set(PICO_NO_PICOTOOL 1)
 option(PM_REPRO_YOUTUBE_CYW43 "Use the working YouTube CYW43 driver snapshot" ON)
+set(PM_REPRO_YOUTUBE_SOURCE "" CACHE PATH "Local historical YouTube diagnostics source")
 if(PM_REPRO_YOUTUBE_CYW43)
-  set(PICO_CYW43_DRIVER_PATH /home/tane/dev/PicoW/PicoW_Youtube_Player/diagnostics/pico/cyw43-driver)
+  if(NOT PM_REPRO_YOUTUBE_SOURCE)
+    message(FATAL_ERROR "Set PM_REPRO_YOUTUBE_SOURCE for the historical CYW43 trial")
+  endif()
+  set(PICO_CYW43_DRIVER_PATH "${PM_REPRO_YOUTUBE_SOURCE}/cyw43-driver")
 endif()
 include(${PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 project(picomado_lcd_repro C CXX ASM)
@@ -61,7 +69,7 @@ if(PM_REPRO_HOLD_FRAME_CS)
 endif()
 target_include_directories(picomado_lcd_repro PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}" "${PM_DEVICE_DIR}" "${PM_FIRMWARE_ROOT}/src"
-  /home/tane/dev/PicoW/PicoW_Youtube_Player/diagnostics/pico)
+  "${PM_REPRO_YOUTUBE_SOURCE}")
 target_compile_definitions(picomado_lcd_repro PRIVATE
   PM_REPRO_SPI_BAUD=${PM_REPRO_SPI_BAUD}
   PM_REPRO_WIFI_HOME=$<BOOL:${PM_REPRO_WIFI_HOME}>
@@ -72,7 +80,7 @@ if(PM_REPRO_SAMPLE)
 endif()
 if(PM_REPRO_YOUTUBE_CYW43)
   target_sources(picomado_lcd_repro PRIVATE
-    /home/tane/dev/PicoW/PicoW_Youtube_Player/diagnostics/pico/cyw43_diag.c)
+    "${PM_REPRO_YOUTUBE_SOURCE}/cyw43_diag.c")
   target_compile_definitions(picomado_lcd_repro PRIVATE PLAYER_CYW43_DIAG=1)
 endif()
 target_link_libraries(picomado_lcd_repro pico_stdlib pico_unique_id hardware_spi

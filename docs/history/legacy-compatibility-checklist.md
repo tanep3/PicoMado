@@ -1,7 +1,9 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # 既存 YouTube・風刺画の機能抽出と互換チェック
 
 - 調査日：2026-10-12 UTC
-- 方法：`/home/tane/dev/PicoW/PicoW_Youtube_Player` と `/home/tane/dev/PicoW/PicoW_E-ink_Display` のソース・資料をローカルで読み取り。サービス、既存データ、端末は変更していない。
+- 方法：`$HOME/dev/PicoW/PicoW_Youtube_Player` と `$HOME/dev/PicoW/PicoW_E-ink_Display` のソース・資料をローカルで読み取り。サービス、既存データ、端末は変更していない。
 - 状態：既存コードの挙動を抽出したもの。PicoMado の Rust 実装・LCD 実表示・E-ink 実表示・複数端末・動画 fps の達成を示さない。既存のデータや稼働構成を移行する許可でもない。
 
 ## YouTube

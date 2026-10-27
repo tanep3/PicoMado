@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # E-ink firmware verification — 2026-10-14
 
 E-ink_0は最終RAM転置を修正したe8409d06版へ再書込み・verify・再起動済み。mono1対応サーバも反映し、HOME／Hello／ReceiptAck／RenderedAck（frame817）を確認した。風刺画のみONを維持。E-ink_0の実表示成功はユーザー確認済み。初回のローカル表示崩れと修正証拠は以下に残す。
@@ -6,7 +8,7 @@ PicoMadoサーバのmono1対応は全回帰・Releaseビルド・clippy完了。
 
 ## 表示崩れの証拠と修正
 
-- 添付JPEG（Library ID `libfile_867a3faaeabc819195bf0671d68d3829`）をこの環境の `/home/tane/Documents/Codex/2026-10-14/task-3/eink-evidence/768.jpg` へ取得し、436614B・読取可能・実ピクセル閲覧を確認。中央に規則的な短い黒線、上下は白。画像だけで配線不良と判断しない。
+- 添付JPEG（Library ID `libfile_867a3faaeabc819195bf0671d68d3829`）をこの環境の `$HOME/Documents/Codex/2026-10-14/task-3/eink-evidence/768.jpg` へ取得し、436614B・読取可能・実ピクセル閲覧を確認。中央に規則的な短い黒線、上下は白。画像だけで配線不良と判断しない。
 - 初回USBログ `/tmp/picomado-E-ink_0-usb.txt` ではローカル描画の4000B SPI完了とACTIVE／READYを確認。サーバのCRC／Receipt／Renderedなし、APIもlast_received_frame／last_rendered_frameがnullなので、写真はローカル文字表示の崩れと判断。初回時点の本番サーバはLCD配信固定で、ファームがRGB565フレームを拒否していた。
 - 同じ非対称3813B画像から旧 `ai_news.frame.png_to_wire` のW[x*16+u/8]（u=121-y）を構成し、旧 `pico/panel_v4.py` の実 `Panel.display` をmock SPIで実行した。初回C版のSPI出力とは4000B中3519Bが異なった。
 - 旧 `pico/protocol.py` はB[x+(15-byte)*250]=W[x*16+byte]に変換し、Panel.displayがbyte面ごとに250列を送る。最終送信は `W[x*16+byte] for byte=0..15 then x=0..249`。初回C版はWの列順のまま送っており、この最終転置を欠いていた。
@@ -53,7 +55,7 @@ PicoMado-lcd1 ea8d2a3a9a98dc635117ac6819a2901281549bf874213a40896cee7bcde71a1b
 ## 本番反映後の証拠
 
 - cargo install記録の既存feature `caricature-retention-delete` を確認し、同featureでRelease再ビルド。運用設定／サービスunitは変更せず、既存 `PICOMADO_CARICATURE_DELETE=1` を再起動後の実プロセスで確認した。
-- 前段mono1対応の稼働サーバSHA256は `16d30233d2130837f7ae2724e474526f243a4e0d239733206741064bd794faf0`、ビルド元とインストール先 `/home/tane/bin/picomado-server` が一致。picomado.serviceはPID1462842／active／running。
+- 前段mono1対応の稼働サーバSHA256は `16d30233d2130837f7ae2724e474526f243a4e0d239733206741064bd794faf0`、ビルド元とインストール先 `$HOME/bin/picomado-server` が一致。picomado.serviceはPID1462842／active／running。
 - 17:25:48 UTC：E-ink_0 incarnation4／session3のHelloとWebSocket結合、frame817を3813B mono1として送信し、ReceiptAckをサーバ観測。
 - 17:25:54 UTC：同frame817のRenderedAckをサーバ観測。APIもlast_received_frame=817／last_rendered_frame=817。USBログ `/tmp/picomado-E-ink_0-deployed-usb.txt` にはCRC3813B、Receipt投入成功、4000B SPI、Rendered投入成功、ACTIVE／READY。USB未接続時の診断欠落8件はカウントされているが、サーバ側の両ACK到着を確認した。
 - LCDもオンラインへ再接続しframe818のReceipt／Renderedを確認。enabled4機能・selected=caricatureを維持。
@@ -77,7 +79,7 @@ FrameStartへ後方互換の任意mode=normal/subを追加。共通Pico入力実
 - ファームの23実行PASS。実mainのLCD／E-ink FrameStartで局所SubがNormalへ戻る回帰を追加。ロゴ試験のclippy指摘は等価なas_chunksへ修正し、該当試験も再実行PASS。
 - fmt・全target clippy -D warnings成功。Releaseはcaricature-retention-deleteを明示して成功。
 - OS再起動後18:40:45 JSTに前段サーバが自動起動していた。LCDは通常USB／HOME／ACTIVE／READY、BOOTSEL不在。/tmpの中断時ログは消失し、新旧ビルド識別が無いので再BOOTSELが必要と報告した。OS設定には追加作業していない。
-- 18:53:43 JST：今回の修正版を/home/tane/bin/picomado-serverへ原子的導入し、picomado.serviceを再起動。PID14966／active／running。Release元と稼働先のSHA256は3bb276ff2cc15647fbb73e20c66c7581d6ee536035e581dd19e7a3e19f1b06ee、15048288B。
+- 18:53:43 JST：今回の修正版を$HOME/bin/picomado-serverへ原子的導入し、picomado.serviceを再起動。PID14966／active／running。Release元と稼働先のSHA256は3bb276ff2cc15647fbb73e20c66c7581d6ee536035e581dd19e7a3e19f1b06ee、15048288B。
 - 再起動前後の実プロセスでPICOMADO_CARICATURE_DELETE=1を確認。unit／設定は変更せず、旧ai-news-http.serviceはactive running、ai-news-generate.timerはactive waiting。
 - 現在のユーザー設定は両端末ともrain-radarのみON。実HTTP保存でweatherをON（選択維持）、rain-radarをOFF（天気へ即時）、weatherをOFF（ロゴへ即時）、rain-radarをON（元へ復元）を試験した。CASで並行変更を保護。
 - E-ink_0：incarnation4／session10を維持し、天気frame889、全OFFロゴ890、復元雨雲891でReceiptAck／RenderedAck。各画像3813B、実更新約2.6秒。LCD：incarnation3／session128を維持し、天気892、ロゴ893、復元雨雲894で両ACK、各25600B。

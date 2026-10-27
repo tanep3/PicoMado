@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # LCD 固定画面の最小再現
 
 同一の全画面（白枠、RGB帯、`PICO MADO` / `FIXED FRAME`）を Wi-Fi 接続前6回、接続後500msごとに描く。画面の位相表示やカウンタは変えない。窓 X0..159/Y24..103、180度回転、色補正は個体configの値を維持。LCD専用でE-inkはビルド拒否する。
@@ -9,7 +11,7 @@
 ```sh
 umask 077
 cmake -S firmware/diagnostics/lcd-repro -B firmware/build/lcd-repro-sdk211 \
-  -DPICO_SDK_PATH=/home/tane/pico/pico-sdk -DPICO_BOARD=pico_w \
+  -DPICO_SDK_PATH=$HOME/pico/pico-sdk -DPICO_BOARD=pico_w \
   -DCMAKE_BUILD_TYPE=Release -DPM_REPRO_DEVICE=PicoMado-lcd1 \
   -DPM_REPRO_SAMPLE=OFF -DPM_REPRO_WIFI_HOME=ON \
   -DPM_REPRO_YOUTUBE_CYW43=ON -DPM_REPRO_SPI_BAUD=5000000
@@ -18,7 +20,7 @@ cmake --build firmware/build/lcd-repro-sdk211 -j4
 
 この版は実働YouTubeのSDK2.1.1と診断CYW43ドライバを読み取り参照し、同じbackground方式を使う。USBログ、固定画面、個体チェック、DHCPは最小再現の差。background方式と互換のない `MEM_LIBC_MALLOC=1` は再現用ヘッダで0へ切り替える。本体のpoll用lwIP設定は変更しない。
 
-SDK2.3.1版は別buildフォルダに `-DPICO_SDK_PATH=/home/tane/dev/PicoW/pico-sdk -DPM_REPRO_YOUTUBE_CYW43=OFF` で作る。この場合SDKとCYW43ドライバ両方の差があるため、SDKだけの原因判定には使わない。速度だけの比較は一つのUF2内の上/下操作で行う。
+SDK2.3.1版は別buildフォルダに `-DPICO_SDK_PATH=$HOME/dev/PicoW/pico-sdk -DPM_REPRO_YOUTUBE_CYW43=OFF` で作る。この場合SDKとCYW43ドライバ両方の差があるため、SDKだけの原因判定には使わない。速度だけの比較は一つのUF2内の上/下操作で行う。
 
 本体LCDの低速制御候補は既定で制御1MHz・画素は個体configの20MHz要求。実速度はRP2040の分周で決まる。最小再現はこの既定を上書きし、制御/画素を同一速度にする。低速化の実効は実機確認待ち。
 

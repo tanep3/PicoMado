@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+root=$PWD
+source tests/profile_env.sh
 work=$(mktemp -d /tmp/picomado-inner.XXXXXX)
 trap 'rm -rf -- "$work"' EXIT
-base=(-std=gnu11 -Wall -Wextra -Werror -DPM_CYW43_INNER_PROBE=1 -Isrc)
+base=(-std=gnu11 -Wall -Wextra -Werror -DPM_CYW43_INNER_PROBE=1 -include "$root/profiles/pico_w_lcd_160x80_4.h" -Iprofiles -Isrc)
 if [[ ${SANITIZE:-0} == 1 ]]; then base+=(-g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-pie -no-pie); fi
 cc "${base[@]}" tests/cyw43_frame_validity_test.c -o "$work/validity"
 "$work/validity"
