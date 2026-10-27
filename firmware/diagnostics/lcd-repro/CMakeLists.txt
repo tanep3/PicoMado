@@ -1,7 +1,11 @@
 cmake_minimum_required(VERSION 3.13)
 # Select an installed SDK explicitly. No SDK/tool downloads.
 if(NOT DEFINED PICO_SDK_PATH)
-  message(FATAL_ERROR "Set PICO_SDK_PATH to your installed Pico SDK")
+  if(DEFINED ENV{PICO_SDK_PATH})
+    set(PICO_SDK_PATH "$ENV{PICO_SDK_PATH}")
+  else()
+    message(FATAL_ERROR "Set PICO_SDK_PATH to your installed Pico SDK")
+  endif()
 endif()
 set(PICO_NO_PICOTOOL 1)
 option(PM_REPRO_YOUTUBE_CYW43 "Use the working YouTube CYW43 driver snapshot" ON)

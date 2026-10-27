@@ -2,6 +2,7 @@
 //! by importing the library, and accepts only the requested trial address.
 
 use std::path::PathBuf;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use picomado_core::{application::App, host::serve_jma_on_listener};
@@ -13,11 +14,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         || args[1] != "--temporary"
         || args[2] != "--bind"
         || args[4] != "--db"
-        || args[3] != "192.0.2.120:16153"
     {
         return Err(
-            "usage: temporary_lan_host --temporary --bind 192.0.2.120:16153 --db PATH".into(),
+            "usage: temporary_lan_host --temporary --bind LAN_IP:PORT --db PATH".into(),
         );
+    }
+    let bind: SocketAddr = args[3].parse()?;
+    if bind.port() == 0 || bind.ip().is_unspecified() || bind.ip().is_multicast() {
+        return Err("bind requires a specific unicast address and nonzero port".into());
     }
     let db = PathBuf::from(&args[5]);
     if db.as_os_str().is_empty() {
@@ -26,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Arc::new(picomado_core::shared::Application::new(
         App::open(&db).map_err(|e| format!("database open failed: {e:?}"))?,
     ));
-    let listener = tokio::net::TcpListener::bind(&args[3]).await?;
+    let listener = tokio::net::TcpListener::bind(bind).await?;
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     let host = serve_jma_on_listener(listener, app, stop_rx);
     tokio::pin!(host);

@@ -9,7 +9,7 @@
 
 2026-10-15 checkpoint: negotiated LCD push video, complete low-resolution YouTube sources, explicit per-conversion FPS, individual source/variant deletion, and responsive dark Web controls are implemented. See [media/UI verification](youtube-media-verification-2026-10-15.md) and [LCD firmware verification](../firmware/lcd-push-verification-2026-10-15.md). Earlier sections below retain their dated checkpoint limits; the new LCD functional-clock firmware candidate remains unflashed.
 
-The crate contains a pure transition engine, settings model, SQLite application boundary, Web/API/UI shell, versioned control and image protocol, WebSocket adapter, bounded queue model, cached JMA weather and rain-radar renderers, plugin fetch cycle, and replaceable effect runner. Importing the library never starts a listener or background worker. `picomado-server` reads its dedicated user-service configuration. `temporary_lan_host` is a historical fixed-address trial host, not a general setup path. No PicoMado API key or Web login is added.
+The crate contains a pure transition engine, settings model, SQLite application boundary, Web/API/UI shell, versioned control and image protocol, WebSocket adapter, bounded queue model, cached JMA weather and rain-radar renderers, plugin fetch cycle, and replaceable effect runner. Importing the library never starts a listener or background worker. `picomado-server` reads its dedicated user-service configuration. `temporary_lan_host` accepts an explicit unicast address for an isolated operator trial, not general setup. No PicoMado API key or Web login is added.
 
 ## Current behavior
 
@@ -63,8 +63,8 @@ systemctl --user is-active picomado.service
 ## Explicit LAN trial
 
 The standalone trial host uses an isolated `/tmp` DB and cannot share the port
-with the user service. Its bind address is fixed in source for an earlier local
-trial. It is not a portable setup command. No SSID, password, or SOCKS
+with the user service. It requires an explicit unicast bind address and is an
+operator trial, not the first-setup path. No SSID, password, or SOCKS
 credential belongs in database setup.
 
 ```sh
