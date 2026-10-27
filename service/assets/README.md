@@ -60,3 +60,11 @@ native JP Bold atlas above and its source label credits JMA and GSI.
 `radar-lcd-preview.png` and `radar-eink-preview.png` are direct outputs of the
 Rust renderer for the saved latest observation. They are review previews,
 not images fetched or displayed by the live service.
+
+## Word tutorial default card
+
+`word-card.png` is the 160×80 default for the optional `word-tutorial` plugin.
+Its lettering matches Noto Sans CJK JP Bold at 24 px, generated with
+`service/examples/make-word-card.py`. The Noto source and SIL Open Font License
+1.1 attribution are included in [`NOTO-COPYRIGHT`](NOTO-COPYRIGHT). Browser-edited
+cards use the fonts available to that browser.

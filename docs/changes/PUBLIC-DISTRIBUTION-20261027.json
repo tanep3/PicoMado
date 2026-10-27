@@ -6,17 +6,73 @@
   "cause": "First-use builds depend on private evidence and newly created device selections dirty the worktree; tracked and historical evidence contains private context.",
   "introduction_cause": "Internal development and publication workflows were combined.",
   "escape_cause": "Prior checks did not exercise a history-free distribution and clean first-use environment end to end.",
-  "deliverables": ["First-use build and device safety checks", "History-free public distribution", "Bilingual setup and plugin instructions", "License and privacy review"],
-  "dependencies": ["Retain internal gate and private evidence", "Independent verification and physical application remain separate"],
-  "design_artifacts": ["docs/changes/PUBLIC-DISTRIBUTION-20261027.md"],
+  "deliverables": [
+    "First-use build and device safety checks",
+    "History-free public distribution",
+    "Bilingual setup and plugin instructions",
+    "License and privacy review"
+  ],
+  "dependencies": [
+    "Retain internal gate and private evidence",
+    "Independent verification and physical application remain separate"
+  ],
+  "design_artifacts": [
+    "docs/changes/PUBLIC-DISTRIBUTION-20261027.md"
+  ],
   "domain_authority": "docs/changes/PUBLIC-DISTRIBUTION-20261027.md",
   "standard": "development/standard/v1/standard.md",
   "status": "in_progress",
   "stages": {
-    "design": {"state": "in_progress", "evidence": []},
-    "implementation": {"state": "not_started", "evidence": []},
-    "independent_verification": {"state": "not_started", "evidence": []},
-    "operational_application": {"state": "not_started", "evidence": []},
-    "effectiveness_confirmation": {"state": "not_started", "evidence": []}
-  }
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "9342064"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "in_progress",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  },
+  "design_commit": "9342064",
+  "investigation": [
+    {
+      "hypothesis": "The initial publication allowlist contains all files needed for an LCD firmware build.",
+      "status": "refuted",
+      "evidence": "Candidate v2 passed host and Rust checks but CMake configure rejected a missing diagnostics/backlight-polarity/main.c referenced by the existing LCD target.",
+      "correction": "Include the required source and cover its presence in the export regression test.",
+      "pending": "Repeat the actual firmware build and full candidate check using the corrected output.",
+      "verification": "Corrected candidate v13 configured, built the normal LCD UF2 and passed offline preflight; no board was accessed."
+    },
+    {
+      "hypothesis": "The default all-target LCD build works with the documented unconnected-backlight sample.",
+      "status": "refuted",
+      "evidence": "Candidate v11 configured successfully but the diagnostic backlight target rejected the sample setting during an all-target build.",
+      "correction": "The public build selects the main LCD or E-ink application target, leaving the existing optional diagnostic and internal gate unchanged.",
+      "pending": "Repeat actual builds and preflight for the updated public route.",
+      "verification": "Selecting the LCD application target built successfully with the documented unconnected-backlight sample; offline preflight passed. Final candidate must be rechecked."
+    },
+    {
+      "hypothesis": "The originally documented tool list is enough for the complete offline test suite.",
+      "status": "refuted",
+      "evidence": "The existing YouTube conversion tests invoke FFmpeg, FFprobe and nice, including an MPEG-4 encoder. The provenance adapter also requires a clean Git SDK and initialized submodules.",
+      "correction": "Document these requirements and their checks in both setup guides.",
+      "pending": "Verify on a new clean OS separately; the current isolated cache is not a clean OS."
+    }
+  ]
 }

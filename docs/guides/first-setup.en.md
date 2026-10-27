@@ -6,9 +6,14 @@ This guide assumes a Linux server and Raspberry Pi Pico W. Run its commands from
 
 ## 1. Prepare the tools
 
-Install [Rust and Cargo](https://rust-lang.org/tools/install/) for the server, and a C/C++ toolchain, CMake, Python 3 and the [Pico SDK](https://www.raspberrypi.com/documentation/microcontrollers/c_sdk.html) for firmware. Install [picotool](https://github.com/raspberrypi/picotool/blob/master/BUILDING.md) for UF2 conversion and board identification. Follow the official Raspberry Pi setup instructions for a matching SDK and C/C++ toolchain. Check `rustc --version`, `cargo --version`, `cmake --version`, `python3 --version` and `picotool version`. Point `PICO_SDK_PATH` at your installed SDK; for example, `export PICO_SDK_PATH="$HOME/pico-sdk"` if it is really there.
+Install [Rust and Cargo](https://rust-lang.org/tools/install/) for the server, and a C/C++ toolchain, CMake, Python 3.11 or newer, Git and the [Pico SDK](https://www.raspberrypi.com/documentation/microcontrollers/c_sdk.html) for firmware. Install [picotool](https://github.com/raspberrypi/picotool/blob/master/BUILDING.md) for UF2 conversion and board identification. Follow the official Raspberry Pi setup instructions for a matching SDK and C/C++ toolchain. Check `rustc --version`, `cargo --version`, `cmake --version`, `python3 --version`, `git --version` and `picotool version`. Point `PICO_SDK_PATH` at your installed SDK; for example, `export PICO_SDK_PATH="$HOME/pico-sdk"` if it is really there.
+The firmware build records the SDK checkout and its submodules. Use a complete Git checkout with initialized submodules, and keep the SDK and its submodules clean; an SDK installed without Git metadata cannot pass this build provenance check. Check `git -C "$PICO_SDK_PATH" status --porcelain` and `git -C "$PICO_SDK_PATH" submodule status --recursive` before building.
+
+The full offline check also requires `ffmpeg`, `ffprobe`, and GNU `nice`; FFmpeg must provide the MPEG-4 encoder used by the tests. Check `ffmpeg -version`, `ffprobe -version`, and `nice --version`. `ffmpeg -hide_banner -encoders | grep -E "(^|[[:space:]])mpeg4[[:space:]]"` should show an encoder line. YouTube playback additionally requires `yt-dlp`, FFmpeg and FFprobe; install a JavaScript runtime if your yt-dlp setup requires one.
 
 From the repository root, run `cargo fetch --locked --manifest-path service/Cargo.toml` once to download the locked dependencies. This requires network access. Subsequent gate checks and builds use `--offline --locked`.
+
+Before changing files, run `python3 tools/public_gate.py verify-source` from the distribution root to check the included manifest. Also compare the archive SHA256 through a trusted channel.
 
 ## 2. Configure the Linux server
 
@@ -36,33 +41,34 @@ Edit the copied `config.h`: replace `PM_DEVICE_ID`, HOME Wi-Fi SSID and password
 
 The `profile.txt` selects display type, SPI and button pins. A new `config.h` must not define those hardware macros or include another header. Only an LCD backlight's connection and polarity, or the E-ink panel connection, may vary by individual device. Connect the appropriate display power and common GND as specified by its module maker; check all GPIO against the [wiring table](hardware-support.en.md) before powering it.
 
-The real `board-id.txt` must contain the selected board's 16-digit Flash ID. Put only one Pico W in BOOTSEL mode and inspect `picotool info -d`; do not guess the ID. Keep `config.h` and the real board ID out of Git.
+The real `board-id.txt` must contain the selected board's 16-digit Flash ID. Put only one Pico W in BOOTSEL mode and inspect `picotool info -d`; do not guess the ID. Create `firmware/devices/<device>/board-id.txt` in a text editor and save only the confirmed 16 digits on one line. Keep `config.h` and the real board ID private.
 
 ## 4. Start with HOME
 
 Put the server and Pico W on a LAN where they can reach each other. `PM_HOME_SERVER_IP` in firmware must be the same address as the server's `bind`; allow TCP port `16153` between them and the browser you use for the web interface. The current server does not provide a built-in web login or PicoMado API key, so use a trusted LAN.
 
-## 5. Check whether you can build this source
+## 5. Check and build
 
-Source builds use the project gate. If you create a new wiring profile, keep its `.h` and `.board` files under `firmware/profiles/`, select it in `profile.txt`, and commit the new profile before building. The gate checks the source and binds the build to that profile; it does not certify your wiring on hardware. A separate review is required before installation.
-To check and build the source:
+From the distribution root, run the following after configuring the device. The check runs offline, including firmware host tests and Rust tests that use local loopback. The output and logs are private; they may contain local paths. Choose a fresh directory. For custom wiring, add the `.h` and `.board` profile files under `firmware/profiles/` and select them in `profile.txt`. The checks bind the build to the selected profile; they cannot verify your physical wiring.
 
 ```sh
-python3 tools/project_gate.py check
-python3 tools/project_gate.py build --kind server --build-dir /tmp/picomado-server-build
-python3 tools/project_gate.py record --build-receipt /tmp/picomado-server-build/build-receipt.json --artifact /tmp/picomado-server-build/release/picomado-server --kind server --out /tmp/picomado-server-build/candidate.json
 PM_DEVICE=my-pico
-firmware/tools/build.sh --device "$PM_DEVICE"
+PM_RUN=$(mktemp -d /tmp/picomado.XXXXXX)
+python3 tools/public_gate.py check --out "$PM_RUN/check"
+python3 tools/public_gate.py build --kind server --report "$PM_RUN/check/check.json" --build-dir "$PM_RUN/server"
+python3 tools/public_gate.py build --kind firmware --device "$PM_DEVICE" --report "$PM_RUN/check/check.json" --build-dir "$PWD/firmware/build/$PM_DEVICE"
+python3 tools/public_gate.py preflight --receipt "$PM_RUN/server/public-build.json"
+python3 tools/public_gate.py preflight --receipt "firmware/build/$PM_DEVICE/public-build.json"
 ```
 
-Use a fresh empty build directory each time. The server candidate is `/tmp/picomado-server-build/release/picomado-server`; the device candidate is `firmware/build/$PM_DEVICE/$PM_DEVICE.uf2`. `record` records a candidate; it does not approve one. Once a separate reviewer supplies `review.json` tied to that candidate and artifact, check the server with `python3 tools/project_gate.py preflight --candidate /tmp/picomado-server-build/candidate.json --review /tmp/picomado-server-build/review.json --artifact /tmp/picomado-server-build/release/picomado-server`, and the device with `flash.sh --verify-only`. Do not manufacture an approval file yourself. A passing build is not a physical display check.
+The firmware directory must be fresh. Before rebuilding, privately back up the earlier build directory and its sibling `firmware/build/$PM_DEVICE-configure.log` and `firmware/build/$PM_DEVICE-build.log`. Preflight checks source, toolchain, SDK, configuration and artifact identity. The files are local integrity records, not a security signature or independent review. A successful build does not establish physical operation.
 
-## 6. Install a checked candidate on your own new device
+## 6. Install on your own server and device
 
-The commands here are for the owner of the Linux server and Pico W **after** a matching candidate, independent review and `project_gate.py preflight` have succeeded.
+After both preflights succeed, install the checked server executable:
 
 ```sh
-PM_RELEASE_BIN=/tmp/picomado-server-build/release/picomado-server
+PM_RELEASE_BIN="$PM_RUN/server/release/picomado-server"
 mkdir -p "$HOME/.cargo/bin" "$HOME/.config/systemd/user"
 install -m 755 "$PM_RELEASE_BIN" "$HOME/.cargo/bin/picomado-server"
 cp -n service/deploy/picomado.service "$HOME/.config/systemd/user/picomado.service"
@@ -71,20 +77,20 @@ systemctl --user enable --now picomado.service
 systemctl --user is-active picomado.service
 ```
 
-The example unit's `ExecStart` points to `~/.cargo/bin/picomado-server`; edit your unit if you install elsewhere. Expect `active` from `is-active`. If startup fails, use `systemctl --user status picomado.service`, then check the TOML path, bind address and port. Open the web page at your configured IPv4 and port `16153`.
+The unit points to `~/.cargo/bin/picomado-server`. Expect `active`; otherwise inspect `systemctl --user status picomado.service` and your TOML configuration. Open the configured IPv4 and port `16153` on your trusted LAN.
 
-For the firmware, make sure the matching `candidate.json` and `review.json` are present and offline preflight succeeded. Connect **one** target Pico W in BOOTSEL mode. The first command only checks the board and artifact; the second writes and verifies the UF2:
+Connect exactly one Pico W in BOOTSEL mode. The first command checks the current device and artifact; the second repeats those checks, writes and verifies the UF2:
 
 ```sh
-firmware/tools/flash.sh --device "$PM_DEVICE" --check-only
-firmware/tools/flash.sh --device "$PM_DEVICE"
+python3 tools/public_gate.py flash --receipt "firmware/build/$PM_DEVICE/public-build.json" --device "$PM_DEVICE" --check-only
+python3 tools/public_gate.py flash --receipt "firmware/build/$PM_DEVICE/public-build.json" --device "$PM_DEVICE"
 ```
 
-Stop if the board ID, manifest, candidate or review does not match. After restart, check HOME Wi-Fi, server Hello, an actual image on the display and, where present, button input as separate observations. The zero-button E-ink profile has no button check.
+Stop on any mismatch. After restart, check HOME Wi-Fi, server Hello, the display and, where present, buttons separately. The zero-button E-ink profile has no button check.
 
 ## 7. Updating an existing device
 
-Begin with [backup and recovery](release-and-recovery.md#更新前の退避), not with the new-install copy commands. Keep a consistent copy of the old executable, config, SQLite database, plugin `data/`, and the old UF2 and manifest for the same device. Never copy just a live SQLite DB file. After preflight, update the server and device in separate steps and repeat web, HOME connection, drawing and input checks. Restore the saved combination if the update fails.
+Begin with [backup and recovery](release-and-recovery.en.md), not with the new-install copy commands. Keep a consistent copy of the old executable, config, SQLite database, plugin `data/`, and the old UF2 and manifest for the same device. Never copy just a live SQLite DB file. After the public preflight, update the server and device in separate steps and repeat web, HOME connection, drawing and input checks. Restore the saved combination if the update fails.
 
 ## 8. Optional AWAY connection
 

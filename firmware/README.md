@@ -4,7 +4,7 @@ PicoMado firmware runs on Raspberry Pi Pico W. It receives prepared images from 
 
 ## 対応構成
 
-現行プロファイルは Pico W の 160×80 ST7735S LCD・4 ボタンと、250×122 V4 E-ink・0／2 ボタンです。LCD 4 ボタンと E-ink 0 ボタンには実機確認記録があります。E-ink 2 ボタン構成も動作確認済みです。同じ表示器の配線を変える場合は新しいプロファイルを作れます。別の画面やマイコンを使う場合は[カスタマイズガイド](../docs/guides/customization.md)で必要な変更と検証を確認してください。
+現行プロファイルは Pico W の 160×80 ST7735S LCD・4 ボタンと、250×122 V4 E-ink・0／2 ボタンです。LCD 4 ボタンと E-ink 0／2 ボタン構成は動作確認済みです。同じ表示器の配線を変える場合は新しいプロファイルを作れます。別の画面やマイコンを使う場合は[カスタマイズガイド](../docs/guides/customization.md)で必要な変更と検証を確認してください。
 
 ## 配線
 
@@ -16,10 +16,6 @@ PicoMado firmware runs on Raspberry Pi Pico W. It receives prepared images from 
 
 ## ビルド・書込み・確認
 
-ソースからのビルドは root gate に結び付く `firmware/tools/build.sh`、対象確認と書込みは `firmware/tools/flash.sh` を使用します。依存ツール、候補記録、独立レビュー、offline preflight、BOOTSEL 照合、画面とボタンの確認は[初回設定](../docs/guides/first-setup.md#5-ビルドできる配布物か確認する)の順に進めてください。既存端末には先に[退避と復旧](../docs/guides/release-and-recovery.md)を適用します。サンプルの Wi-Fi 値と UF2 は実機用ではありません。
+ソースからの検査、ビルド、対象確認と書込みは [初回設定](../docs/guides/first-setup.md#5-検査してビルドする) の順に行います。既存端末は先に[退避と復旧](../docs/guides/release-and-recovery.md)を確認します。
 
 Pico W は HOME でサーバの `/device` WebSocket に接続します。AWAY には別プロジェクトの Android EEX1 アプリ、テザリング、TailSocks/SOCKS5 経路が必要です。このリポジトリだけでは AWAY の一式は揃いません。実機未確認の構成をビルド成功だけで対応済みとしません。
-
-## 過去の記録
-
-旧 SDK 場所、直接変換・書込み例、日付付きの実機観測は[開発履歴](history/development-record-before-20261027.md)に保全しました。そこにある「現在」は各記録時点の状態です。現行の導入手順として実行しないでください。

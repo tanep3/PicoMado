@@ -13,6 +13,5 @@
 - [好きな言葉のプラグインを作る](plugin-author.md)
 - [Make a favorite words plugin (English)](plugin-author.en.md)
 - [更新前の退避と復旧](release-and-recovery.md)
+- [Updates and recovery (English)](release-and-recovery.en.md)
 - [風刺画のプロンプトを編集する](caricature-prompts.md)
-- [自宅・外出先接続 技術検証ガイド](home-away-connectivity-technical-guide.md)
-- [次回の反映・退避・復旧・採取手順](refactor-rollout-runbook.md)

@@ -6,16 +6,16 @@ Web 画面に言葉を入力し、プレビューを見て保存すると、160�
 
 ## 1. 同梱サンプルを試す
 
-[初回設定](first-setup.md)の準備を済ませ、リポジトリのルートで作業します。同梱コードと登録は完成済みです。以下の自作手順のコードを重複して追加しないでください。ソースを変更した場合は必要なファイルをローカル Git にコミットし、作業ツリーをクリーンにします。秘密設定や実機 ID は追加しません。
+[初回設定](first-setup.md)の準備を済ませ、リポジトリのルートで作業します。同梱コードと登録は完成済みです。以下の自作手順のコードを重複して追加しないでください。変更したソースは再検査します。秘密設定や実機 ID は公開しません。
 
 ```sh
 PM_RUN=$(mktemp -d /tmp/picomado-word.XXXXXX)
-python3 tools/project_gate.py check --out "$PM_RUN/check"
-python3 tools/project_gate.py build --kind server --features word-tutorial --report "$PM_RUN/check/check.json" --build-dir "$PM_RUN/build"
-python3 tools/project_gate.py record --kind server --report "$PM_RUN/check/check.json" --build-receipt "$PM_RUN/build/build-receipt.json" --artifact "$PM_RUN/build/release/picomado-server" --out "$PM_RUN/build/candidate.json"
+python3 tools/public_gate.py check --out "$PM_RUN/check"
+python3 tools/public_gate.py build --kind server --features word-tutorial --report "$PM_RUN/check/check.json" --build-dir "$PM_RUN/build"
+python3 tools/public_gate.py preflight --receipt "$PM_RUN/build/public-build.json"
 ```
 
-[初回設定](first-setup.md)の候補記録と別の確認者によるレビュー・preflight を行い、このビルドの `"$PM_RUN/build/release/picomado-server"` を導入します。現在、初回導入の gate には作者のローカル証拠に依存する未解決の問題があります。その場合は導入済みとせず、エラーと不足している証拠を確認してください。
+[初回設定](first-setup.md)の導入手順に従い、検査した `"$PM_RUN/build/release/picomado-server"` を利用します。既存の稼働環境を更新する場合は先に設定とデータを退避してください。
 
 Web ホームの「好きな言葉」の「編集」を開き、言葉を入力します。ブラウザの日本語フォントで描かれたプレビューが読めることを確認して「保存して端末に反映」を押します。画面に収まらない文字列は短くしてください。プレビューに豆腐が出る場合はブラウザ側に日本語フォントを用意します。接続済み LCD で「好きな言葉」を選ぶと、保存した画像が表示されます。表示中なら保存時に更新されます。設定は保存され、再起動後も残ります。毎回ビルドする必要はありません。
 
@@ -184,4 +184,4 @@ impl ContentPlugin for WordContent {
 
 ## 5. 変更して学ぶ
 
-Web 画面の言葉は再ビルドせず何度でも変更できます。文字サイズや位置を変えるには `renderWords()` の `24px`、`x`、`y` を変更し、160×80 の境界確認とプレビューも合わせて調整します。コード変更はコミットしてから手順 1 で再ビルドし、初回設定のレビュー・導入手順を踏みます。ブラウザで保存後、端末の表示と、リロード後にも言葉が残ることを確認してください。
+Web 画面の言葉は再ビルドせず何度でも変更できます。文字サイズや位置を変えるには `renderWords()` の `24px`、`x`、`y` を変更し、160×80 の境界確認とプレビューも合わせて調整します。コード変更後は手順 1 で再検査・再ビルドし、初回設定の導入手順を踏みます。ブラウザで保存後、端末の表示と、リロード後にも言葉が残ることを確認してください。
