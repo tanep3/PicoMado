@@ -378,6 +378,7 @@ fn owner_panic_does_not_silently_publish_or_lend_mutable_state() {
 
 async fn wait_persist_frame(
     recorded: &Arc<std::sync::Mutex<Vec<Message>>>,
+    app: &SharedApp,
     from: usize,
     expected_bytes: usize,
 ) -> (crate::FrameToken, usize) {
@@ -385,16 +386,22 @@ async fn wait_persist_frame(
         loop {
             let rows = recorded.lock().unwrap().clone();
             let mut assembler = FrameAssembler::default();
-            for row in &rows[from..] {
+            let mut collecting = false;
+            for (index, row) in rows.iter().enumerate().skip(from) {
                 if let Message::Binary(bytes) = row {
                     for message in Decoder::default().push(bytes).unwrap() {
-                        if matches!(
-                            message,
-                            WireMessage::FrameStart { .. } | WireMessage::FrameChunk { .. }
-                        ) {
+                        match &message {
+                            WireMessage::FrameStart { token, .. } => {
+                                collecting = app.read().unwrap().frame_is_current(token);
+                                assembler.reset();
+                            }
+                            WireMessage::FrameChunk { .. } => {}
+                            _ => continue,
+                        }
+                        if collecting {
                             if let Some((token, pixels)) = assembler.accept(message).unwrap() {
                                 assert_eq!(pixels.len(), expected_bytes);
-                                return (token, rows.len());
+                                return (token, index + 1);
                             }
                         }
                     }
@@ -600,6 +607,7 @@ async fn sqlite_wait_allows_native_static_browse_ack_and_merges_fresh_latest_wit
                 );
                 let (frame, end) = wait_persist_frame(
                     &recorded,
+                    &app,
                     offset,
                     if screen == "eink" { 3813 } else { 25600 },
                 )
@@ -636,6 +644,7 @@ async fn sqlite_wait_allows_native_static_browse_ack_and_merges_fresh_latest_wit
                 );
                 let (frame, end) = wait_persist_frame(
                     &recorded,
+                    &app,
                     offset,
                     if screen == "eink" { 3813 } else { 25600 },
                 )
@@ -696,6 +705,7 @@ async fn sqlite_wait_allows_native_static_browse_ack_and_merges_fresh_latest_wit
                 );
                 let (frame, _) = wait_persist_frame(
                     &recorded,
+                    &app,
                     offset,
                     if screen == "eink" { 3813 } else { 25600 },
                 )

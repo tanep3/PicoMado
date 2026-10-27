@@ -19,7 +19,7 @@
   "design_artifacts": [
     "docs/changes/PUBLIC-WORD-WEB-20261027.md"
   ],
-  "design_commit": "f4e28d5",
+  "design_commit": "0d2837f",
   "domain_authority": "docs/changes/PUBLIC-WORD-WEB-20261027.md",
   "standard": "development/standard/v1/standard.md",
   "status": "in_progress",
@@ -29,7 +29,7 @@
       "evidence": [
         {
           "kind": "commit",
-          "commit": "f4e28d5"
+          "commit": "0d2837f"
         }
       ]
     },

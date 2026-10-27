@@ -143,13 +143,15 @@ impl ContentPlugin for WordContent {
 
 ## 4. Web UI and image creation
 
-This is the UI function in `service/src/ui.html`. `textField`, `section`, `managedViews`, and `managedCommand` are shared helpers in the same file. `managedCommand` posts `{expected_revision, command}` to the existing API and displays conflicts. User text stays in input values rather than being inserted as HTML.
+This is the UI function in `service/src/ui.html`. `textField`, `section`, `managedViews`, and `managedCommand` are shared helpers in the same file. The draft retains the revision from the first edit; conflicts preserve the input. Reload to fetch the latest saved value.
+
+`managedCommand` posts `{expected_revision, command}` to the existing API and displays conflicts. User text stays in input values rather than being inserted as HTML.
 
 ```javascript
     function renderWords(){
       const view=managedViews['my-words'];if(!view)return;
       const panel=section('好きな言葉','入力してプレビューを確認し、保存すると表示中の LCD に反映されます。','plugin-card');
-      const form=el('form'), input=textField(form,'言葉（40文字まで）','text',drafts.words??view.data.words,true);
+      const form=el('form'), input=textField(form,'言葉（40文字まで）','text',drafts.words?.value??view.data.words,true);
       input.maxLength=40;input.autocomplete='off';
       const canvas=el('canvas');canvas.width=160;canvas.height=80;canvas.style.width='320px';canvas.style.maxWidth='100%';canvas.style.imageRendering='pixelated';
       canvas.setAttribute('aria-label','表示プレビュー');form.append(canvas);
@@ -157,20 +159,24 @@ This is the UI function in `service/src/ui.html`. `textField`, `section`, `manag
       const save=button('保存して端末に反映','primary');save.type='submit';form.append(save);panel.append(form);
       const ctx=canvas.getContext('2d');
       function preview(){
-        const words=input.value;drafts.words=words;
+        const words=input.value;
         ctx.fillStyle='#102030';ctx.fillRect(0,0,160,80);ctx.font='bold 24px "Noto Sans CJK JP", "Noto Sans JP", sans-serif';ctx.textBaseline='alphabetic';
         const m=ctx.measureText(words),x=8,y=40;
-        const valid=words.trim().length>0 && Array.from(words).length<=40 && new TextEncoder().encode(words).length<=160 && !/[\x00-\x1f\x7f]/.test(words) &&
+        const valid=words.trim().length>0 && Array.from(words).length<=40 && new TextEncoder().encode(words).length<=160 && !/\p{Cc}/u.test(words) &&
           x-m.actualBoundingBoxLeft>=0 && x+m.actualBoundingBoxRight<=160 && y-m.actualBoundingBoxAscent>=0 && y+m.actualBoundingBoxDescent<=80;
-        input.setCustomValidity(valid?'':'文字が空か長すぎます。画面に収まる言葉を入力してください。');
+        const error=/\p{Cc}/u.test(words)?'制御文字は使用できません。':'文字が空か長すぎます。画面に収まる言葉を入力してください。';
+        input.setCustomValidity(valid?'':error);
         ctx.fillStyle='#ffffff';ctx.fillText(words,x,y);
-        message.textContent=valid?'文字が正しく表示されているか確認してください。':'文字が空か長すぎます。画面に収まる言葉を入力してください。';
+        message.textContent=valid?'文字が正しく表示されているか確認してください。':error;
         save.disabled=!valid;return valid;
       }
-      input.addEventListener('input',preview);preview();
+      input.addEventListener('input',()=>{drafts.words={value:input.value,revision:drafts.words?.revision??view.revision};preview()});preview();
       form.onsubmit=async event=>{event.preventDefault();if(!preview()||!form.reportValidity())return;
-        const png=canvas.toDataURL('image/png').split(',')[1];
-        if(await managedCommand('my-words',{kind:'save',words:input.value,png},'言葉を保存しました')){delete drafts.words;render()}
+        const png=canvas.toDataURL('image/png').split(',')[1],revision=drafts.words?.revision??view.revision;
+        drafts.words??={value:input.value,revision};
+        input.disabled=save.disabled=true;
+        if(await managedCommand('my-words',{kind:'save',words:input.value,png},'言葉を保存しました',revision)){delete drafts.words;render()}
+        else{input.disabled=false;preview()}
       };
     }
 ```
