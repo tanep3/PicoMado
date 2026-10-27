@@ -4,31 +4,51 @@
 
 Build a little device for your desk, then keep making it yours. PicoMado puts a tiny screen and physical buttons in your hands. Its plugins give it something new to show long after the hardware is assembled.
 
+![Three PicoMado devices: a color LCD playing video, an E-ink clock, and an E-ink drawing](docs/media/picomado-devices.jpg)
+
+*Three built devices, photographed together. The screens show different plugins.*
+
 PicoMado already has five built-in experiences:
 
 ### YouTube on a tiny LCD
 
 Choose a video in the web interface, prepare it on the server, then watch it play on the 160×80 LCD. Saved sources and frame-rate variants can be managed in the browser. This feature uses the LCD; the small screen is part of the fun, not a replacement for a full-size player.
 
+![PicoMado LCD device playing a video](docs/media/youtube-lcd.jpg)
+
+*The upper LCD is playing video. The E-ink device underneath is showing a different plugin.*
+
 ### Weather to glance at
 
 Leave the Japanese forecast on your desk and use the device controls to browse its days. The server refreshes the forecast from JMA data; the screen gives you a quick view without opening another app.
 
+![PicoMado weather forecast on LCD and E-ink devices](docs/media/weather-lcd-eink.jpg)
+
+*The same forecast plugin on color LCD and E-ink.*
+
 ### Rain radar you can step through
 
-See a compact map of Japanese precipitation and move through the available times. The image below is an actual **software render preview** of the LCD output, not a device photo.
+See a compact map of Japanese precipitation and move through the available times.
 
-![Rain radar LCD render preview](service/assets/radar-lcd-preview.png)
+![PicoMado rain radar on LCD and E-ink devices](docs/media/rain-radar-lcd-eink.jpg)
+
+*Rain radar on both screens. The time and map are from the moment the photo was taken.*
 
 ### Caricatures to make and revisit
 
 Start a drawing from a news topic or your own words in the web interface. The finished image appears on the device, and you can browse saved work later. Generation requires separate server-side tools and settings.
 
+![PicoMado caricature drawings on LCD and E-ink devices](docs/media/caricature-lcd-eink.jpg)
+
+*The drawing plugin gives the two screen types different presentations of saved work.*
+
 ### A clock that belongs on the desk
 
-Show the date, an analog face and 24-hour time. The image below is an actual **software render preview** of the LCD output, not a device photo.
+Show the date, an analog face and 24-hour time.
 
-![Clock LCD render preview](service/assets/clock-lcd-preview.png)
+![PicoMado clock on LCD and E-ink devices](docs/media/clock-lcd-eink.jpg)
+
+*Two clock displays, photographed while running; the date and time are examples from the photo.*
 
 ## Make it yours
 
