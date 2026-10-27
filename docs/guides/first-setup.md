@@ -4,7 +4,7 @@
 
 ## 1. 自分の環境を確認する
 
-サーバ用の Rust と Cargo、ファーム用の C/C++ コンパイラ、CMake、Python 3、Pico SDK、UF2 変換とボード確認用の `picotool` を用意します。入手先は各ツールの公式配布元を確認し、バージョンは利用する Pico SDK の要件と照合してください。`rustc --version`、`cargo --version`、`cmake --version`、`python3 --version`、`picotool version` で実行できるか確認します。端末で `echo "$HOME"` を実行し、自分のホームディレクトリも確認します。Pico SDK の実際の場所を `PICO_SDK_PATH` に指定します。例: `export PICO_SDK_PATH="$HOME/pico-sdk"`。風刺画プラグインは追加の実行環境が必要です。使う場合だけ [サービスの説明](../../service/README.md) を参照してください。
+サーバ用の [Rust と Cargo](https://rust-lang.org/tools/install/)、ファーム用の C/C++ コンパイラ、CMake、Python 3、[Pico SDK](https://www.raspberrypi.com/documentation/microcontrollers/c_sdk.html)、UF2 変換とボード確認用の [picotool](https://github.com/raspberrypi/picotool/blob/master/BUILDING.md) を用意します。C/C++ ツールと Pico SDK の導入は Raspberry Pi の公式手順に従い、利用する SDK の要件に合う版を選んでください。`rustc --version`、`cargo --version`、`cmake --version`、`python3 --version`、`picotool version` で実行できるか確認します。端末で `echo "$HOME"` を実行し、自分のホームディレクトリも確認します。Pico SDK の実際の場所を `PICO_SDK_PATH` に指定します。例: `export PICO_SDK_PATH="$HOME/pico-sdk"`。風刺画プラグインは追加の実行環境が必要です。使う場合だけ [サービスの説明](../../service/README.md) を参照してください。
 
 ## 2. サーバの設定を作る
 
