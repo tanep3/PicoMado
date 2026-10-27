@@ -47,7 +47,7 @@ The server prepares images and media; the Pico W receives them, draws them and r
 
 ## Choose a build
 
-The supported profiles are Pico W with a 160×80 ST7735S LCD and four buttons, or Pico W with a 250×122 V4 E-ink display and zero or two buttons. The LCD four-button and E-ink zero-button builds have physical verification records. A complete E-ink two-button device has not yet passed physical acceptance. [Check exact parts, wiring and status](docs/guides/hardware-support.md) before buying or connecting components. Pico 2 W, other screens and arbitrary button layouts are not supported.
+The supported profiles are Pico W with a 160×80 ST7735S LCD and four buttons, or Pico W with a 250×122 V4 E-ink display and zero or two buttons. The LCD four-button and E-ink zero-button builds have physical verification records. A complete E-ink two-button device has not yet passed physical acceptance. [Check exact parts, wiring and status](docs/guides/hardware-support.en.md) before buying or connecting components. Pico 2 W, other screens and arbitrary button layouts are not supported.
 
 ## Get started
 
