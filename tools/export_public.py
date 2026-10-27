@@ -12,26 +12,22 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLE_DIRS = {'sample-a', 'sample-b', 'E-ink_0', 'E-ink_1', 'custom-wiring'}
 GUIDES = {'README.md', 'first-setup.md', 'first-setup.en.md', 'hardware-support.md', 'hardware-support.en.md', 'customization.md', 'customization.en.md', 'plugin-author.md', 'plugin-author.en.md', 'release-and-recovery.md', 'release-and-recovery.en.md', 'caricature-prompts.md'}
-EXACT = {'.gitignore', 'README.md', 'README.ja.md', 'LICENSE', 'firmware/CMakeLists.txt', 'firmware/diagnostics/backlight-polarity/main.c', 'firmware/lwipopts.h', 'firmware/README.md', 'service/README.md', 'service/Cargo.toml', 'service/Cargo.lock', 'contracts/observation-domain.json', 'contracts/development-boundaries.json', 'development/standard/v1/check.py', 'development/standard/v1/generate.py', 'tools/generate_observation.py', 'tools/build_lineage.py', 'tools/public_gate.py', 'tests/test_public_gate.py', 'tests/test_hardware_profile_validation.py', 'docs/design/eex1-endpoint-discovery.md'}
+EXACT = {'.gitignore', 'README.md', 'README.ja.md', 'LICENSE', 'firmware/CMakeLists.txt', 'firmware/diagnostics/backlight-polarity/main.c', 'firmware/lwipopts.h', 'firmware/README.md', 'service/README.md', 'service/Cargo.toml', 'service/Cargo.lock', 'contracts/observation-domain.json', 'contracts/development-boundaries.json', 'development/standard/v1/check.py', 'development/standard/v1/generate.py', 'tools/generate_observation.py', 'tools/build_lineage.py', 'tests/test_hardware_profile_validation.py', 'docs/design/eex1-endpoint-discovery.md'}
 PREFIXES = ('firmware/src/', 'firmware/profiles/', 'firmware/tests/', 'firmware/tools/', 'service/src/', 'service/tests/', 'service/assets/', 'service/deploy/', 'service/examples/', 'service/tools/', 'docs/media/')
-EXCLUDE = {'firmware/tools/build.sh', 'firmware/tools/flash.sh'}
 
 
 def selected(name):
-    if name in EXCLUDE: return False
     if name in EXACT: return True
     if name.startswith('docs/guides/'): return name.removeprefix('docs/guides/') in GUIDES
     if name.startswith('firmware/devices/'):
         parts = name.split('/')
-        return len(parts) == 4 and parts[2] in SAMPLE_DIRS and parts[3] in {'config.sample.h', 'board-id.sample.txt', 'profile.txt'}
+        return len(parts) == 4 and parts[2] in SAMPLE_DIRS and parts[3] in {'config.sample.h', 'profile.txt'}
     return name.startswith(PREFIXES)
 
 
 def main():
     os.umask(0o077)
-    parser = argparse.ArgumentParser(); parser.add_argument('--out', required=True); parser.add_argument('--allow-dirty', action='store_true', help='private testing only; never publish this output'); args = parser.parse_args()
-    dirty = bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT).strip())
-    if dirty and not args.allow_dirty: raise SystemExit('commit source changes before creating a distribution')
+    parser = argparse.ArgumentParser(); parser.add_argument('--out', required=True); args = parser.parse_args()
     out = Path(args.out).resolve()
     if out.exists() or out.is_relative_to(ROOT): raise SystemExit('choose a fresh output outside the source tree')
     data = subprocess.check_output(['git', 'ls-files', '-z'], cwd=ROOT)
@@ -80,7 +76,6 @@ def main():
     except BaseException:
         shutil.rmtree(out)
         raise
-    if dirty: print('WARNING: uncommitted source; private testing only')
     print('Private staging tree created:', out)
     print('Review privacy, links and tests before distribution; this output is not an approval.')
 

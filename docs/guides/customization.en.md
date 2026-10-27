@@ -6,7 +6,7 @@ PicoMado combines a screen, buttons and a Pico W into a device you can make your
 
 | Goal | Starting point | Current boundary |
 | --- | --- | --- |
-| Set your Wi-Fi, server address and device name | `firmware/devices/<device>/config.h`, `board-id.txt` | Individual device setup in the [first setup guide](first-setup.en.md) |
+| Set your Wi-Fi, server address and device name | `firmware/devices/<device>/config.h` | Individual device setup in the [first setup guide](first-setup.en.md) |
 | Set LCD backlight connection and polarity, or E-ink panel connection | The same `config.h` | Allowed per-device hardware options; a disconnected panel does not prove drawing |
 | Choose plugins, caricature topics and drawing styles | PicoMado Web UI | Does not change firmware hardware definitions |
 | Move GPIO or same-kind button wiring | `firmware/profiles/*.h` and the validation/build path | Create a new profile and check wiring and build; cannot be overridden in device `config.h` |
@@ -16,7 +16,7 @@ Adding screen, SPI or button macros, an `#include`, or conditional directives to
 
 ## Pico 2 W
 
-The current Pico W profiles identify their board as `pico_w`. The current MCU implementation supports Pico W. A Pico 2 W needs its SDK board setting, CYW43/network path, Flash ID and UF2 checks, memory and timing checked on that board, followed by a distinct profile and physical acceptance. Parts of the display and server message contract may be reusable; the device port has not been done.
+The current Pico W profiles identify their board as `pico_w`. The current MCU implementation supports Pico W. A Pico 2 W needs its SDK board setting, CYW43/network path, UF2 format, memory and timing checked on that board, followed by a distinct profile and physical acceptance. Parts of the display and server message contract may be reusable; the device port has not been done.
 
 ## Another screen or size
 
@@ -30,13 +30,13 @@ Moving pins without changing the button count still requires a new profile and a
 
 ## ESP32 or another MCU
 
-An ESP32 cannot use the Pico SDK, Pico W CYW43 path, SPI and USB CDC integration, Flash ID and UF2 checks, or build/flash scripts unchanged. It needs a device port covering display, buttons, Wi-Fi/WebSocket, persistent state, build and recovery. The server message format and plugin roles can guide the design, but no ESP32 implementation or physical acceptance exists here yet.
+An ESP32 cannot use the Pico SDK, Pico W CYW43 path, SPI and USB CDC integration, UF2 format, or build/flash scripts unchanged. It needs a device port covering display, buttons, Wi-Fi/WebSocket, persistent state, build and recovery. The server message format and plugin roles can guide the design, but no ESP32 implementation or physical acceptance exists here yet.
 
 ## Validate a new configuration
 
 1. Record the exact parts, voltage, wiring, pixel format and controls, and compare them with a registered profile.
 2. For wiring changes with the same display and button count, copy an existing `.h` and `.board` profile under a new name, change GPIO values and put that name on one line in `firmware/devices/<device>/profile.txt`. Add an implementation when changing the display or MCU.
 3. Follow [first setup](first-setup.en.md) to check and build. On validation errors, check GPIO collisions, Pico W SPI pins, and the display/button combination.
-4. After the owner has backed up and completed preflight, physically check supply/GND/GPIO, first drawing, buttons, HOME connection, plugin images and recovery. Record the build result separately from physical acceptance.
+4. After backing up, physically check supply/GND/GPIO, first drawing, buttons, HOME connection, plugin images and recovery. Record the build result separately from physical acceptance.
 
 For a build using a registered profile, use [first setup](first-setup.en.md) and the [current hardware table](hardware-support.en.md).

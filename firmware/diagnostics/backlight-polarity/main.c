@@ -4,7 +4,6 @@
 #include <string.h>
 #include "pico/stdlib.h"
 #include "pico/stdio_usb.h"
-#include "pico/unique_id.h"
 #include "pico/cyw43_arch.h"
 #include "core.h"
 #include "lcd.h"
@@ -26,19 +25,8 @@ static void report(const char *reason){
 static void select_level(bool high,const char *reason){
     requested_high=high;gpio_put(22,high);report(reason);
 }
-static bool matching_board(void){
-    char id[2*PICO_UNIQUE_BOARD_ID_SIZE_BYTES+1];pico_get_unique_board_id_string(id,sizeof id);
-    const char *expected=PM_EXPECTED_BOARD_ID;
-    if(strlen(id)!=strlen(expected))return false;
-    for(size_t i=0;i<strlen(id);i++){
-        char a=id[i],b=expected[i];if(a>='a'&&a<='f')a-=32;if(b>='a'&&b<='f')b-=32;
-        if(a!=b)return false;
-    }
-    return true;
-}
 int main(void){
     stdio_init_all();
-    if(!matching_board()){puts("blk-polarity: wrong board; GPIO untouched");while(true)sleep_ms(1000);}
     // Keep the usual CYW43-before-LCD power/init order fixed for both levels.
     // No SSID join, proxy/server connection, or standby transition is used.
     if(cyw43_arch_init()){puts("blk-polarity: chip init failed; BLK untouched");while(true)sleep_ms(1000);}

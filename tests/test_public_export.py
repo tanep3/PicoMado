@@ -12,15 +12,15 @@ spec.loader.exec_module(export)
 
 class ExportPolicyTests(unittest.TestCase):
     def test_required_assets_and_docs_are_selected(self):
-        for name in ['LICENSE', 'README.md', 'service/Cargo.lock', 'service/src/word.rs', 'service/assets/word-card.png', 'service/assets/NOTO-COPYRIGHT', 'firmware/diagnostics/backlight-polarity/main.c', 'firmware/profiles/pico_w_lcd_160x80_4.h', 'firmware/devices/sample-a/config.sample.h', 'docs/guides/plugin-author.en.md', 'docs/media/picomado-devices.jpg', 'tools/public_gate.py']:
+        for name in ['LICENSE', 'README.md', 'service/Cargo.lock', 'service/src/word.rs', 'service/assets/word-card.png', 'service/assets/NOTO-COPYRIGHT', 'firmware/diagnostics/backlight-polarity/main.c', 'firmware/profiles/pico_w_lcd_160x80_4.h', 'firmware/devices/sample-a/config.sample.h', 'docs/guides/plugin-author.en.md', 'docs/media/picomado-devices.jpg', 'firmware/tools/build.sh']:
             self.assertTrue(export.selected(name), name)
 
     def test_internal_records_and_device_settings_are_excluded(self):
-        for name in ['.git/config', 'docs/changes/private.json', 'docs/checkpoints/private.json', 'firmware/devices/mine/config.h', 'firmware/devices/mine/board-id.txt', 'firmware/devices/mine/profile.txt', 'firmware/devices/sample-a/config.h', 'firmware/tools/flash.sh', 'service/history/private.md']:
+        for name in ['.git/config', 'docs/changes/private.json', 'docs/checkpoints/private.json', 'firmware/devices/mine/config.h', 'firmware/devices/mine/board-id.txt', 'firmware/devices/mine/profile.txt', 'firmware/devices/sample-a/config.h', 'service/history/private.md']:
             self.assertFalse(export.selected(name), name)
 
     def test_selected_inputs_are_scrubbed_and_history_is_absent(self):
-        with tempfile.TemporaryDirectory() as tmp, patch('sys.argv', ['export_public.py', '--allow-dirty', '--out', str(Path(tmp)/'candidate')]):
+        with tempfile.TemporaryDirectory() as tmp, patch('sys.argv', ['export_public.py', '--out', str(Path(tmp)/'candidate')]):
             export.main()
             out = Path(tmp)/'candidate'
             self.assertFalse((out/'.git').exists())

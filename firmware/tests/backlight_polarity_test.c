@@ -19,7 +19,7 @@ bool stdio_usb_connected(void){return true;}
 int cyw43_arch_init(void){chip_inits++;return 0;}
 void cyw43_arch_enable_sta_mode(void){sta_enables++;}
 void cyw43_arch_poll(void){}
-void pico_get_unique_board_id_string(char *id,size_t n){assert(n>=17);memcpy(id,PM_EXPECTED_BOARD_ID,17);}
+void pico_get_unique_board_id_string(char *id,size_t n){(void)id;(void)n;assert(!"diagnostic must not require a physical board ID");}
 void pm_lcd_init(void){inits++;}
 uint32_t pm_lcd_fixed_test_frame(void){assert(!draws);draws++;return 0x20ac31e9;}
 uint32_t pm_lcd_last_frame_baud(void){return 15625000;}

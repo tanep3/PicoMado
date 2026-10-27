@@ -6,7 +6,7 @@ PicoMado は画面、ボタン、Pico W の役割を組み合わせた自作端�
 
 | やりたいこと | 最初に見る場所 | 現在の扱い |
 | --- | --- | --- |
-| Wi-Fi、接続先、端末名を自分用にする | `firmware/devices/<端末名>/config.h`、`board-id.txt` | [初回設定](first-setup.md)の個体設定で対応 |
+| Wi-Fi、接続先、端末名を自分用にする | `firmware/devices/<端末名>/config.h` | [初回設定](first-setup.md)の個体設定で対応 |
 | LCD バックライトの接続有無・極性、E-ink パネルの接続有無を設定する | 同じ `config.h` | 個体ごとに許されたハード設定。パネル未接続は表示成功を意味しない |
 | 機能の選択、風刺画の題材・画風などを変える | PicoMado の Web UI | ファームのハード定義を変更しない |
 | GPIO や同じ種類のボタン配線を変える | `firmware/profiles/*.h` と検査・ビルド導線 | 新しい profile を作り、配線とビルドを確認する。個体 `config.h` では上書きできない |
@@ -30,7 +30,7 @@ Pico W 用 profile の `.board` は `pico_w` です。現行ファームの MCU 
 
 ## ESP32 など別のマイコンにしたい
 
-ESP32 には Pico SDK と Pico W の CYW43、SPI、USB CDC、Flash ID、UF2、ビルド・書込み手順をそのまま使えません。表示・ボタン・Wi-Fi／WebSocket・保存領域・起動／復旧の移植設計が必要です。サーバとのメッセージ形式やプラグインの役割は設計の起点にできますが、ESP32 版は現時点で実装・検証されていません。
+ESP32 には Pico SDK と Pico W の CYW43、SPI、USB CDC、UF2、ビルド・書込み手順をそのまま使えません。表示・ボタン・Wi-Fi／WebSocket・保存領域・起動／復旧の移植設計が必要です。サーバとのメッセージ形式やプラグインの役割は設計の起点にできますが、ESP32 版は現時点で実装・検証されていません。
 
 ## 新しい構成を確認する順序
 

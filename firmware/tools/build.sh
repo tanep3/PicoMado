@@ -20,29 +20,27 @@ build_dir="$root/build/$device"
 if [[ $sample == ON ]]; then build_dir="$root/build/.samples/$device"; fi
 if [[ $unbound == ON ]]; then build_dir="$root/build/.unbound/$device"; fi
 if [[ $panel == ON ]]; then build_dir="$root/build/.unbound-panel/$device"; fi
-python3 "$root/../tools/project_gate.py" verify-check
 if [[ -n ${PM_BUILD_DIR:-} ]]; then build_dir=$PM_BUILD_DIR; fi
-mode=normal
-if [[ $sample == ON ]]; then mode=sample; fi
-if [[ $unbound == ON ]]; then mode=unbound; fi
-if [[ $panel == ON ]]; then mode=unbound_panel; fi
-umask 077
-python3 "$root/../tools/project_gate.py" build --kind firmware --device "$device" --mode "$mode" --build-dir "$build_dir"
-board_file="$root/devices/$device/board-id.txt"
-if [[ $sample == ON ]]; then board_file="$root/devices/$device/board-id.sample.txt"; fi
-if [[ $unbound == ON ]]; then board=0000000000000000; sample=UNBOUND;
-else board=$(tr -d '\r\n' < "$board_file"); fi
-if [[ $panel == ON ]]; then sample=UNBOUND-PANEL; fi
-profile=$(tr -d '\r\n' < "$root/devices/$device/profile.txt")
+profile_file="$root/devices/$device/profile.txt"
+[[ -f $profile_file ]] || { echo 'hardware profile is missing' >&2; exit 2; }
+profile=$(tr -d '\r\n' < "$profile_file")
 if [[ ! $profile =~ ^[A-Za-z0-9_-]+$ || ! -f $root/profiles/$profile.h || ! -f $root/profiles/$profile.board ]]; then
   echo 'invalid or missing hardware profile' >&2; exit 2
 fi
-profile_hash=$(sha256sum "$root/profiles/$profile.h" | cut -d' ' -f1)
-hash=$(sha256sum "$build_dir/$device.uf2" | cut -d' ' -f1)
-printf '%s %s %s %s %s %s\n' "$sample" "$device" "$board" "$hash" "$profile" "$profile_hash" > "$build_dir/manifest.txt"
+board=$(tr -d '\r\n' < "$root/profiles/$profile.board")
+if [[ $board != pico_w ]]; then echo 'MCU board implementation unavailable: only pico_w is implemented' >&2; exit 2; fi
+target=picomado_lcd
+if grep -Eq '^[[:space:]]*#define[[:space:]]+PM_DISPLAY_TYPE[[:space:]]+PM_DISPLAY_EINK\b' "$root/profiles/$profile.h"; then target=picomado_eink; fi
+options=()
+for flag in PM_ACK_PATH_PROBE PM_USB_BUTTON_SIM PM_TX_LINK_PROBE PM_CYW43_INNER_PROBE PM_CYW43_SPI_REAL_SIZE PM_EVENT_STREAM PM_STREAM_DIAGNOSTICS; do
+  if [[ -v $flag ]]; then
+    value=${!flag}
+    [[ $value == ON || $value == OFF ]] || { echo "$flag must be ON or OFF" >&2; exit 2; }
+    options+=("-D$flag=$value")
+  fi
+done
+cmake -S "$root" -B "$build_dir" -DPM_DEVICE="$device" -DPICO_BOARD="$board" \
+  -DPM_USE_SAMPLE="$sample" -DPM_PREPARE_UNBOUND="$unbound" -DPM_PREPARE_UNBOUND_PANEL="$panel" \
+  -DCMAKE_BUILD_TYPE=Release "${options[@]}"
+cmake --build "$build_dir" --target "$target" -j4
 printf 'UF2: %s\n' "$build_dir/$device.uf2"
-
-if [[ $sample == OFF && $unbound == OFF ]]; then
-  python3 "$root/../tools/project_gate.py" record --build-receipt "$build_dir/build-receipt.json" --artifact "$build_dir/$device.uf2" --kind firmware \
-    --device "$device" --board-id "$board_file" --config "$root/devices/$device/config.h" --out "$build_dir/candidate.json"
-fi

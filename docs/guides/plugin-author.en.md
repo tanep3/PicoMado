@@ -6,16 +6,13 @@ Enter a phrase in the Web UI, preview it, and save it to display on a 160×80 LC
 
 ## 1. Try the included sample
 
-Prepare the server and LCD as described in [first setup](first-setup.en.md), and work from the repository root. The sample and its registrations are already present: do not add the self-build code a second time. If you change source files, run the checks again. Do not publish secrets or device IDs.
+Prepare the server and LCD as described in [first setup](first-setup.en.md), and work from the repository root. The sample and its registrations are already present: do not add the self-build code a second time. If you change source files, rebuild. Do not publish secrets or device IDs.
 
 ```sh
-PM_RUN=$(mktemp -d /tmp/picomado-word.XXXXXX)
-python3 tools/public_gate.py check --out "$PM_RUN/check"
-python3 tools/public_gate.py build --kind server --features word-tutorial --report "$PM_RUN/check/check.json" --build-dir "$PM_RUN/build"
-python3 tools/public_gate.py preflight --receipt "$PM_RUN/build/public-build.json"
+cargo build --release --locked --manifest-path service/Cargo.toml --features word-tutorial
 ```
 
-Follow [first setup](first-setup.en.md) to install the checked `"$PM_RUN/build/release/picomado-server"`. Back up existing settings and data before updating an installation.
+Follow [first setup](first-setup.en.md) to install `service/target/release/picomado-server`. Back up existing settings and data before updating an installation.
 
 On the Web home page, open “編集” next to “好きな言葉”. Enter a phrase, check that the preview drawn with the browser's Japanese font is legible, and select “保存して端末に反映”. Shorten a phrase that does not fit. If the preview shows missing glyphs, install a Japanese font on the browser's system. Select “好きな言葉” on a connected LCD; a device already showing it receives the update on save. The setting survives restart, and editing the words does not require a rebuild.
 
@@ -186,4 +183,4 @@ The browser creates the PNG using its available Japanese font, so glyphs vary by
 
 ## 5. Make it yours
 
-Change words from the Web UI without rebuilding. To change size or position, edit `24px`, `x` and `y` in `renderWords()` and adjust the 160×80 bounds check and preview together. Recheck and rebuild code changes as in step 1, then follow the installation steps. After saving from the browser, verify the LCD and that the phrase remains after reloading.
+Change words from the Web UI without rebuilding. To change size or position, edit `24px`, `x` and `y` in `renderWords()` and adjust the 160×80 bounds check and preview together. Rebuild code changes as in step 1, then follow the installation steps. After saving from the browser, verify the LCD and that the phrase remains after reloading.

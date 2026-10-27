@@ -73,7 +73,7 @@ bool gpio_get(uint pin){
     return pressed<0 || pin!=button_pins[pressed];
 }
 void pico_get_unique_board_id_string(char *id,size_t n){
-    assert(n>=17);memcpy(id,PM_EXPECTED_BOARD_ID,17);
+    (void)id; (void)n; assert(!"normal startup must not require a physical board ID");
 }
 uint32_t save_and_disable_interrupts(void){return 0;}
 void restore_interrupts(uint32_t status){assert(status==0);}

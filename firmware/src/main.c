@@ -15,7 +15,6 @@
 #include "pico/rand.h"
 #include "pico/cyw43_arch.h"
 #include "radio_query_sdk.h"
-#include "pico/unique_id.h"
 #include "pico/stdio_usb.h"
 #include "hardware/flash.h"
 #include "hardware/sync.h"
@@ -1213,16 +1212,6 @@ int main(void){
     pm_display_init();
     load_settings();active_profile=settings.profile;
     retry_ms=settings.retry_s*1000u;
-    char board_id[2*PICO_UNIQUE_BOARD_ID_SIZE_BYTES+1];
-    pico_get_unique_board_id_string(board_id,sizeof board_id);
-    bool board_matches=strlen(PM_EXPECTED_BOARD_ID)==strlen(board_id);
-    for(size_t i=0;board_matches && i<strlen(board_id);i++){
-        char a=board_id[i],b=PM_EXPECTED_BOARD_ID[i];
-        if(a>='a'&&a<='f')a-=32;
-        if(b>='a'&&b<='f')b-=32;
-        if(a!=b)board_matches=false;
-    }
-    if(!board_matches){pm_display_status("CONFIG","WRONG BOARD");while(true)sleep_ms(1000);}
     if(strcmp(PM_DEVICE_ID,PM_BUILD_DEVICE)){
         pm_display_status("CONFIG","WRONG ID");while(true)sleep_ms(1000);
     }

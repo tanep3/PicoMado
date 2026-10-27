@@ -12,11 +12,11 @@ The browser interface and device endpoint have no built-in login or PicoMado API
 
 The service reads `$HOME/.config/PicoMado/config.toml` by default; [the generic example](deploy/config.toml) documents its fields. The `bind` address must be the Linux server's actual LAN IPv4 and port, not the documentation address in the example. SQLite state and plugin `data/` and `cache/` directories are configured separately. Protect an existing database and saved media before changing these paths.
 
-The [first setup guide](../docs/guides/first-setup.en.md) covers dependencies, configuration, public checks, build, preflight, installation and verification. The [user-service notes](deploy/README.md) describe the unit and file layout.
+The [first setup guide](../docs/guides/first-setup.en.md) covers dependencies, configuration, build, installation and verification. The [user-service notes](deploy/README.md) describe the unit and file layout.
 
 ## Code and verification
 
-The main paths are `src/application.rs` for persistent application state, `src/plugins.rs` and plugin modules for content, `src/transport.rs` and `src/protocol.rs` for device communication, and `src/web.rs` for browser controls. SQLite snapshots and effect outbox work are separated from physical frame state; receipt of a frame and completion of drawing are separate acknowledgements. Public source checks run through `python3 tools/public_gate.py check` as described in first setup.
+The main paths are `src/application.rs` for persistent application state, `src/plugins.rs` and plugin modules for content, `src/transport.rs` and `src/protocol.rs` for device communication, and `src/web.rs` for browser controls. SQLite snapshots and effect outbox work are separated from physical frame state; receipt of a frame and completion of drawing are separate acknowledgements. Run `cargo test --locked --all-features --manifest-path service/Cargo.toml` when you want to test the server.
 
 LCD and both zero- and two-button E-ink configurations are supported as listed in [hardware support](../docs/guides/hardware-support.en.md). Long-duration and multi-device acceptance remain open.
 

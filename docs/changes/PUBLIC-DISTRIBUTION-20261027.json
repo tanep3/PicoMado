@@ -74,6 +74,13 @@
       "evidence": "The user explicitly requested removing the mandatory gates and physical-board identity checks for both authors and public users.",
       "correction": "Use ordinary build and UF2 copy while retaining compiler/SDK hardware and pin consistency checks.",
       "pending": "Verify the changed paths without touching hardware; keep the existing history private."
+    },
+    {
+      "hypothesis": "Ordinary firmware builds and startup require the physical board ID.",
+      "status": "refuted by user decision and local verification",
+      "evidence": "An LCD UF2 built with no board-ID file; host startup and diagnostic mocks passed without reading a physical ID.",
+      "correction": "Use normal CMake/Cargo build and owner-operated BOOTSEL UF2 copy; retain MCU, profile and pin checks.",
+      "pending": "Physical device operation and independent review remain unperformed. The attempted AGENTS governance edit was rejected by automatic approval review."
     }
   ]
 }

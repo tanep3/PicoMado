@@ -12,10 +12,10 @@ PicoMado firmware runs on Raspberry Pi Pico W. It receives prepared images from 
 
 ## 個体設定
 
-`firmware/devices/<端末名>/profile.txt` が表示方式と GPIO を選び、Git に含めない `config.h` が個体の Wi-Fi・サーバ接続値を保持します。`board-id.txt` には対象 Pico W から読み取った Flash ID を入れます。新規 `config.h` に画面やボタンの定義を追加せず、選択したプロファイルと一致させます。HOME だけを使う場合でも AWAY マクロの定義はコンパイルに必要です。ダミー値の扱いとファイルの作り方は[初回設定](../docs/guides/first-setup.md#3-ファームの個体設定を用意する)を参照してください。実際の資格情報や Flash ID を Git に追加しないでください。
+`firmware/devices/<端末名>/profile.txt` が表示方式と GPIO を選び、Git に含めない `config.h` が個体の Wi-Fi・サーバ接続値を保持します。新規 `config.h` に画面やボタンの定義を追加せず、選択したプロファイルと一致させます。HOME だけを使う場合でも AWAY マクロの定義はコンパイルに必要です。ダミー値の扱いとファイルの作り方は[初回設定](../docs/guides/first-setup.md#3-ファームの個体設定を用意する)を参照してください。実際の資格情報を Git に追加しないでください。
 
 ## ビルド・書込み・確認
 
-ソースからの検査、ビルド、対象確認と書込みは [初回設定](../docs/guides/first-setup.md#5-検査してビルドする) の順に行います。既存端末は先に[退避と復旧](../docs/guides/release-and-recovery.md)を確認します。
+ソースからのビルドと BOOTSEL ドライブへの UF2 コピーは [初回設定](../docs/guides/first-setup.md#5-ビルドする) の順に行います。既存端末は先に[退避と復旧](../docs/guides/release-and-recovery.md)を確認します。
 
 Pico W は HOME でサーバの `/device` WebSocket に接続します。AWAY には別プロジェクトの Android EEX1 アプリ、テザリング、TailSocks/SOCKS5 経路が必要です。このリポジトリだけでは AWAY の一式は揃いません。実機未確認の構成をビルド成功だけで対応済みとしません。
