@@ -1,56 +1,126 @@
 # 好きな言葉を表示するプラグインを作る
 
-[English](plugin-author.en.md) · [API と仕組み](../../service/src/content.rs)
+[English](plugin-author.en.md) · [初回設定](first-setup.md)
 
-このチュートリアルの完成画面は、160×80 LCD の濃い背景に白字で「おはよう」と表示したものです。外部サービスや API キーは不要です。文字を画像にしてから `my-words` プラグインが画面用の RGB565BE フレームを作ります。まず自分の PC 上で画像と配信経路を確認し、最後に自分の端末で表示します。
+160×80 のカラー LCD に、濃い青の背景と白い「おはよう」を表示します。画像を変えれば、好きな言葉を自分の PicoMado に飾れます。外部サービスや API キーは不要です。この例は LCD 用です。E-ink や別の画面サイズには別の描画処理が必要です。
 
-## 1. 準備する
+## 1. 準備
 
-リポジトリのルートで作業します。Rust/Cargo、Python 3、Pillow、Noto Sans CJK などの日本語フォントが必要です。`python3 -c 'from PIL import Image; print(Image.__version__)'` と `fc-list :lang=ja file | head` で確認できます。既存 LCD 内蔵フォントは文字集合が限定されるため、好きな日本語をそのまま渡すと `?` に置換されることがあります。この例は日本語フォントで PNG を作るため、その問題を避けます。
+[初回設定](first-setup.md)に従ってサーバーと LCD 端末を用意し、リポジトリのルートで以下の操作をします。Rust、Cargo、Python 3、Pillow、日本語フォントが必要です。`python3 -c 'from PIL import Image'` で Pillow、`fc-list :lang=ja file | head` でフォントを確認できます。Pillow がなければ Python の仮想環境などに `python3 -m pip install Pillow` でインストールしてください。
 
-## 2. 表示画像を作る
+このリポジトリには完成版が入っています。プラグイン本体は `service/src/word.rs`、画像生成プログラムは `service/examples/make-word-card.py`、生成画像の置き場所は `service/assets/word-card.png` です。既存ファイルを使えるので、コピーを作る必要はありません。コードを自分で書く場合は、それぞれ次の内容を同じ場所に保存します。
 
-[make-word-card.py](../../service/examples/make-word-card.py) が 160×80 の画像を作ります。`PM_FONT` を `fc-list` で見つけたフォントパスに変えます。
+## 2. 画像を作るコード
+
+`service/examples/make-word-card.py` の全コードです。
+
+```python
+#!/usr/bin/env python3
+"""Make a 160x80 LCD card from a phrase using an installed Japanese font."""
+import argparse
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('words')
+    parser.add_argument('--font', required=True, type=Path)
+    parser.add_argument('--size', type=int, default=24)
+    parser.add_argument('--x', type=int, default=8)
+    parser.add_argument('--y', type=int, default=22)
+    parser.add_argument('--output', type=Path, default=Path('service/examples/word-card.png'))
+    args = parser.parse_args()
+    if not 8 <= args.size <= 48 or not args.font.is_file():
+        parser.error('choose an installed font and size 8..48')
+    font = ImageFont.truetype(str(args.font), args.size, index=0)
+    card = Image.new('RGB', (160, 80), '#102030')
+    draw = ImageDraw.Draw(card)
+    box = draw.textbbox((args.x, args.y), args.words, font=font, anchor='lt')
+    if box[0] < 0 or box[1] < 0 or box[2] > 160 or box[3] > 80:
+        parser.error('text does not fit 160x80; shorten it or change size/position')
+    draw.text((args.x, args.y), args.words, font=font, fill='#ffffff', anchor='lt')
+    card.save(args.output)
+    print(args.output)
+
+
+if __name__ == '__main__':
+    main()
+```
+
+
+日本語フォントで文字を描画し、160×80 の PNG として保存します。次のフォントパスは例です。`fc-list` の結果にある自分の環境のパスに置き換えてください。
 
 ```sh
 PM_FONT=/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc
 python3 service/examples/make-word-card.py 'おはよう' --font "$PM_FONT" --output service/assets/word-card.png
 ```
 
-`service/assets/word-card.png` を画像ビューアで開き、文字が読めることを確認します。好きな言葉へ変えるには引用符の中を編集します。`--size 20`、`--x 12`、`--y 28` で大きさと位置を調整できます。画面からはみ出すとエラーになります。生成画像を確認してからローカル Git コミットに含めます。
+生成された PNG を画像ビューアで開き、文字が読めることを確認します。
 
-## 3. コードを読む・変更する
+## 3. プラグイン本体
 
-省略のない実装は [word.rs](../../service/src/word.rs) です。`WordRules` は ID と LCD 対応を宣言します。`WordContent` の `current_frame` は PNG の各画素を RGB565BE に変換して 25,600 バイトを返します。`service/src/plugins.rs` は `word-tutorial` 機能が有効なときに規則と内容を同じ ID で登録し、選択順に加えます。`service/src/ui.html` は選択肢を「好きな言葉」と表示します。これらのファイルを複製して ID と描画を変えれば、自分用の別プラグインの土台になります。入力操作や保存が必要なら [ContentPlugin の API](../../service/src/content.rs) を確認してください。
+`service/src/word.rs` の実行に必要な全コードです（リポジトリのファイルには続けてテストもあります）。
 
-## 4. 隔離して配信まで確認する
+```rust
+//! Optional LCD phrase example. The PNG is rendered before compilation.
+use crate::content::{ButtonAction, ContentError, ContentPlugin, PluginContext, PluginPlan, PluginPosition};
+use crate::{Candidate, Capability, Event, Plugin, WorldQuery};
+use std::collections::BTreeSet;
+use std::sync::LazyLock;
 
-`word-tutorial` を有効にしたテストは、一時 DB のサーバー側アプリへ LCD 端末を接続し、ボタンで `my-words` を選択して、送出対象のフレームを検査します。実機や稼働中のサービスを使いません。
+static FRAME: LazyLock<Vec<u8>> = LazyLock::new(|| {
+    let image = image::load_from_memory(include_bytes!("../assets/word-card.png"))
+        .expect("word card PNG").to_rgb8();
+    assert_eq!(image.dimensions(), (160, 80), "word card must be 160x80");
+    let mut frame = Vec::with_capacity(160 * 80 * 2);
+    for pixel in image.pixels() {
+        let [r, g, b] = pixel.0;
+        let color = ((u16::from(r) >> 3) << 11) | ((u16::from(g) >> 2) << 5) | (u16::from(b) >> 3);
+        frame.extend_from_slice(&color.to_be_bytes());
+    }
+    frame
+});
 
-```sh
-cargo test --offline --manifest-path service/Cargo.toml --features word-tutorial word::tests::registered_phrase_reaches_server_send_effect
+pub struct WordRules;
+impl Plugin for WordRules {
+    fn id(&self) -> &str { "my-words" }
+    fn supports(&self, caps: &BTreeSet<Capability>) -> bool { caps.contains("lcd") }
+    fn candidates<'a>(&'a self, _: &'a dyn WorldQuery, _: &'a Event) -> Box<dyn Iterator<Item = Candidate> + 'a> {
+        Box::new(std::iter::empty())
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct WordContent;
+impl ContentPlugin for WordContent {
+    fn clone_box(&self) -> Box<dyn ContentPlugin> { Box::new(self.clone()) }
+    fn id(&self) -> &'static str { "my-words" }
+    fn publish(&mut self, _: &PluginContext, _: &[u8], _: &str, _: &str) -> Result<(), ContentError> { Err(ContentError::Unsupported) }
+    fn position(&self, _: &PluginContext) -> Option<PluginPosition> { None }
+    fn plan(&mut self, _: &PluginContext, _: ButtonAction) -> Result<PluginPlan, ContentError> { Err(ContentError::Unsupported) }
+    fn current_frame(&self, _: &PluginContext) -> Option<Vec<u8>> { Some(FRAME.clone()) }
+    fn session_reset(&mut self, _: &str, _: u64) {}
+    fn delete_device(&mut self, _: &str) {}
+}
 ```
 
-`test result: ok` が成功の目印です。さらに別の空ディレクトリでブラウザ画面を見たい場合は、次のように検査済みビルドを作ります。`/tmp/picomado-word-build` は毎回新しい名前にしてください。
+
+`FRAME` は PNG を読み、各画素を LCD 用の RGB565 に変換します。`WordRules` は ID `my-words` と LCD 対応を宣言します。`WordContent` の `current_frame` がその画像を返します。この例にはボタン操作やデータ保存はありません。
+
+## 4. 登録して表示する
+
+登録は既に用意されています。`service/src/lib.rs` がモジュールを読み込み、`service/src/plugins.rs` が `WordRules` と `WordContent` を同じ ID で登録し、表示順に追加します。`service/src/ui.html` は名前を「好きな言葉」と表示します。これらは `word-tutorial` 機能を有効にしたときに使われます。
+
+[初回設定](first-setup.md)のサーバービルドでは、サーバーの `build` コマンドに `--features word-tutorial` を加えてください。例えば次の通りです。ビルド先は空の新しいディレクトリを指定します。
 
 ```sh
 python3 tools/project_gate.py check
 python3 tools/project_gate.py build --kind server --features word-tutorial --build-dir /tmp/picomado-word-build
-mkdir -p /tmp/picomado-word-run/data
-cat > /tmp/picomado-word-run/config.toml <<'CONFIG'
-bind = "127.0.0.1:16154"
-database_path = "/tmp/picomado-word-run/data/app.db"
-plugins_root = "/tmp/picomado-word-run"
-CONFIG
-/tmp/picomado-word-build/release/picomado-server --config /tmp/picomado-word-run/config.toml
 ```
 
-別の端末で `curl http://127.0.0.1:16154/` を実行し、ブラウザで同じアドレスを開きます。選択名「好きな言葉」が見えます。終了は起動した端末で Ctrl+C。これは自分の PC 内の別 DB を使う確認です。送信フレームの確認は上の隔離テストで行います。
+初回設定のサーバー導入手順で、このビルドの `release/picomado-server` を使います。サーバーを起動し、LCD 端末を HOME に接続したら、本体の次へ進む操作で「好きな言葉」まで切り替えます。濃い青の画面に白い「おはよう」が見えれば完成です。選択肢がない場合は、実行中のサーバーが `word-tutorial` 付きでビルドされたか確認してください。
 
-## 5. 自分の端末で表示する
+## 5. 自分の言葉に変える
 
-[初回設定](first-setup.md)と[更新・復旧](release-and-recovery.md)に沿って、`word-tutorial` を有効にした検査済みサーバー候補を自分の環境へ導入します。対応する 160×80 LCD 端末を HOME で接続し、端末の次へ進むボタンまたは Web の選択操作で「好きな言葉」を選びます。実際の画面に文字が出るか、電源・配線・接続も含めて確認してください。今回の隔離テストは物理表示の成功を証明しません。E-ink や別サイズの画面には専用レンダラーが必要です。
-
-## 困ったとき
-
-`No module named PIL` は Pillow、`choose an installed font` はフォントパスを確認します。`text does not fit` は文字を短くするかサイズ・位置を調整します。選択肢がない場合は `word-tutorial` を有効にしたサーバーを使っているかを確認します。画像が更新されない場合は PNG を作り直した後にサーバーを再ビルドしたかを確認します。
+手順 2 の引用符内を好きな言葉に変え、`--size 20 --x 12 --y 28` のように文字サイズと左上の位置を指定できます。画像からはみ出すとエラーになります。文字を短くするか、サイズや位置を調整してください。画像はサーバーのビルド時に埋め込まれるため、変更後は PNG を生成し直し、手順 4 のビルドと導入をもう一度行います。

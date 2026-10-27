@@ -4,11 +4,11 @@
 
 Choose a profile before buying parts or wiring the board. For different wiring with an implemented display and button count, create a new profile. PicoMado currently supports Raspberry Pi **Pico W**, with these display and input combinations:
 
-| Profile | Display | Buttons | Evidence |
+| Profile | Display | Buttons | Status |
 | --- | --- | --- | --- |
-| `pico_w_lcd_160x80_4` | ST7735S LCD, 160×80, RGB565 | 4 | Existing LCD device physically checked |
-| `pico_w_eink_250x122_0` | 2.13-inch V4 E-ink, 250×122 | 0 | E-ink display physically checked |
-| `pico_w_eink_250x122_2` | Same V4 E-ink | 2 | Operation checked |
+| `pico_w_lcd_160x80_4` | ST7735S LCD, 160×80, RGB565 | 4 | Verified |
+| `pico_w_eink_250x122_0` | 2.13-inch V4 E-ink, 250×122 | 0 | Verified |
+| `pico_w_eink_250x122_2` | Same V4 E-ink | 2 | Verified |
 
 Pico 2 W, ESP32, other display versions or sizes, speakers, microphones and servos need added implementation. New button wiring can be built with a new profile; the [customization guide](customization.en.md) shows what would need to change and be tested. Match the display controller and panel version to the profile. Do not change wiring while power is connected.
 
