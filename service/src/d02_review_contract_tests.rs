@@ -253,7 +253,7 @@ fn d02_review_stream_status_publishes_only_changed_progress() {
 async fn d02_review_real_reader_duplicate_confirmation_does_not_block_following_ack() {
     let temp = tempfile::tempdir().unwrap();
     let mut state = app_at_fixture_date(&temp.path().join("db"));
-    let order = ["weather", "rain-radar", "youtube", "caricature", "clock"]
+    let order: Vec<String> = ["weather", "rain-radar", "youtube", "caricature", "clock"]
         .into_iter().chain(crate::plugins::DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
         .map(str::to_owned).collect();
     state.set_order(1, order.clone()).unwrap();
