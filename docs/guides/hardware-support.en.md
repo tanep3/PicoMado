@@ -10,7 +10,7 @@ Choose a tracked profile before buying parts or wiring the board. PicoMado curre
 | `pico_w_eink_250x122_0` | 2.13-inch V4 E-ink, 250×122 | 0 | E-ink display physically checked |
 | `pico_w_eink_250x122_2` | Same V4 E-ink | 2 | Host tests; complete two-button device not yet physically accepted |
 
-Pico 2 W, ESP32, other display versions or sizes, arbitrary button maps, speakers, microphones and servos are not supported. Match the display controller and panel version to the profile. Do not change wiring while power is connected.
+Pico 2 W, ESP32, other display versions or sizes, different button maps, speakers, microphones and servos are possible directions for a custom build. They are outside the current checked profiles; the [customization guide](customization.en.md) shows what would need to change and be tested. Match the display controller and panel version to the profile. Do not change wiring while power is connected.
 
 The GPIO values below come from the tracked files in `firmware/profiles/`. **GPIO numbers are not physical pin numbers.** The profile does not specify a particular module's power-pin label or safe supply voltage. Read your module's specification, connect it to an appropriate Pico W supply, and share GND with the Pico W. Do not power an unidentified module.
 
@@ -29,3 +29,5 @@ The GPIO values below come from the tracked files in `firmware/profiles/`. **GPI
 | Display power / GND | Supply specified for your V4 module / common Pico W GND |
 
 The tracked profile owns display geometry, controller, SPI and button GPIO. A device's `config.h` may set only the LCD backlight connection and polarity, or whether the E-ink panel is connected. `PM_EINK_PANEL_CONNECTED=0` allows a no-panel check but proves nothing about physical drawing. Older flat hardware definitions are accepted only when they match the selected profile exactly. See the [first setup guide](first-setup.en.md) for device configuration.
+
+An enclosure design is not included. Choose or design a housing for your screen, buttons and wiring.

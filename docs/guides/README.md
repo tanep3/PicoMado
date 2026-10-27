@@ -6,8 +6,10 @@
 
 - [初回設定](first-setup.md)
 - [対応する基板・画面・配線](hardware-support.md)
+- [自分の端末へカスタマイズする](customization.md)
 - [First setup (English)](first-setup.en.md)
 - [Supported hardware (English)](hardware-support.en.md)
+- [Customize PicoMado (English)](customization.en.md)
 - [更新前の退避と復旧](release-and-recovery.md)
 - [風刺画のプロンプトを編集する](caricature-prompts.md)
 - [自宅・外出先接続 技術検証ガイド](home-away-connectivity-technical-guide.md)

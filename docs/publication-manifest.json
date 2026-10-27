@@ -22,6 +22,8 @@
     "docs/guides/first-setup.en.md",
     "docs/guides/hardware-support.md",
     "docs/guides/hardware-support.en.md",
+    "docs/guides/customization.md",
+    "docs/guides/customization.en.md",
     "docs/guides/release-and-recovery.md",
     "docs/guides/plugin-author.md",
     "service/README.md",

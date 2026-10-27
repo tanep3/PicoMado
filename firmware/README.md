@@ -4,7 +4,7 @@ PicoMado firmware runs on Raspberry Pi Pico W. It receives prepared images from 
 
 ## 対応構成
 
-現行プロファイルは Pico W の 160×80 ST7735S LCD・4 ボタンと、250×122 V4 E-ink・0／2 ボタンです。LCD 4 ボタンと E-ink 0 ボタンには実機確認記録があります。E-ink 2 ボタン完成端末は実機受入が未完了です。Pico 2 W、別寸法・別版の表示器、任意のボタン配置は対応対象ではありません。
+現行プロファイルは Pico W の 160×80 ST7735S LCD・4 ボタンと、250×122 V4 E-ink・0／2 ボタンです。LCD 4 ボタンと E-ink 0 ボタンには実機確認記録があります。E-ink 2 ボタン完成端末は実機受入が未完了です。別の画面、ボタン配置、マイコンを使う場合は[カスタマイズガイド](../docs/guides/customization.md)で必要な変更と検証を確認してください。
 
 ## 配線
 
