@@ -1,6 +1,6 @@
 {
   "environment": {
-    "sdk_path": "/home/tane/dev/PicoW/pico-sdk",
+    "sdk_path": "$HOME/dev/PicoW/pico-sdk",
     "sdk_commit": "079c6f39023649b154152db30f1d781e884879bc",
     "sdk_version": "2.3.1",
     "CYW43_commit": "c1075d4bc440422cf2b2fd12c64a1f53f77660ee",
@@ -17,8 +17,8 @@
     "original_CYW43_ll_sha256": "a4e6baa503b9332a0a445c8b22deb4bee62793c441dc74a200b0fe8065c397c7",
     "private_CYW43_ll_sha256": "769485c707d80f7841a60f626a735d6001eef1948d8a1dfa425538764010746d",
     "shared_SDK_source_edits": false,
-    "build_dir": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/gap-p2-build/firmware/build/PicoMado-lcd1",
-    "source_dir": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/gap-p2-build/firmware",
+    "build_dir": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/gap-p2-build/firmware/build/example-lcd",
+    "source_dir": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/gap-p2-build/firmware",
     "provenance_limit": "SDK/submodule commits read from present checkout; pre-build commit snapshot not yet located; source hashes/TU dependencies and archived ELF will be cross-checked"
   },
   "git_history": {
@@ -185,7 +185,7 @@
       "causal_link_to_delay": "not observed in missing heartbeat"
     }
   ],
-  "artifact_root": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-usage-audit-20261021T030739Z",
+  "artifact_root": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-usage-audit-20261021T030739Z",
   "artifact_sha256": {
     "environment-early.json": "2d5e4f7f9e801865cf3e1b7a28850dd2553bddcc9e1cdfe9be253bca14340b25",
     "CYW43-vs-SDK-gitlink.stat.txt": "0e4da6d2b3cfefb838d9f26369422a159cd98db181c51476e6eed0db21bf97c6",

@@ -30,9 +30,9 @@
 
 | 端末 | binding | UF2 SHA256 | flash終端（排他） | link時heap余地 |
 | --- | --- | --- | --- | --- |
-| PicoMado-lcd1 | `E661640843239D21` | `291aa0a30506817eacc813e1e77d61c3d41c1e100e0c5da7a1fa1f2a881aca6a` | 0x1006ad00 | 12496 B |
-| E-ink_0 | `E6614864D3813227` | `6aba8f87a5d87b4398838d3ce2813043ef56c3988db71111a66cff1e75821613` | 0x1005a500 | 98076 B |
-| E-ink_1 | `E6614864D34F8E22` | `3770c07251d76fa6e9932111d0e7939c416e17dbaededca8ae80b39d9b67c076` | 0x1005af00 | 97980 B |
+| example-lcd | `0123456789ABCDE0` | `291aa0a30506817eacc813e1e77d61c3d41c1e100e0c5da7a1fa1f2a881aca6a` | 0x1006ad00 | 12496 B |
+| E-ink_0 | `0123456789ABCDE1` | `6aba8f87a5d87b4398838d3ce2813043ef56c3988db71111a66cff1e75821613` | 0x1005a500 | 98076 B |
+| E-ink_1 | `0123456789ABCDE2` | `3770c07251d76fa6e9932111d0e7939c416e17dbaededca8ae80b39d9b67c076` | 0x1005af00 | 97980 B |
 
 各UF2は `firmware/build/<端末>/<端末>.uf2`。全blockのfamily/index/addressを検証し、設定予約sector `[0x101ff000,0x10200000)` を含まない。heap値はlink時の余地であり、実行時空き量の計測ではない。
 
@@ -67,7 +67,7 @@
 
 | 端末 | 修正候補 UF2 SHA256 | flash終端（排他） | link時heap余地 |
 | --- | --- | --- | --- |
-| PicoMado-lcd1 | `92fc0ee9dc0c50161b7fa158252407f507b29292ffd2a6f8ccb1ac3eeaf4fc79` | 0x1006ad00 | 12496 B |
+| example-lcd | `92fc0ee9dc0c50161b7fa158252407f507b29292ffd2a6f8ccb1ac3eeaf4fc79` | 0x1006ad00 | 12496 B |
 | E-ink_0 | `4160d025ed2584b6eb4bd332bb5262dc90c3b74c12d81cff2ea2a331e7e83cfc` | 0x1005a500 | 98076 B |
 | E-ink_1 | `4405a4d03d2773de1f392bacf9e0aaa5d062bfc623811b544d2a22e2367fee34` | 0x1005af00 | 97980 B |
 

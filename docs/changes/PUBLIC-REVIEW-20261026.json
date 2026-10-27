@@ -22,7 +22,7 @@
       "evidence": [
         {
           "kind": "check",
-          "path": "/home/tane/Documents/Codex/2026-10-26/task/picomado-public-review-gate/check.json",
+          "path": "$HOME/Documents/Codex/2026-10-26/task/picomado-public-review-gate/check.json",
           "SHA256": "ea22862e3cf1f3627a33221064254d479dae6cc0c98bb4d183be07c780b7e89b"
         }
       ]

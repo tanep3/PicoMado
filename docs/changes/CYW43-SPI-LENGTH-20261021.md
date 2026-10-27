@@ -2,7 +2,7 @@
 
 # CYW43 SPI command length: bounded LCD comparison candidate
 
-Status: candidate installed on PicoMado-lcd1 and finite comparison completed. The former LCD UF2 is SHA256 `efa09ede35dddd08d1b69ac988d0bada646e1605d1307e3bfdb5e37e8068233a`; the retained recovery UF2 is SHA256 `9d4f66d1b71e07ef5c6e85b802201d0b6712b6290cd1c9133b40bdbf36479687`. The shared SDK remains unchanged.
+Status: candidate installed on example-lcd and finite comparison completed. The former LCD UF2 is SHA256 `efa09ede35dddd08d1b69ac988d0bada646e1605d1307e3bfdb5e37e8068233a`; the retained recovery UF2 is SHA256 `9d4f66d1b71e07ef5c6e85b802201d0b6712b6290cd1c9133b40bdbf36479687`. The shared SDK remains unchanged.
 
 ## Contract and evidence
 
@@ -38,7 +38,7 @@ One intended DOWN trial used key 2 by operator error; key 2 is POWER and key 3 i
 
 ## Candidate hardware result, 2026-10-21
 
-With the user's LCD BOOTSEL complete, `picotool info -d` identified the sole board flash ID `E661640843239D21`. The saved on-device program SHA256 exactly matched former UF2 `efa09ede...`. The settings sector `0x101ff000–0x10200000` was saved and verified before installation. The candidate UF2 SHA256 was rechecked as `77c40a06e9b27450faf7257784e4323ad947f7482e01b85a8eaaad1885dc90e9`; all 1693 payload blocks end by `0x10069d00`, outside the settings sector. `picotool load -v -x` completed full verification and rebooted the application. The post-boot USB ID, AP2 and EV1 were valid. The ACK-independent server binary remained `a48052af...` and PID 2019441 with zero restarts.
+With the user's LCD BOOTSEL complete, `picotool info -d` identified the sole board flash ID `0123456789ABCDE0`. The saved on-device program SHA256 exactly matched former UF2 `efa09ede...`. The settings sector `0x101ff000–0x10200000` was saved and verified before installation. The candidate UF2 SHA256 was rechecked as `77c40a06e9b27450faf7257784e4323ad947f7482e01b85a8eaaad1885dc90e9`; all 1693 payload blocks end by `0x10069d00`, outside the settings sector. `picotool load -v -x` completed full verification and rebooted the application. The post-boot USB ID, AP2 and EV1 were valid. The ACK-independent server binary remained `a48052af...` and PID 2019441 with zero restarts.
 
 Eight finite USB SIM operations on the same new Pico boot and host session completed with saved, released AP2/host captures and zero observer kernel drops. The sequence was caricature→rain-radar, three rain-radar↔weather pairs, then rain-radar→caricature. Before BOOTSEL the user had physically selected caricature, so the last operation restored that selection. All eight input messages match by session, message and CRC between Pico and Rust host; all TX/CY joins, CRC/validation, bus returns and credit checks passed. The Pico input→draw-end times in order were **1546.380, 129.609, 126.103, 130.465, 141.529, 126.126, 118.819, 112.373 ms** (median 127.868 ms). In the first operation, 71-byte TCP input `[8163,8234)` IP ID 40 was absent at the scoped Pi header tap and retransmission IP ID 41 arrived; the draw delay was 1.546 s. The other seven input first transmissions arrived. The three candidate rain-radar→weather operations took 129.609, 130.465 and 126.126 ms. Pi input ingress→image send was 24.970–48.405 ms, using only the Pi realtime clock; Pico and Pi absolute times were not subtracted. Per-operation Pico receive/verify/draw/report stages and exact TCP ranges are in `latency-cyw43-pr155-20261021/candidate-comparison.json`.
 

@@ -22,7 +22,7 @@ SDK全体（.gitとsubmodule metadata/未追跡/ignoredを含む）をSDK-align-
 
 容量対策は未実装の別比較であり、SDK候補へoverlay/serializer差分を含めない。SDK更新による他projectの次回buildへの影響を明記する。既に稼働中のPico/サーバはSDKフォルダ変更だけでは更新されない。
 
-候補完成後に対象LCD E661640843239D21、UF2 SHA、verify/BOOTSEL/再接続の方法、直前復旧UF2 f0c6a15a…と現在fd19…の位置を先に報告し、実機書込みは行わない。E-ink書込み、ai-news/OS/network/service変更、SSH、pushは対象外。
+候補完成後に対象LCD 0123456789ABCDE0、UF2 SHA、verify/BOOTSEL/再接続の方法、直前復旧UF2 f0c6a15a…と現在fd19…の位置を先に報告し、実機書込みは行わない。E-ink書込み、ai-news/OS/network/service変更、SSH、pushは対象外。
 
 ## 復旧
 

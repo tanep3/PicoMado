@@ -454,7 +454,7 @@ def main():
     if not args.execute:
         print(json.dumps(dict(plan_only=True,device=cfg['device'],expected_Flash_ID=cfg['expected_flash_id'],
               single_owner=True,SIM=sim,window_seconds=36.1,firmware_write=False,service_operation=False)));return
-    hc.require(cfg['expected_flash_id']=='E661640843239D21'and cfg['expected_flash_id']in cfg['serial_by_id'],
+    hc.require(bool(cfg['expected_flash_id']) and cfg['expected_flash_id'] in cfg['serial_by_id'],
                'expected bound LCD serial identity')
     hc.require(type(cfg.get('PID'))is int and cfg['PID']>0,'refresh server PID after approved rollout before execution')
     hc.require(hashlib.sha256(Path(f'/proc/{cfg["PID"]}/exe').read_bytes()).hexdigest()==cfg['server_sha'],'server binary changed')

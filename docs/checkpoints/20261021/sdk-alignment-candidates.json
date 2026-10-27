@@ -3,10 +3,10 @@
     "source_commit": "f2bdc7b2e17cc620e5d568c16842ee6ea871e7b0",
     "SDK_commit": "079c6f39023649b154152db30f1d781e884879bc",
     "SDK_aligned": true,
-    "device": "PicoMado-lcd1",
-    "expected_Flash_ID": "E661640843239D21",
+    "device": "example-lcd",
+    "expected_Flash_ID": "0123456789ABCDE0",
     "candidate": {
-      "uf2": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z/artifacts/aligned-observed/PicoMado-lcd1.uf2",
+      "uf2": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z/artifacts/aligned-observed/example-lcd.uf2",
       "sha256": "11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485",
       "elf_sha256": "bbecbcbb84f4a394cacce1726e66063313310de98f73ae9b5966e3255b1d7293",
       "heap_possible": 11096,
@@ -14,7 +14,7 @@
       "all_existing_flags_preserved": true
     },
     "official_LL_reference": {
-      "uf2": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z/artifacts/aligned-official-LL/PicoMado-lcd1.uf2",
+      "uf2": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z/artifacts/aligned-official-LL/example-lcd.uf2",
       "sha256": "c5e2f3e6a42b76c0dc83dea5707f231f3adaa241604f7188f22ead70a9ae425d",
       "only_flag_difference": {
         "PM_CYW43_INNER_PROBE": "OFF"
@@ -22,10 +22,10 @@
       "not_all_app_instrumentation_disabled": true
     },
     "firmware_rollback": {
-      "uf2": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/gap-p2-build/artifacts/PicoMado-lcd1/PicoMado-lcd1.uf2",
+      "uf2": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/gap-p2-build/artifacts/example-lcd/example-lcd.uf2",
       "sha256": "fd19ace94a80c0baf9ad97ed9e97255aca563045ee428efd1ac7aad52a2d8e3a"
     },
-    "SDK_backup": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z/SDK-before.tar",
+    "SDK_backup": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z/SDK-before.tar",
     "SDK_backup_sha256": "4e3e39f8bc98f7a646258a39d1b33611fafd2bf6936b43eefcf33748b4ed3f35",
     "validation_passed": 238,
     "diagnostic_port_files": 5,
@@ -353,7 +353,7 @@
     "SDK_driver": 18,
     "validation_passed": 238
   },
-  "evidence_root": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z",
+  "evidence_root": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z",
   "limits": [
     "RF/real IRQ/runtime heap/stack not measured",
     "SDK combo change alone does not update flashed devices",

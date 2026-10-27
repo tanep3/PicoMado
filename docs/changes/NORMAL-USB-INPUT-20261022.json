@@ -25,7 +25,7 @@
         {
           "SHA256": "349484751bf32500025fb91be1e782015b3376ad7ee1e75f743fdf7bbcf503f5",
           "kind": "check",
-          "path": "/home/tane/Documents/Codex/2026-10-18/task/picomado-usb-input-20261022/work/.gate/check.json"
+          "path": "$HOME/Documents/Codex/2026-10-18/task/picomado-usb-input-20261022/work/.gate/check.json"
         }
       ],
       "state": "verified"
@@ -35,7 +35,7 @@
         {
           "SHA256": "95cdc3d1ac3515dee0a80d5f27c820f4b9146a739e958d26bcaed8cead3384fd",
           "kind": "review",
-          "path": "/home/tane/Documents/Codex/2026-10-18/task/picomado-usb-input-20261022/work/firmware/build/E-ink_1/review.json"
+          "path": "$HOME/Documents/Codex/2026-10-18/task/picomado-usb-input-20261022/work/firmware/build/E-ink_1/review.json"
         }
       ],
       "state": "verified"

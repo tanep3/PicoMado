@@ -23,7 +23,7 @@
       "evidence": [
         {
           "kind": "check",
-          "path": "/home/tane/Documents/Codex/2026-10-18/task/picomado-input-feedback-20261022/work/.gate/check.json",
+          "path": "$HOME/Documents/Codex/2026-10-18/task/picomado-input-feedback-20261022/work/.gate/check.json",
           "SHA256": "074e271dc37ffb4b9c8cc1a59890134d138d4e50ece409abaad9af3747cddf0d"
         }
       ]
@@ -33,7 +33,7 @@
       "evidence": [
         {
           "kind": "review",
-          "path": "/home/tane/Documents/Codex/2026-10-18/task/picomado-input-feedback-20261022/normal-flash-20261022/workflow-parent-acceptance.json",
+          "path": "$HOME/Documents/Codex/2026-10-18/task/picomado-input-feedback-20261022/normal-flash-20261022/workflow-parent-acceptance.json",
           "SHA256": "b9610556217f1f1acaef86abebf8a9389544476b3cbe36f018570c7a8ef931cc"
         }
       ]

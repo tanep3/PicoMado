@@ -48,8 +48,8 @@ Android側のtransaction期限は最大30秒と受付終了時刻の早い方、
 
 ```sh
 bash firmware/tests/run_host_tests.sh
-cmake -S firmware -B firmware/build/PicoMado-lcd1 -DPM_DEVICE=PicoMado-lcd1 -DPM_USE_SAMPLE=OFF -DPM_PREPARE_UNBOUND=OFF -DPM_PREPARE_UNBOUND_PANEL=OFF -DPICO_BOARD=pico_w -DCMAKE_BUILD_TYPE=Release -DPM_AWAY_EEX1=ON -DPM_EEX1_PORT=48116
-cmake --build firmware/build/PicoMado-lcd1 --target picomado_lcd -j4
+cmake -S firmware -B firmware/build/example-lcd -DPM_DEVICE=example-lcd -DPM_USE_SAMPLE=OFF -DPM_PREPARE_UNBOUND=OFF -DPM_PREPARE_UNBOUND_PANEL=OFF -DPICO_BOARD=pico_w -DCMAKE_BUILD_TYPE=Release -DPM_AWAY_EEX1=ON -DPM_EEX1_PORT=48116
+cmake --build firmware/build/example-lcd --target picomado_lcd -j4
 ```
 
 ホストは実ネットワークを使わず、24ベクタ/framing、O/K対応、重複/期限、ACK欠落時probe、TTL後完了と成功cache、遅延アプリ起動、DHCP変化、失敗時再探索、HOME/PM/既存LCD/E-ink経路を確認する。SDK実装はSTAのIPv4/UDP socketを明示して送信する。スマホ側VPN経路・ユーザー環境の実動作はホストmockだけで保証しない。

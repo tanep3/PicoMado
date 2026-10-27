@@ -1,6 +1,6 @@
 # LCD 段階診断版（書込み前）
 
-対象は `PicoMado-lcd1`、Flash ID `E661640843239D21`、現在の個体専用 UF2 SHA256 `fbcac607fb55776e1a9077f8c552c4aa66f71f1962c221af6740930a2b292f29`。診断フラグはGit除外・権限600の端末 `config.h` に `PM_DIAGNOSTIC_STAGE=1` として追加。`0` へ戻すと段階表示・ボタン単体期間・USB診断行を無効化できる。旧 `PM_DIAGNOSTIC_BOOT=0` を維持し、サーバ画像ごとの一瞬の四色帯は出さない。秘密情報をログへ出さない。
+対象は `example-lcd`、Flash ID `0123456789ABCDE0`、現在の個体専用 UF2 SHA256 `fbcac607fb55776e1a9077f8c552c4aa66f71f1962c221af6740930a2b292f29`。診断フラグはGit除外・権限600の端末 `config.h` に `PM_DIAGNOSTIC_STAGE=1` として追加。`0` へ戻すと段階表示・ボタン単体期間・USB診断行を無効化できる。旧 `PM_DIAGNOSTIC_BOOT=0` を維持し、サーバ画像ごとの一瞬の四色帯は出さない。秘密情報をログへ出さない。
 
 ## 実機で見える予定の順序
 

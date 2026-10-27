@@ -46,7 +46,7 @@ SDK本体 `079c6f39023649b154152db30f1d781e884879bc` と公式整合submodule6�
 
 | 項目 | 値 |
 | --- | --- |
-| UF2 | H/artifacts/PicoMado-lcd1.uf2 |
+| UF2 | H/artifacts/example-lcd.uf2 |
 | UF2 SHA256 | `9d4f66d1b71e07ef5c6e85b802201d0b6712b6290cd1c9133b40bdbf36479687` |
 | 静的main RAM | 252072B（前候補251048Bから+1024B） |
 | heap linker余地 | 10072B（8192B下限以上） |
@@ -62,6 +62,6 @@ CY15でも20秒の任意な再送/自然frame更新を全て収容する保証�
 
 次工程は固定sourceの独立レビューと、既存単一owner/owned-socket observerへのcallback統合・失敗時freeze/save/closeの照合。host sourceは全回帰済みだが、新しいreleaseサーバbinaryは今回buildしていない。実機承認前に必要なserver候補を準備し、設定/flags・退避・復旧先を照合する必要がある。
 
-自然HB triggerには将来LCDファーム更新とhost側の新metadata/arm機能が必要で、サーバだけでは完結しない。対象は引き続きFlash ID E661640843239D21のLCDだけ。新候補を書いた場合の直前復旧先は現在書込み済み整合版 `SDK-align-20261021T032923Z/artifacts/aligned-observed/PicoMado-lcd1.uf2`、SHA `11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485`。fd19…はそのさらに前の履歴。今回flash/service更新は未実施で、E-ink/ai-newsにも変更なし。
+自然HB triggerには将来LCDファーム更新とhost側の新metadata/arm機能が必要で、サーバだけでは完結しない。対象は引き続きFlash ID 0123456789ABCDE0のLCDだけ。新候補を書いた場合の直前復旧先は現在書込み済み整合版 `SDK-align-20261021T032923Z/artifacts/aligned-observed/example-lcd.uf2`、SHA `11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485`。fd19…はそのさらに前の履歴。今回flash/service更新は未実施で、E-ink/ai-newsにも変更なし。
 
 [機械可読checkpoint](../checkpoints/20261021/periodic-heartbeat-implementation.json)。

@@ -20,7 +20,7 @@
 umask 077
 cmake -S firmware/diagnostics/lcd-repro -B firmware/build/lcd-repro-sdk231-capture-held-cs \
   -DPICO_SDK_PATH=$HOME/dev/PicoW/pico-sdk -DPICO_BOARD=pico_w \
-  -DCMAKE_BUILD_TYPE=Release -DPM_REPRO_DEVICE=PicoMado-lcd1 \
+  -DCMAKE_BUILD_TYPE=Release -DPM_REPRO_DEVICE=example-lcd \
   -DPM_REPRO_SAMPLE=OFF -DPM_REPRO_WIFI_HOME=ON \
   -DPM_REPRO_YOUTUBE_CYW43=OFF -DPM_REPRO_SPI_BAUD=5000000 \
   -DPM_REPRO_CAPTURE=ON -DPM_REPRO_HOLD_FRAME_CS=ON
@@ -36,7 +36,7 @@ cmake --build firmware/build/lcd-repro-sdk231-capture-held-cs -j4
 
 ```sh
 python3 firmware/diagnostics/lcd-repro/capture_usb.py --collect \
-  --board-id E661640843239D21 --output /tmp/picomado-capture-real-run1
+  --board-id 0123456789ABCDE0 --output /tmp/picomado-capture-real-run1
 ```
 
 ログからのオフライン再構成は `--from-log PATH --output NEW_DIRECTORY`。出力は権限を制限し、JSONに全バイト差数・最初の差のoffset/行/列を保存する。秘密資格情報を回収しない。対象は固定画素バッファだけ。

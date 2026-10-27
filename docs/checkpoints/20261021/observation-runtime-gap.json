@@ -87,7 +87,7 @@
     "service/src/transport.rs": "4876f1ce8195d2434ea30e959620b623c734b64576285ed53809283ef2b72d0a"
   },
   "builds": {
-    "PicoMado-lcd1": {
+    "example-lcd": {
       "uf2_sha256": "a68eec0bce2f62560e2e9bc9442c9d4e8254e764580bdd7229c0806820e43a2a",
       "elf_sha256": "bae9df04bd5fd10f7918d7365dd9e4ec498f344ed6b21356bb023a785ce06b86",
       "memory": {
@@ -112,7 +112,7 @@
         "PM_CYW43_INNER_PROBE": "ON",
         "PM_AWAY_EEX1": "ON",
         "PM_EEX1_PORT": "48116",
-        "PM_DEVICE": "PicoMado-lcd1",
+        "PM_DEVICE": "example-lcd",
         "PM_USE_SAMPLE": "OFF",
         "PM_PREPARE_UNBOUND": "OFF",
         "PM_PREPARE_UNBOUND_PANEL": "OFF",
@@ -195,7 +195,7 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },
-    "PicoMado-lcd1-off": {
+    "example-lcd-off": {
       "uf2_sha256": "3da9da4ad4c412fb29162af6f81569bc90f15e95a1bb485037eb06b6f3f413ce",
       "elf_sha256": "8058e0b25b103f676af5cf191fe7d45357702dd35e9a09e5aed87a10007a1932",
       "memory": {
@@ -220,7 +220,7 @@
         "PM_CYW43_INNER_PROBE": "ON",
         "PM_AWAY_EEX1": "ON",
         "PM_EEX1_PORT": "48116",
-        "PM_DEVICE": "PicoMado-lcd1",
+        "PM_DEVICE": "example-lcd",
         "PM_USE_SAMPLE": "OFF",
         "PM_PREPARE_UNBOUND": "OFF",
         "PM_PREPARE_UNBOUND_PANEL": "OFF",
@@ -233,7 +233,7 @@
     }
   },
   "server": {
-    "binary": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/gap-build/server/picomado-server.observation",
+    "binary": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/gap-build/server/picomado-server.observation",
     "binary_sha256": "db81e9f7ec6f4c72f79b13d7db44bcf3d6a62626c8a1d4569ad8639d2fa7b2a0",
     "binary_bytes": 17194336,
     "features": [

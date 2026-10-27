@@ -9,7 +9,7 @@ class Tests(unittest.TestCase):
   # An after-ARM socket fact below is a counterfactual isolated input because
   # the old resolver rejected NUD before it queried that socket.
   args=types.SimpleNamespace(interface='eth0',known_mac='02:00:00:00:42:11',
-      local_ip='198.51.100.101',port=16153,host_pid=1928084,device='PicoMado-lcd1')
+      local_ip='198.51.100.101',port=16153,host_pid=1928084,device='example-lcd')
   row=dict(dst='198.51.100.102',lladdr=args.known_mac,state=['STALE'])
   route=[dict(dst=row['dst'],dev='eth0',prefsrc=args.local_ip)]
   before=dict(interface='eth0',local_ip=args.local_ip,local_port=16153,peer_ip=row['dst'],
@@ -32,8 +32,8 @@ class Tests(unittest.TestCase):
       dict(rows=[]),dict(rows=[row,row]),
       dict(rows=[row,row|{'lladdr':'00:00:00:00:00:01'}]),
       dict(rows=[row|{'dev':'wlan0'}]),
-      dict(rows=[row|{'dst':'192.168.0.174'}]),
-      dict(via=[route[0]|{'dev':'wlan0'}]),dict(via=[route[0]|{'gateway':'192.168.0.1'}]),
+      dict(rows=[row|{'dst':'203.0.113.10374'}]),
+      dict(via=[route[0]|{'dev':'wlan0'}]),dict(via=[route[0]|{'gateway':'203.0.113.103'}]),
       dict(target=after|{'peer_port':61824}),dict(target=after|{'socket_state':7}),
       dict(target=after|{'pid':1928085}),dict(target=after|{'process_start_ticks':60873348}),
       dict(target=after|{'control_socket_owned':False}),
@@ -134,7 +134,7 @@ class Tests(unittest.TestCase):
   target=dict(interface='eth0',local_ip='198.51.100.101',local_port=16153,
               peer_ip='198.51.100.102',peer_port=55555,inode=123,pid=456,
               process_start_ticks=789,cookie=[1,2],known_device_mac='02:00:00:00:42:11',
-              binding=dict(boot='boot',connection=12,session=2318,target='PicoMado-lcd1',
+              binding=dict(boot='boot',connection=12,session=2318,target='example-lcd',
                            phase='idle',run='0'))
   after=json.loads(json.dumps(target));after['binding'].update(phase='armed',run='new-run')
   m.require_same_target(target,after)

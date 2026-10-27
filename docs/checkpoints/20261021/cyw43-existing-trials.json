@@ -32,7 +32,7 @@
         "us": "14e",
         "max": "32"
       },
-      "source": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/CY-probe-feasibility-20261021T023416Z/inner-trial-01"
+      "source": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/CY-probe-feasibility-20261021T023416Z/inner-trial-01"
     },
     {
       "label": "CY-probe-feasibility-20261021T023416Z/inner-trial-02",
@@ -68,7 +68,7 @@
         "us": "1d0",
         "max": "31"
       },
-      "source": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/CY-probe-feasibility-20261021T023416Z/inner-trial-02"
+      "source": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/CY-probe-feasibility-20261021T023416Z/inner-trial-02"
     },
     {
       "label": "CY-probe-feasibility-20261021T023416Z/inner-trial-03",
@@ -101,7 +101,7 @@
         "us": "11d",
         "max": "31"
       },
-      "source": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/CY-probe-feasibility-20261021T023416Z/inner-trial-03"
+      "source": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/CY-probe-feasibility-20261021T023416Z/inner-trial-03"
     },
     {
       "label": "CY-inner-followup-20261021T025006Z/inner-trial-01",
@@ -135,7 +135,7 @@
         "us": "158",
         "max": "31"
       },
-      "source": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/CY-inner-followup-20261021T025006Z/inner-trial-01"
+      "source": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/CY-inner-followup-20261021T025006Z/inner-trial-01"
     },
     {
       "label": "CY-inner-followup-20261021T025006Z/inner-trial-02",
@@ -168,7 +168,7 @@
         "us": "11b",
         "max": "31"
       },
-      "source": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/CY-inner-followup-20261021T025006Z/inner-trial-02"
+      "source": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/CY-inner-followup-20261021T025006Z/inner-trial-02"
     }
   ],
   "TX_CY_header_joins": [
@@ -1141,7 +1141,7 @@
       "run": "0",
       "schema": 2,
       "session": 2298,
-      "target": "PicoMado-lcd1",
+      "target": "example-lcd",
       "trigger_us": 3750405982,
       "window_us": 20000000
     },

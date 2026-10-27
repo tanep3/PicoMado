@@ -1,6 +1,6 @@
 # LCD-FIXED-UPDATE-20261027: fixed firmware operation
 
-Scope: USB update of PicoMado-lcd1 with the independently assessed normal LCD UF2 built at 17e231ffa9db9b9cc9d93ecd55444eae0b7f26b1. PUBLIC-DOCS-20261027 remains incomplete. This operation cannot authorize publication or server deployment.
+Scope: USB update of example-lcd with the independently assessed normal LCD UF2 built at 17e231ffa9db9b9cc9d93ecd55444eae0b7f26b1. PUBLIC-DOCS-20261027 remains incomplete. This operation cannot authorize publication or server deployment.
 
 Admission must bind candidate, artifact, configuration, board ID, profile, build receipt and original check evidence to the immutable source commit. Validate historical provenance against an isolated read-only source snapshot, rather than pretending current gate changes were firmware build inputs. No alternate clone or worktree is required: a temporary git archive is sufficient for validation only.
 

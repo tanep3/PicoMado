@@ -6,7 +6,7 @@ Run approximately 07:09–07:11 UTC. This is separate from the earlier direct Pi
 
 ## Setup and identity
 
-- A single BOOTSEL RP2040 Pico W was identified before flashing, with the same flash ID `E6614864D34F8E22` as the earlier experiment Pico. No other Pico was flashed.
+- A single BOOTSEL RP2040 Pico W was identified before flashing, with the same flash ID `0123456789ABCDE2` as the earlier experiment Pico. No other Pico was flashed.
 - The locally entered, Git-ignored configuration was built without displaying credentials. The new UF2 was transferred with verification and executed. USB log identified the running build as `socks5-20261011-1`, mode `SOCKS5`.
 - Pico hotspot DHCP IPv4: `198.51.100.11/24`; gateway and TailSocks SOCKS5 endpoint: `198.51.100.232:48115`. Final Pi5 destination: Tailscale IPv4 `203.0.113.9`.
 - The user reported TailSocks v4.9.1 as the independent Headscale node `redmi-tailsocks` (`203.0.113.18`). Pi5 independently observed inbound A/C connections **from `203.0.113.18` to `203.0.113.9`**.

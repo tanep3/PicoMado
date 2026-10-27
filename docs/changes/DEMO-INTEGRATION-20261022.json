@@ -23,7 +23,7 @@
       "evidence": [
         {
           "kind": "check",
-          "path": "/home/tane/Documents/Codex/2026-10-21/task/latency-eex1-restore-20261022/readback-integrated-check/check.json",
+          "path": "$HOME/Documents/Codex/2026-10-21/task/latency-eex1-restore-20261022/readback-integrated-check/check.json",
           "SHA256": "6ebcb146104125cd8f510552673b2e900b30cad5a2f4d3b84d16282c52e61e24"
         }
       ]
@@ -33,12 +33,12 @@
       "evidence": [
         {
           "kind": "review",
-          "path": "/home/tane/Documents/Codex/2026-10-21/task/latency-eex1-restore-20261022/shipping-worktree/firmware/build/PicoMado-lcd1/review.json",
+          "path": "$HOME/Documents/Codex/2026-10-21/task/latency-eex1-restore-20261022/shipping-worktree/firmware/build/example-lcd/review.json",
           "SHA256": "fefd78592328651f3a5e28ef819b6c9f167784d1b27f23c58fd8a3cf970b91aa"
         },
         {
           "kind": "review",
-          "path": "/home/tane/Documents/Codex/2026-10-21/task/latency-eex1-restore-20261022/shipping-worktree/firmware/build/E-ink_1/review.json",
+          "path": "$HOME/Documents/Codex/2026-10-21/task/latency-eex1-restore-20261022/shipping-worktree/firmware/build/E-ink_1/review.json",
           "SHA256": "031ca60c7a7f02da8eb4435616438c326f5b577e7e31c3711d6671688c3272a1"
         }
       ]

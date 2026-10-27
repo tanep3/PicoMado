@@ -6,7 +6,7 @@
 
 ## 結論と適用範囲
 
-2026-10-11 は、Pico W → スマートフォンの TailSocks SOCKS5 → Pi5 の Tailnet IPv4 で HTTP POST と持続 TCP の PUSH/ACK を実測した。2026-10-13 は、LCD端末 `PicoMado-lcd1` の AWAY プロファイルから、同じ SOCKS5 経路で **Pi5 の LAN 宛先 `192.0.2.120:16153`** へ接続できた。端末側の METHOD/AUTH/CONNECT 成功・ACTIVE/READY と、サーバ側の WebSocket Hello・画像受信ACK・描画ACKを時刻で照合した。本環境の既存 subnet routing を利用して LAN 宛先へ到達できたため、追加の Tailnet listener は不要だった。[今回の検証記録](../../experiments/tether-tailnet/results-2026-10-13-picomado-away-lan.md)
+2026-10-11 は、Pico W → スマートフォンの TailSocks SOCKS5 → Pi5 の Tailnet IPv4 で HTTP POST と持続 TCP の PUSH/ACK を実測した。2026-10-13 は、LCD端末 `example-lcd` の AWAY プロファイルから、同じ SOCKS5 経路で **Pi5 の LAN 宛先 `192.0.2.120:16153`** へ接続できた。端末側の METHOD/AUTH/CONNECT 成功・ACTIVE/READY と、サーバ側の WebSocket Hello・画像受信ACK・描画ACKを時刻で照合した。本環境の既存 subnet routing を利用して LAN 宛先へ到達できたため、追加の Tailnet listener は不要だった。[今回の検証記録](../../experiments/tether-tailnet/results-2026-10-13-picomado-away-lan.md)
 
 自宅 direct TCP もLCD１台でHelloと画像ACKまで確認済み。HOMEの全操作中の再接続問題が解消したとは断定しない。動画帯域、長時間維持、回線切替・省電力後の復帰、複数実機は受入未完了。
 
@@ -37,7 +37,7 @@ Pico W 198.51.100.11 (テザリング DHCP)
 ### 外出先: 2026-10-13に成功した LAN IPv4 宛の経路
 
 ```text
-PicoMado-lcd1 (AWAY / テザリング)
+example-lcd (AWAY / テザリング)
     └─SOCKS5認証・CONNECT─> スマホのTailSocks独立ノード
         └─既存subnet routing─> Pi5 192.0.2.120:16153 /device
             WebSocket Hello → 画像片 → 受信ACK / 描画ACK

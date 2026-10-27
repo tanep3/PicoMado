@@ -9,7 +9,7 @@
 | 項目 | 照合結果 |
 | --- | --- |
 | accepted app source | f2bdc7b2e17cc620e5d568c16842ee6ea871e7b0。build sourceのC/header/CMake/lwipoptsは同commitと一致 |
-| SDK実パス | $HOME/dev/PicoW/pico-sdk。gap-p2-build/PicoMado-lcd1.private.log:1、LCD CMakeCache.txt:300で一致 |
+| SDK実パス | $HOME/dev/PicoW/pico-sdk。gap-p2-build/example-lcd.private.log:1、LCD CMakeCache.txt:300で一致 |
 | SDK | 2.3.1、079c6f39023649b154152db30f1d781e884879bc |
 | CYW43 checkout | c1075d4bc440422cf2b2fd12c64a1f53f77660ee |
 | lwIP checkout | 2.2.0、0a0452b2c39bdd91e252aef045c115f88f6ca773 |

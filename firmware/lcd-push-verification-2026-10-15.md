@@ -16,9 +16,9 @@ LCD mainは組立中25600Bと描画待ち/描画用25600Bを持つ。IRQはRX tr
 
 比較基準は実際にeth0経路を確認した09:25:37〜09:28:37の6fps：949 Rendered ACK、5.2807fps、描画間隔median164.1ms/p95 209.9ms/max2.659s、再接続なし。最大停滞はPico SPI約16msではなく、TCPへの投入からサーバー着信までにも存在した。前日のWi-Fi値とは直接比較しない。
 
-最小の復旧資産は基準LCD UF2 `build/.rollback/5224c30/PicoMado-lcd1.uf2`（SHA256 c5c9fc741c94cc77fbdde036548fc17e905a9637d0313d4d29692f5db2ab1d56、720384B）と、本番反映直前に確保する旧server/config。秘密値を含むconfig/UF2/ELF/manifestはGit除外・0600。既存資格情報の新送信先追加、OS/ネットワーク/デスクトップ設定変更、SSH、E-ink書換えは行わない。
+最小の復旧資産は基準LCD UF2 `build/.rollback/5224c30/example-lcd.uf2`（SHA256 c5c9fc741c94cc77fbdde036548fc17e905a9637d0313d4d29692f5db2ab1d56、720384B）と、本番反映直前に確保する旧server/config。秘密値を含むconfig/UF2/ELF/manifestはGit除外・0600。既存資格情報の新送信先追加、OS/ネットワーク/デスクトップ設定変更、SSH、E-ink書換えは行わない。
 
-実機ビルド：LCD UF2 724480B、text368284B/BSS223976B、main RAM残32928B。SHA256 `4d7def9e0ab6da3c90a6e82404787bcd24140a08c71ab10cc75e9c4c2ee69e31`。書き込み前check-onlyで単一Flash ID `E661640843239D21` とmanifest/hash一致を確認。書込・本番反映・実測結果は完了後に追記する。
+実機ビルド：LCD UF2 724480B、text368284B/BSS223976B、main RAM残32928B。SHA256 `4d7def9e0ab6da3c90a6e82404787bcd24140a08c71ab10cc75e9c4c2ee69e31`。書き込み前check-onlyで単一Flash ID `0123456789ABCDE0` とmanifest/hash一致を確認。書込・本番反映・実測結果は完了後に追記する。
 
 ## 実施結果
 
@@ -28,7 +28,7 @@ LCD mainは組立中25600Bと描画待ち/描画用25600Bを持つ。IRQはRX tr
 
 本番反映は 2026-10-15T10:23:14.773544+09:00、PID236178。server SHA256 `e0b425f6dbba94f2cf6f38d367c8232b9cb4b439647e1ba4433ba7a5639c5b67`、15406112B。configとunitは不変、caricature-retention-delete featureと実env=1を維持し、API200。旧server/config各1ファイルを `service/target/rollback-5224c30/` に0600保存した。DB/OS/network/desktopは変更しない。
 
-LCDは新BOOTSEL連絡の後、10:23 JSTに単一Flash ID E661640843239D21へ上記4d7def9e UF2をload、Flash verify100% OK、起動。実Helloでlcd-push-v1を確認。HOMEと実DHCPアドレスへのeth0経路、6fps設定を確認し、設定操作を行っていない。E-ink_0は旧能力buttons0/eink・風刺画だけONで再接続し、frame70038のReceipt/Renderedと継続heartbeatを確認。旧ai-news-http.service PID2081とai-news-generate.timerも継続。
+LCDは新BOOTSEL連絡の後、10:23 JSTに単一Flash ID 0123456789ABCDE0へ上記4d7def9e UF2をload、Flash verify100% OK、起動。実Helloでlcd-push-v1を確認。HOMEと実DHCPアドレスへのeth0経路、6fps設定を確認し、設定操作を行っていない。E-ink_0は旧能力buttons0/eink・風刺画だけONで再接続し、frame70038のReceipt/Renderedと継続heartbeatを確認。旧ai-news-http.service PID2081とai-news-generate.timerも継続。
 
 採取は 2026-10-15T10:23:41.589116+09:00〜2026-10-15T10:27:11.662212+09:00、210秒。Pico統計の比較区間208.587秒で受信1246枚・描画1133枚・latest置換等の破棄113枚、**5.432fps**。全StreamStatusがaccepted、画像ごとのReceipt/Rendered ACKは0、再接続・write stall・USB受信/送信エラー0。USBトレースのdropped counterは[12, 12]で増えておらず、接続前の12件は測定中の欠落と混同しない。
 
@@ -46,7 +46,7 @@ LCDは新BOOTSEL連絡の後、10:23 JSTに単一Flash ID E661640843239D21へ上
 
 実mainを含む同じ回帰で、修正前ONは成功、OFFはfirst_us==SDK時刻のassertで失敗を再現。修正後はON/OFFとも32bitを超える時刻・2枚目の描画期限前/後・1秒後のelapsed_ms・完了時刻/最大間隔・静止画ACK/入力キャンセルを確認し、全28ホスト実行PASS。通常SDKビルド成功。OFFも既存SDK/core libraryを再利用し、全7applicationファイルをPM_TRACE_ENABLE=0でクロスコンパイル/リンクして検証UF2を生成した。CMakeの通常ビルドは従来のtrace=1のまま。OFF候補は標準flash.sh対象外の検証variantである。
 
-現在、通常生成先 `build/PicoMado-lcd1/PicoMado-lcd1.uf2` は未転送の時計修正ON候補へ更新済み：724480B、SHA256 `9bc20fa7ca823551d813c3afa0ac082fafadafc9e1bfda94da801942af214e8c`、text368284B/BSS223976B。OFF検証候補 `build/PicoMado-lcd1/clock-trace-off/PicoMado-lcd1-clock-trace-off.uf2` は721920B、SHA256 `4e7162f9d4ad6f21f9b3ce5e3aadffbfec82acccb08eede7b9551e44d6909964`、text367084B/BSS218632B。両方0600・Git除外。実機で動いているのは引き続き4d7def9eの10:23書込版。新たなBOOTSEL通知まで再書込みしない。
+現在、通常生成先 `build/example-lcd/example-lcd.uf2` は未転送の時計修正ON候補へ更新済み：724480B、SHA256 `9bc20fa7ca823551d813c3afa0ac082fafadafc9e1bfda94da801942af214e8c`、text368284B/BSS223976B。OFF検証候補 `build/example-lcd/clock-trace-off/example-lcd-clock-trace-off.uf2` は721920B、SHA256 `4e7162f9d4ad6f21f9b3ce5e3aadffbfec82acccb08eede7b9551e44d6909964`、text367084B/BSS218632B。両方0600・Git除外。実機で動いているのは引き続き4d7def9eの10:23書込版。新たなBOOTSEL通知まで再書込みしない。
 
 6fps未達・p95の揺らぎと表示ペーシング方針はユーザーの見た目/ボタン評価待ちで変更しない。30fps実機と実空きheap/stack最高水位も未確認。今回の時計修正による滑らかさ改善を主張しない。追加commit/pushなし。証跡は `task-3/eink-evidence/wired-20261015/clock-fix/verification.json` とON/OFF build/host/beforeログ。
 

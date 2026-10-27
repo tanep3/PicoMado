@@ -34,7 +34,7 @@ HOME／AWAY等の10通信マクロはLCD個体と値を表示せず一致比較�
 
 ## 現在の実機と修正成果物
 
-E-ink_0のFlash IDはE6614864D3813227。本人確認後の単一BOOTSELで取得しGit除外board-id.txtに保存。BOOTSEL USB serial E0C9125B0D9Bとは別物。通常起動のUSB CDCは `/dev/serial/by-id/usb-Raspberry_Pi_Pico_E6614864D3813227-if00`。追加の個体識別機構は作っていない。
+E-ink_0のFlash IDは0123456789ABCDE1。本人確認後の単一BOOTSELで取得しGit除外board-id.txtに保存。BOOTSEL USB serial E0C9125B0D9Bとは別物。通常起動のUSB CDCは `/dev/serial/by-id/usb-Raspberry_Pi_Pico_0123456789ABCDE1-if00`。追加の個体識別機構は作っていない。
 
 初回書込みのUF2 SHA256は `3de693dc5c6aee71cfbfee3d835c2e9fc4f34fcf28acf962ab3934d80c258c15`。load／verify100% OKとアプリ再起動を確認した。その後、再BOOTSELの本人確認を受け、以下の修正版を同じFlash IDに一度だけ再転送した。ログ `/tmp/picomado-E-ink_0-fixed-flash.txt` はload／verify100% OK、再起動、終了コード0。
 
@@ -42,14 +42,14 @@ E-ink_0のFlash IDはE6614864D3813227。本人確認後の単一BOOTSELで取得
 | --- | --- | ---: | ---: | ---: | --- |
 | E-ink_0 | build/E-ink_0/E-ink_0.uf2 | 718336 | 365180 | 159136 | load／verify済み |
 | E-ink_1 | build/.unbound/E-ink_1/E-ink_1.uf2 | 720896 | 366468 | 155228 | 未結合・禁止 |
-| PicoMado-lcd1 | build/PicoMado-lcd1/PicoMado-lcd1.uf2 | 718848 | 365348 | 198680 | load／verify済み |
+| example-lcd | build/example-lcd/example-lcd.uf2 | 718848 | 365348 | 198680 | load／verify済み |
 
 ELF dataは両方0。静的RAM量でありスタック等を含む実測最大値ではない。E-ink_1はCONNECTED=0で表示処理が最適化除去されるため、転置修正によるUF2差分はない。CONNECTED=1の表示有効候補は修正された共通変換を使用する。
 
 ```text
 E-ink_0 e8409d06a6786467b11b7d1554334d8bbbc8aa8cd399436fb04e16e0e230131a
 E-ink_1 6e03c4ecee2c0560df164f750ec19ab1079e45602add607134eb413401a87b8c
-PicoMado-lcd1 ea8d2a3a9a98dc635117ac6819a2901281549bf874213a40896cee7bcde71a1b
+example-lcd ea8d2a3a9a98dc635117ac6819a2901281549bf874213a40896cee7bcde71a1b
 ```
 
 ## 本番反映後の証拠
@@ -87,9 +87,9 @@ FrameStartへ後方互換の任意mode=normal/subを追加。共通Pico入力実
 
 ## LCDモード同期版の実機書込み完了
 
-ユーザーの再BOOTSEL連絡後、既存flash.shで単一対象Flash ID E661640843239D21を照合。準備済みPicoMado-lcd1 UF2（718848B、SHA256 ea8d2a3a9a98dc635117ac6819a2901281549bf874213a40896cee7bcde71a1b）をloadし、Flash verify100% OK、アプリ再起動、終了コード0を確認した。書込みログ最終時刻は2026-10-14 19:05:43 JST。/tmp/picomado-lcd-mode-flash.txtへ記録。
+ユーザーの再BOOTSEL連絡後、既存flash.shで単一対象Flash ID 0123456789ABCDE0を照合。準備済みexample-lcd UF2（718848B、SHA256 ea8d2a3a9a98dc635117ac6819a2901281549bf874213a40896cee7bcde71a1b）をloadし、Flash verify100% OK、アプリ再起動、終了コード0を確認した。書込みログ最終時刻は2026-10-14 19:05:43 JST。/tmp/picomado-lcd-mode-flash.txtへ記録。
 
-通常USBは同じE661640843239D21へ復帰。HOME／ACTIVE／READY／IP取得を確認。incarnation3／新session129へ再接続し、rain-radarのframe904でサーバ側ReceiptAck／RenderedAck、USB側CRC25600B／Receipt投入／Rendered投入を確認した。未接続中のUSB診断欠落4件はカウントされているが、サーバ側の両ACK到着を確認した。
+通常USBは同じ0123456789ABCDE0へ復帰。HOME／ACTIVE／READY／IP取得を確認。incarnation3／新session129へ再接続し、rain-radarのframe904でサーバ側ReceiptAck／RenderedAck、USB側CRC25600B／Receipt投入／Rendered投入を確認した。未接続中のUSB診断欠落4件はカウントされているが、サーバ側の両ACK到着を確認した。
 
 更新後のLCDだけでWeb保存を再試験。weather ONで現在rain-radarを維持、rain-radar OFFで天気frame905、weather OFFで中央ロゴ906、rain-radar ONで復元frame907へ即時配信し、すべてReceiptAck／RenderedAckを確認した。session129を維持、最後はrain-radarのみON／選択rain-radar／online、enabled_revision40。証跡はtask-3/eink-evidence/lcd-postflash-settings-acks.json。物理SUBの押下とその後のWeb解除は今回は操作しておらず、実mainホスト試験の同期確認と区別する。
 

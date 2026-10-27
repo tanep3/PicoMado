@@ -59,7 +59,7 @@
         {
           "SHA256": "71ec473d079e0de38414425d64f47cbac9274f8b935ca7d70d1f346d68e13da1",
           "kind": "check",
-          "path": "/home/tane/Documents/Codex/2026-10-19/task-2/observation-prevention-20261021/p2-04-gate-evidence/check.json"
+          "path": "$HOME/Documents/Codex/2026-10-19/task-2/observation-prevention-20261021/p2-04-gate-evidence/check.json"
         }
       ],
       "state": "verified"

@@ -75,9 +75,9 @@
 - 起動後357行の確認区間でpanic/error/timeout等は0件。E-ink両機とLCDの再接続・RenderedAckを確認。
 - LCD時計は表示開始時 `14:44:16` と分境界 `14:45:00` の送信を確認。後者のRenderedAckは `14:45:04` で、実機配送／完了応答には約4秒の遅れを観測した。送信時刻の分境界は確認できたが、物理表示の正確な完了時刻・遅れの原因は未確定で、過去からのLCD通信課題と混同せずユーザー確認を残す。
 
-E-ink_0は実configとFlash ID `E6614864D3813227`、唯一のBOOTSEL端末、manifestとUF2 SHAを照合し、load/verify/起動を完了した。UF2 SHA-256は `2136bf3954b3e05cf78c1dabd4c53bf8d615a9802f334f9831795772259a7399`（723,456 byte）。USBシリアルの同ID再認識、ACTIVE/READYの診断、サーバの `eink-clock-v1` 申告と描画完了ACKを確認した。時計へ強制切替はしていないため、部分更新の見た目・残像・10分全面更新はユーザーテストで確認する。
+E-ink_0は実configとFlash ID `0123456789ABCDE1`、唯一のBOOTSEL端末、manifestとUF2 SHAを照合し、load/verify/起動を完了した。UF2 SHA-256は `2136bf3954b3e05cf78c1dabd4c53bf8d615a9802f334f9831795772259a7399`（723,456 byte）。USBシリアルの同ID再認識、ACTIVE/READYの診断、サーバの `eink-clock-v1` 申告と描画完了ACKを確認した。時計へ強制切替はしていないため、部分更新の見た目・残像・10分全面更新はユーザーテストで確認する。
 
-その後、ユーザーから「E-ink_1 Bootselしました」と明示されたため、E-ink_1も実configとFlash ID `E6614864D34F8E22`、唯一のBOOTSEL端末を照合してload/verify/起動した。SHA-256は `397115122bca8c1e6db781ea10602954461292184c17759d7bc094698aa7ef38`（726,528 byte）。`14:48:53 JST` に `eink-clock-v1` 付きで再接続し、`14:48:58` にframe 288395の描画ACKを確認した。USBの同ID再認識とACTIVE/READY診断も確認した。サーバは同じPID `907828`、再起動回数0を継続している。LCDの時計用ファーム更新は不要。
+その後、ユーザーから「E-ink_1 Bootselしました」と明示されたため、E-ink_1も実configとFlash ID `0123456789ABCDE2`、唯一のBOOTSEL端末を照合してload/verify/起動した。SHA-256は `397115122bca8c1e6db781ea10602954461292184c17759d7bc094698aa7ef38`（726,528 byte）。`14:48:53 JST` に `eink-clock-v1` 付きで再接続し、`14:48:58` にframe 288395の描画ACKを確認した。USBの同ID再認識とACTIVE/READY診断も確認した。サーバは同じPID `907828`、再起動回数0を継続している。LCDの時計用ファーム更新は不要。
 
 追加確認の `14:50 JST` 時点では全3台がonline。ユーザー操作によりE-ink_1とLCDが時計を選択している。こちらから選択・有効化を変更していない。LCDは14:48・14:49の各00秒に送信とRenderedAckを確認した。
 

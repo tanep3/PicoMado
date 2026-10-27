@@ -8,7 +8,7 @@
     "verdict": "accepted",
     "sha256": "4f433c66d5ebcd02ca225f4458d637ccb9b7c203cc965e37ba2d9dc2debefad5"
   },
-  "capture": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/observation-recapture-20261021T014716Z",
+  "capture": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/observation-recapture-20261021T014716Z",
   "trials": 5,
   "device_complete": false,
   "server_complete": true,

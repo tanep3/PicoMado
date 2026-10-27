@@ -30,9 +30,9 @@
 
 | 端末 / Flash ID | 適用UF2 SHA256 | 起動後の確認 |
 | --- | --- | --- |
-| LCD / E661640843239D21 | 9c97fdb7390cf1f998a0bf0ad0a74fab627d7782bb69c8e7d108865c3465ccd6 | boot 4395c33ada81770a、元画像の受信・rendered報告、USB有限切替後も復帰 |
-| E-ink_1 / E6614864D34F8E22 | 662c77419d08dfcd389bbcbaa62e621ef51622aab4a4b13f96ddb5b9209806fe | boot 8dc818c156d9b7b6、session 113、weather frame 1214068 の受信・rendered報告 |
-| E-ink_0 / E6614864D3813227 | f041f895332457f9b327ef03b91c99f148069c278d6a64eb15898baec2e78a9c | boot 3733e37bcf5ff09、session 86、caricature frame 1218937 の受信・rendered報告 |
+| LCD / 0123456789ABCDE0 | 9c97fdb7390cf1f998a0bf0ad0a74fab627d7782bb69c8e7d108865c3465ccd6 | boot 4395c33ada81770a、元画像の受信・rendered報告、USB有限切替後も復帰 |
+| E-ink_1 / 0123456789ABCDE2 | 662c77419d08dfcd389bbcbaa62e621ef51622aab4a4b13f96ddb5b9209806fe | boot 8dc818c156d9b7b6、session 113、weather frame 1214068 の受信・rendered報告 |
+| E-ink_0 / 0123456789ABCDE1 | f041f895332457f9b327ef03b91c99f148069c278d6a64eb15898baec2e78a9c | boot 3733e37bcf5ff09、session 86、caricature frame 1218937 の受信・rendered報告 |
 
 3台の実機handoff（非公開の外部証跡）に個体別の書込み・起動証拠SHAと07:18 UTC時点の3台onlineを保存した。rendered ACK は端末報告がPiへ届いた事実であり、目視確認ではない。現在のデモはこの固定版とユーザーが快適と確認したテザリングを用い、別の対策を同時投入しない。
 

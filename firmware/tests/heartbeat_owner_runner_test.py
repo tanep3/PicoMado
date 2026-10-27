@@ -225,11 +225,13 @@ class Tests(unittest.TestCase):
             for name in ('header_observer.py','observer_client.py'):
                 data=b'# isolated observer stub\n';(observer/name).write_bytes(data)
                 digests[name]=hashlib.sha256(data).hexdigest()
-            cfg=dict(device='PicoMado-lcd1',expected_flash_id='E661640843239D21',
-                serial_by_id='/dev/serial/by-id/E661640843239D21',PID=os.getpid(),
+            cfg=dict(device='example-lcd',expected_flash_id='0123456789ABCDE0',
+                serial_by_id='/dev/serial/by-id/0123456789ABCDE0',PID=os.getpid(),
                 server_sha=hashlib.sha256(Path(f'/proc/{os.getpid()}/exe').read_bytes()).hexdigest(),
                 observer=str(observer),observer_SHA256=digests,host_socket=str(root/'host.sock'),
                 interface='eth0',known_mac='02:00:00:00:00:01',local_ip='198.51.100.101',port=16153)
+            test_id='0123456789ABC001'
+            cfg.update(expected_flash_id=test_id, serial_by_id=f'/dev/serial/by-id/{test_id}')
             config=root/'config.json';config.write_text(json.dumps(cfg));out=root/'trial'
             with patch.object(sys,'argv',['heartbeat_capture_runner.py','--config',str(config),'--dir',str(out),'--execute']),\
                  patch.object(run.hc.txlib,'refresh_target',side_effect=ValueError('neighbor not REACHABLE')) as resolver,\

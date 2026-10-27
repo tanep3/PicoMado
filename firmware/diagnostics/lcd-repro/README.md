@@ -12,7 +12,7 @@
 umask 077
 cmake -S firmware/diagnostics/lcd-repro -B firmware/build/lcd-repro-sdk211 \
   -DPICO_SDK_PATH=$HOME/pico/pico-sdk -DPICO_BOARD=pico_w \
-  -DCMAKE_BUILD_TYPE=Release -DPM_REPRO_DEVICE=PicoMado-lcd1 \
+  -DCMAKE_BUILD_TYPE=Release -DPM_REPRO_DEVICE=example-lcd \
   -DPM_REPRO_SAMPLE=OFF -DPM_REPRO_WIFI_HOME=ON \
   -DPM_REPRO_YOUTUBE_CYW43=ON -DPM_REPRO_SPI_BAUD=5000000
 cmake --build firmware/build/lcd-repro-sdk211 -j4

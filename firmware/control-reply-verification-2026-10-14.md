@@ -32,13 +32,13 @@ LCD動画はFrameSent（OSへの送信）で次位置を許可し、端末のRec
 - ファーム26実行PASS。両応答、前後・途中の順序、旧形式、古い世代／incarnation／session、別フレーム、連続切替、Web変更、SUB取消し、待機、設定同期、再接続、不正offsetをsample LCD／E-ink_0／E-ink_1で検証。
 - 実際の旧main（7cf7e7b）を別の一時ホストビルドで使い、新コンテキスト付き応答と従来の画像／両ACKを3構成で確認。kind／version／画像契約は変更せず、追加項目は任意。新LCD＋旧サーバは旧形式の試験で確認。旧サーバの位置応答は世代を持たないため完全な古さ判定はできず、サーバ先行を推奨する。
 - サーバを先行導入済み。SHA256 f0024aeaa3e4913de7360d3fc739957f8f105cb055ff75c309fe86f94d6fb3d3、15103032B、PID33784。caricature-retention-delete featureと起動完了後の実PICOMADO_CARICATURE_DELETE=1を維持。旧E-ink_0はframe982、旧LCDは983で両ACK・設定維持を確認。旧サービス／timer active。
-- 新しいBOOTSEL連絡後、LCDの単一Flash ID E661640843239D21を照合し、20:53:30 JSTに転送・Flash verify100% OK・起動を完了した。E-ink書込み、OS／ネットワーク／xrdp変更、SSHは行っていない。
+- 新しいBOOTSEL連絡後、LCDの単一Flash ID 0123456789ABCDE0を照合し、20:53:30 JSTに転送・Flash verify100% OK・起動を完了した。E-ink書込み、OS／ネットワーク／xrdp変更、SSHは行っていない。
 
 ## 準備済みUF2
 
 | 構成 | パス | bytes | 用途 |
 | --- | --- | ---: | --- |
-| LCD | build/PicoMado-lcd1/PicoMado-lcd1.uf2 | 719872 | load／verify済み |
+| LCD | build/example-lcd/example-lcd.uf2 | 719872 | load／verify済み |
 | E-ink_1 V4表示有効 | build/.unbound-panel/E-ink_1/E-ink_1.uf2 | 722432 | UNBOUND-PANEL |
 | E-ink_1 表示なし | build/.unbound/E-ink_1/E-ink_1.uf2 | 722432 | UNBOUND |
 
@@ -56,7 +56,7 @@ V3ドライバはこのプロジェクトに実装していない。display_eink
 
 ## 応答競合修正版LCDの実機転送後
 
-20:52 JSTのユーザーBOOTSEL連絡を受け、期待SHA256 b817e5a44ee0a95e8f4004b272b208ce5f9ca65091f02a1bbb7117ed21a717d0と単一対象E661640843239D21を照合。20:53:30 JSTにload／Flash verify100% OK／アプリ起動、終了コード0を確認。ログは/tmp/picomado-lcd-control-fix-flash.txt。
+20:52 JSTのユーザーBOOTSEL連絡を受け、期待SHA256 b817e5a44ee0a95e8f4004b272b208ce5f9ca65091f02a1bbb7117ed21a717d0と単一対象0123456789ABCDE0を照合。20:53:30 JSTにload／Flash verify100% OK／アプリ起動、終了コード0を確認。ログは/tmp/picomado-lcd-control-fix-flash.txt。
 
 20:53:36にincarnation3／session139へ再接続。frame986のReceiptAckとRenderedAckは20:53:39、USBもCRC25600B・Receipt投入成功・Rendered投入成功、HOME／ACTIVE／READYを確認。接続前のリング欠落12件はカウントされているが、両ACKの実到着はサーバで確認した。
 
@@ -80,7 +80,7 @@ LCD/E-inkともRenderedAck後に次の共有再生位置を採用する。端末
 
 本番サーバは2026-10-14T22:21:53.754188+09:00に反映。SHA256 `629afb3a292ba84c5c95b8bddcc27e5649991d7fece4a9e2a723d845b95867a4`、15105696B、PID105348。unit hash不変、実削除env=1、feature有効、API200と旧風刺画service/timer稼働を確認。旧E-ink_0はsession14/frame7666でReceiptとRendered、heartbeatを確認し、風刺画のみONを維持した。
 
-新LCD BOOTSEL連絡後、単一Flash ID E661640843239D21とbb57f71eの全SHAを照合し、22:22:16 JSTに719872Bをload/Flash verify100% OK/起動した。Hello能力にframe-bytes-v1、frame7667から動画の両ACK、ignored ACK0を確認。しかしsession312 frame7678、313 frame7702、314 frame7761でACK待ち期限切れと再接続が再現した。USBではこれらのCRC/SPI/ACKのTCP投入が完了し、サーバに届かない例がある。TCPは再送・cwnd低下を記録している。タイムアウトを長くして解決としない。動画連続再生と物理ボタンの受入は未完了。
+新LCD BOOTSEL連絡後、単一Flash ID 0123456789ABCDE0とbb57f71eの全SHAを照合し、22:22:16 JSTに719872Bをload/Flash verify100% OK/起動した。Hello能力にframe-bytes-v1、frame7667から動画の両ACK、ignored ACK0を確認。しかしsession312 frame7678、313 frame7702、314 frame7761でACK待ち期限切れと再接続が再現した。USBではこれらのCRC/SPI/ACKのTCP投入が完了し、サーバに届かない例がある。TCPは再送・cwnd低下を記録している。タイムアウトを長くして解決としない。動画連続再生と物理ボタンの受入は未完了。
 
 旧実動playerはSTA開始後にSDKロック内で`CYW43_NONE_PM`を設定していたが、bb57f71e移植には含めていなかった。SDK標準はPERFORMANCEでもPM2である。旧playerと同じ接続中radio方針を共通mainへ補完し、SDK結果だけログへ出す。失敗でも接続処理を保ち、待機では従来どおりSTAを停止する。OS/ルータ/SSID/HOME/AWAY/プロキシ/端末IPの設定変更はしていない。この差分の効果はまだ実機未検証で、PM2が障害の唯一の原因という確定ではない。接続中消費電流は未測定。
 
@@ -88,11 +88,11 @@ LCD/E-inkともRenderedAck後に次の共有再生位置を採用する。端末
 
 | 端末 | パス（firmwareから） | UF2 B | text B | bss B | 区分 |
 | --- | --- | ---: | ---: | ---: | --- |
-| PicoMado-lcd1 | `build/PicoMado-lcd1/PicoMado-lcd1.uf2` | 720384 | 366132 | 214652 | NORMAL |
+| example-lcd | `build/example-lcd/example-lcd.uf2` | 720384 | 366132 | 214652 | NORMAL |
 | E-ink_0 | `build/E-ink_0/E-ink_0.uf2` | 719872 | 365876 | 175108 | NORMAL |
 | E-ink_1 | `build/.unbound-panel/E-ink_1/E-ink_1.uf2` | 722432 | 367244 | 175204 | UNBOUND-PANEL |
 
-PicoMado-lcd1 SHA256: `c5c9fc741c94cc77fbdde036548fc17e905a9637d0313d4d29692f5db2ab1d56`
+example-lcd SHA256: `c5c9fc741c94cc77fbdde036548fc17e905a9637d0313d4d29692f5db2ab1d56`
 
 E-ink_0 SHA256: `5d51e67578e72c9e91c5890da3920825b8ef1c69c60e83609063e2be5d368617`
 
@@ -131,13 +131,13 @@ UF2/config.hは0600・Git除外。E-ink_0/1の10通信マクロはLCDと一致�
 
 ## 省電力方針補完版LCD転送 — 22:48 JST
 
-22:47 JSTの新BOOTSEL連絡後、単一Flash ID E661640843239D21・最新c5c9fc741c94cc77fbdde036548fc17e905a9637d0313d4d29692f5db2ab1d56・720384B・通常LCD/4入力/個体config/manifestを照合。22:48:42 JSTにload/Flash verify100% OK/起動、22:48:49にsession328、YouTube frame9109のReceipt/Renderedを確認した。22:50:08まで両ACK各115・ACK待ち切れ0、短時間の観測であり改善の受入ではない。PM設定要求の初期USBログは採取開始前にリングから欠落し、実PMモード読戻しも未実装のため、PM実状態は未確認。
+22:47 JSTの新BOOTSEL連絡後、単一Flash ID 0123456789ABCDE0・最新c5c9fc741c94cc77fbdde036548fc17e905a9637d0313d4d29692f5db2ab1d56・720384B・通常LCD/4入力/個体config/manifestを照合。22:48:42 JSTにload/Flash verify100% OK/起動、22:48:49にsession328、YouTube frame9109のReceipt/Renderedを確認した。22:50:08まで両ACK各115・ACK待ち切れ0、短時間の観測であり改善の受入ではない。PM設定要求の初期USBログは採取開始前にリングから欠落し、実PMモード読戻しも未実装のため、PM実状態は未確認。
 
 同じraspi5有線環境・同じ本番PID105348のまま、post-pm-flashへ別採取を開始。collector PID115154、22:49:21から20分予定。旧E-ink_0は再転送せず同じ接続/設定を維持。E-ink_1未結合、追加E-ink転送なし。Flash logは/tmp/picomado-stream-pm-lcd-flash.txt、証跡lcd-pm-flash.json。連続動画/物理ボタンの受入は未完了。
 
 ## 経路の確認による比較条件訂正 — 23:06 JST
 
-23:05〜06の読み取りで、実LCDのDHCPアドレス192.168.0.173へ、サーバのbind送信元192.0.2.120を指定した`ip -4 route get`もdev wlan0を返した。eth0のIPv4 routeは空、wlan0に192.168.0.0/24とdefault（metric600）がある。TCP socketは192.0.2.120:16153→LCDである。eth0にIPがあるという22:05確認だけでは、端末向け送信が有線だとは確定できなかった。前半区間の経路は採っていないので、この20分を純粋な有線区間とは記載しない。停止の唯一の原因と断定せず、route-evidence.jsonを保存した。ネット設定変更は禁止のため一切変更していない。
+23:05〜06の読み取りで、実LCDのDHCPアドレス203.0.113.10373へ、サーバのbind送信元192.0.2.120を指定した`ip -4 route get`もdev wlan0を返した。eth0のIPv4 routeは空、wlan0に203.0.113.102/24とdefault（metric600）がある。TCP socketは192.0.2.120:16153→LCDである。eth0にIPがあるという22:05確認だけでは、端末向け送信が有線だとは確定できなかった。前半区間の経路は採っていないので、この20分を純粋な有線区間とは記載しない。停止の唯一の原因と断定せず、route-evidence.jsonを保存した。ネット設定変更は禁止のため一切変更していない。
 
 ## 最新LCD継続試験終了 — 23:09 JST
 

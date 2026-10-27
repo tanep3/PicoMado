@@ -11,11 +11,11 @@
   "firmware_changes": 0,
   "server_restarts": 0,
   "private_roots": [
-    "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/TCP-header-trials-20261021T022124Z",
-    "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/TCP-header-trials-20261021T022422Z"
+    "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/TCP-header-trials-20261021T022124Z",
+    "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/TCP-header-trials-20261021T022422Z"
   ],
   "slow_case": {
-    "slow_trial": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/TCP-header-trials-20261021T022422Z/trial-01",
+    "slow_trial": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/TCP-header-trials-20261021T022422Z/trial-01",
     "packet_to_ack_us": 70.056,
     "first_Pi_payload_ms": [
       1436.271217,

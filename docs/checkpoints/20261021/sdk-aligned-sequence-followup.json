@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "evidence_root": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-live-20261021T040833Z",
-  "analysis_script": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-live-20261021T040833Z/analysis/sequence_followup.py",
+  "evidence_root": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-live-20261021T040833Z",
+  "analysis_script": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-live-20261021T040833Z/analysis/sequence_followup.py",
   "analysis_SHA256": "c62cfe4e976c8dc30f98a8849cb2ea40a3e632bb0edd15833572e4ae6f28fbe3",
   "results_SHA256": "b57f65e14c8ba517f32e4bc2f6b262c57789fbeea1ae1c5c62882c10e744aafe",
   "validation": {

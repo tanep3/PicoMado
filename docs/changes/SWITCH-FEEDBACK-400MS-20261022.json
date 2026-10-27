@@ -25,7 +25,7 @@
       "evidence": [
         {
           "kind": "check",
-          "path": "/home/tane/Documents/Codex/2026-10-18/task/picomado-feedback-400ms-20261022/gate-release/check.json",
+          "path": "$HOME/Documents/Codex/2026-10-18/task/picomado-feedback-400ms-20261022/gate-release/check.json",
           "SHA256": "a0d12ec483e0e31f148e1b6e47bc3d37f030a4ce7b4a29256ceaa3a555f4e695"
         }
       ]
@@ -35,17 +35,17 @@
       "evidence": [
         {
           "kind": "review",
-          "path": "/home/tane/Documents/Codex/2026-10-18/task/picomado-feedback-400ms-20261022/work/firmware/build/PicoMado-lcd1/review.json",
+          "path": "$HOME/Documents/Codex/2026-10-18/task/picomado-feedback-400ms-20261022/work/firmware/build/example-lcd/review.json",
           "SHA256": "af2d9f846366dd6aca8ccf2ec79515f227bb30fed310600b39adf4c286d5f1b4"
         },
         {
           "kind": "review",
-          "path": "/home/tane/Documents/Codex/2026-10-18/task/picomado-feedback-400ms-20261022/work/firmware/build/E-ink_0/review.json",
+          "path": "$HOME/Documents/Codex/2026-10-18/task/picomado-feedback-400ms-20261022/work/firmware/build/E-ink_0/review.json",
           "SHA256": "380e7e36f47aac95732cf753350b537fc28eb65cdb55683b4f3664ef3c5eaa41"
         },
         {
           "kind": "review",
-          "path": "/home/tane/Documents/Codex/2026-10-18/task/picomado-feedback-400ms-20261022/work/firmware/build/E-ink_1/review.json",
+          "path": "$HOME/Documents/Codex/2026-10-18/task/picomado-feedback-400ms-20261022/work/firmware/build/E-ink_1/review.json",
           "SHA256": "360f66a3fed15cb03afbd081046872ffee618e95ff124c311549fb75858357d9"
         }
       ]

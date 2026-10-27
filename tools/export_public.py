@@ -37,7 +37,7 @@ def main():
     m = re.search(r"expected_flash_id=['\"]([A-F0-9]{16})['\"]", fixture)
     n = re.search(r"device=['\"]([A-Za-z0-9_-]+)['\"],expected_flash_id=", fixture)
     if not m or not n: raise SystemExit('private fixture reference could not be identified')
-    replacements = {m.group(1).encode(): b'0123456789ABCDEF', n.group(1).encode(): b'example-lcd'}
+    replacements = {m.group(1).encode(): b'0123456789ABCDEF', n.group(1).encode(): b'example-device'}
     # Compare selected files against typed identifiers found in private JSON records.
     # Never print or copy the values. This supplements the allowlist, not a manual review.
     sensitive = set()

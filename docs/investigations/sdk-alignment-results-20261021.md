@@ -29,7 +29,7 @@ SDK-align-20261021T032923Z/SDK-before.tarにSDK全体/.git/submodule metadata/ig
 
 ## 成果物・ARM比較
 
-rootはSDK-align-20261021T032923Z。candidateはartifacts/aligned-observed/PicoMado-lcd1.uf2、参照はartifacts/aligned-official-LL/PicoMado-lcd1.uf2。両方とも別source/build dirで成功した。既存CMakeはsource/firmware/build/PicoMado-lcd1を厳密要求するため、variantごとに同じsourceを配置してこの制約を維持した。
+rootはSDK-align-20261021T032923Z。candidateはartifacts/aligned-observed/example-lcd.uf2、参照はartifacts/aligned-official-LL/example-lcd.uf2。両方とも別source/build dirで成功した。既存CMakeはsource/firmware/build/example-lcdを厳密要求するため、variantごとに同じsourceを配置してこの制約を維持した。
 
 | 項目 | 書込み済み旧組合せ | 整合SDK・既存計測維持 | 整合SDK・公式LL参照 |
 | --- | ---: | ---: | ---: |
@@ -54,10 +54,10 @@ rootはSDK-align-20261021T032923Z。candidateはartifacts/aligned-observed/PicoM
 
 ## 次の実機手順（未実行）
 
-対象はLCD PicoMado-lcd1、Flash ID E661640843239D21のみ。親が候補と操作範囲を提示した後、BOOTSEL状態で個体・UF2 SHA・個別設定/bindingを再照合し、既存flash.shと同等のpicotool手順で1回load/verify/rebootする。書込み/verify結果不明なら重複実行せず調べる。続いて同個体USB再認識・通常サーバ再接続/受信ACK/描画ACKを確認する。
+対象はLCD example-lcd、Flash ID 0123456789ABCDE0のみ。親が候補と操作範囲を提示した後、BOOTSEL状態で個体・UF2 SHA・個別設定/bindingを再照合し、既存flash.shと同等のpicotool手順で1回load/verify/rebootする。書込み/verify結果不明なら重複実行せず調べる。続いて同個体USB再認識・通常サーバ再接続/受信ACK/描画ACKを確認する。
 
 次の比較はEV1 OFFから開始し、単一USB ownerと新source marker 7f4c9375対応collectorを使う。USB SIMと物理buttonの入口差を明記し、速い対照と遅い例を同条件で比較する。SDK変更だけではserver更新は不要。実機書込み/採取は今回のfolder更新・build範囲では行わない。
 
-直前に戻すfirmwareは現在書込み済みのfd19…（gap-p2-build/artifacts/PicoMado-lcd1/PicoMado-lcd1.uf2）。f0c6a15a…はさらに前の履歴で、今回候補の直前rollbackと取り違えない。SDK自身はbefore.jsonの旧組合せへ戻す。DB/configの巻き戻しはしない。
+直前に戻すfirmwareは現在書込み済みのfd19…（gap-p2-build/artifacts/example-lcd/example-lcd.uf2）。f0c6a15a…はさらに前の履歴で、今回候補の直前rollbackと取り違えない。SDK自身はbefore.jsonの旧組合せへ戻す。DB/configの巻き戻しはしない。
 
 [機械可読checkpoint](../checkpoints/20261021/sdk-alignment-candidates.json)、root/ready.jsonに候補・復旧先・未実施範囲を固定した。

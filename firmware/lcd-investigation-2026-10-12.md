@@ -4,13 +4,13 @@
 
 ## 実機の現在値
 
-ユーザーはスタック修正版で「画面まっくら。ボタン押しても無反応」と報告。LCD の合格判定はしていない。修正版は対象 Flash ID `E661640843239D21` へ verify 100% で書き込まれ、21:41 UTC の新セッションで frame 65、21:49 UTC の frame 66 についてサーバが受信 ACK と描画 ACK を記録した。ACK は SPI API 戻り後のソフトウェア通知であり、LCD が光った証明ではない。21:53 UTC の frame 67 送信は 99,758 B のうち 95,471 B で約2秒止まり、サーバはセッションを切断。21:54 UTC の `/api/state` は offline、TCP 接続なし。ボタン入力と切断の因果関係はログから未確定。さらにユーザーは21:56 UTCにBOOTSELへ移したので、その時点以降のheartbeat停止・offlineは診断根拠にしない。
+ユーザーはスタック修正版で「画面まっくら。ボタン押しても無反応」と報告。LCD の合格判定はしていない。修正版は対象 Flash ID `0123456789ABCDE0` へ verify 100% で書き込まれ、21:41 UTC の新セッションで frame 65、21:49 UTC の frame 66 についてサーバが受信 ACK と描画 ACK を記録した。ACK は SPI API 戻り後のソフトウェア通知であり、LCD が光った証明ではない。21:53 UTC の frame 67 送信は 99,758 B のうち 95,471 B で約2秒止まり、サーバはセッションを切断。21:54 UTC の `/api/state` は offline、TCP 接続なし。ボタン入力と切断の因果関係はログから未確定。さらにユーザーは21:56 UTCにBOOTSELへ移したので、その時点以降のheartbeat停止・offlineは診断根拠にしない。
 
 ## 実働 YouTube 基準の端から端の比較
 
 | 項目 | 完成確認済み YouTube | PicoMado 通信版 | 判断 |
 | --- | --- | --- | --- |
-| 実 UF2 | `video-rotate180.uf2` SHA256 `65900f...eaa1c`。2026-10-10 に対象 Flash ID と全画面表示を目視確認 | `PicoMado-lcd1.uf2` SHA256 `9671e0...1b49e4e`。今回の画面は黒 | YouTube を可視の正本とする |
+| 実 UF2 | `video-rotate180.uf2` SHA256 `65900f...eaa1c`。2026-10-10 に対象 Flash ID と全画面表示を目視確認 | `example-lcd.uf2` SHA256 `9671e0...1b49e4e`。今回の画面は黒 | YouTube を可視の正本とする |
 | 本番ターゲット | `pico_w_jpeg_player` に `pico_player.c`、JPEG decoder、`lgfx_tjpgd.c` をリンク。LCD は `lcd_display.h` の Pico SDK `hardware_spi` 直送。LovyanGFX 本体は LCD ドライバとしてリンクせず、採用した E0/E1 ガンマ表のみ由来 | `picomado_lcd` に `main.c`、`lcd.c`、`net.c`、`ws_accept.c` をリンクし `hardware_spi` 直送 | 「LovyanGFXをそのままリンク」は実働経路と異なる |
 | 初期化順 | `cyw43_arch_init()`→STA enable→Wi-Fi PM設定→`lcd_init()`→3秒のカラーテスト→Wi-Fi join | `stdio_init_all()`→`pm_lcd_init()`→config照合/ボタンGPIO→`cyw43_arch_init()`→STA enable→Wi-Fi join。通常ビルドは起動テスト帯なし | **差あり**。CYW43初期化後にLCDをリセットする順は YouTube と一致させる価値がある。黒画面原因かは未証明 |
 | LCD ピン | SPI0 GP18 SCK、GP19 MOSI、GP17 CS、GP20 DC、GP21 RESET | 同一。GP12/13/14/15 はボタン | ピン衝突なし。Pico W CYW43 PIOバスはGP23/24/25/29 |

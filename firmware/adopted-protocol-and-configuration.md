@@ -30,7 +30,7 @@ LCDは160×80 RGB565BE/25600B、E-inkの通信画像は250×122 mono1/3813B（ce
 | LCD SPI | 通常20MHz要求、制御と画素同速、窓指定から25600B完了までCS保持。125MHzでは実15.625MHzになり得るのでSDK読戻しを使う。40MHzは未採用。 | GPIO、offset24、回転・色・gammaを変更しない。 |
 | 入力・個体 | LCD4、E-ink0/2ボタン。config.h/board-idのbindingと秘密はGit外。通常main stack4096B。 | LCDピン・35ms安定判定、E-ink SPI1/4MHz等はREADME/プリセットが正本。長押し閾値は端末設定。 |
 | 通常ログ | trace ON、LCD stats ON/verbose OFF。stdio stdout/deadlock timeoutは両方0。固定RAM、1回1record・部分write。 | SDK既定500ms待ちをこのビルドへ当てはめない。処理時間0の保証でもない。 |
-| 診断候補 | AP2/SIM/TX/CYW43_INNER/STREAMは既定OFF。私有LL生成時に元SDK SHAを検査し共有SDKを編集しない。 | 候補のLCD BSS245136B/静的heap余裕11768Bはそのvariantの値。保存済みPicoMado-lcd1-ALL-OFFもSTREAM_DIAGNOSTICSとAWAY_EEX1はONで、AP2/SIM/TX/CYのみOFF。名前で全診断OFFと判断せず実CMakeCache/compile commandとhashを照合する。今後の変更へ値を流用しない。 |
+| 診断候補 | AP2/SIM/TX/CYW43_INNER/STREAMは既定OFF。私有LL生成時に元SDK SHAを検査し共有SDKを編集しない。 | 候補のLCD BSS245136B/静的heap余裕11768Bはそのvariantの値。保存済みexample-lcd-ALL-OFFもSTREAM_DIAGNOSTICSとAWAY_EEX1はONで、AP2/SIM/TX/CYのみOFF。名前で全診断OFFと判断せず実CMakeCache/compile commandとhashを照合する。今後の変更へ値を流用しない。 |
 | DTR | 立上りで統計snapshot。既存AP2未開始gate、detached SIM COMMITは下降で開始、再接続で残り取消し。 | closeは抜線・USB IRQ消失ではない。継続観測とは別の実験契約。 |
 
 資格情報、SSID、秘匿URL、board IDの内容は転記しない。端末選択・有効化・共通順序・個体設定を文書整理で変えない。

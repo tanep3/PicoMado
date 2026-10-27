@@ -1,8 +1,8 @@
 {
-  "source_root": "/home/tane/Documents/Codex/2026-10-18/task/cyw43-inner-candidate-20261020/src",
+  "source_root": "$HOME/Documents/Codex/2026-10-18/task/cyw43-inner-candidate-20261020/src",
   "source_files": 348,
   "source_manifest_SHA256": "5369aed770e7f5569f2686263dadb40b88b655e0e288ed550d74879d86b27c8f",
-  "LCD_UF2": "/home/tane/Documents/Codex/2026-10-18/task/cyw43-inner-candidate-20261020/review-frozen/PicoMado-lcd1-INNER-ON.uf2",
+  "LCD_UF2": "$HOME/Documents/Codex/2026-10-18/task/cyw43-inner-candidate-20261020/review-frozen/example-lcd-INNER-ON.uf2",
   "LCD_UF2_SHA256": "ac6a01fe2d26b22ef7d5152e4b93568db9ec0dbc0511cfc6076cca97dd466136",
   "shared_SDK_LL_SHA256": "a4e6baa503b9332a0a445c8b22deb4bee62793c441dc74a200b0fe8065c397c7",
   "private_LL_SHA256": "769485c707d80f7841a60f626a735d6001eef1948d8a1dfa425538764010746d",

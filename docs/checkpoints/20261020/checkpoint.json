@@ -1,8 +1,8 @@
 {
   "production_commit": "ffb62d6dcfe35b85191672d686fcc65c6acb8b50",
-  "tested_source_root": "/home/tane/Documents/Codex/2026-10-18/task/cyw43-inner-candidate-20261020/src",
-  "review_evidence_root": "/home/tane/Documents/Codex/2026-10-18/task/cyw43-inner-candidate-20261020/review-frozen",
-  "private_configuration_backup": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/private-checkpoint",
+  "tested_source_root": "$HOME/Documents/Codex/2026-10-18/task/cyw43-inner-candidate-20261020/src",
+  "review_evidence_root": "$HOME/Documents/Codex/2026-10-18/task/cyw43-inner-candidate-20261020/review-frozen",
+  "private_configuration_backup": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/private-checkpoint",
   "private_configuration": [
     {
       "path": "firmware/devices/E-ink_1/board-id.txt",
@@ -13,11 +13,11 @@
       "sha256": "fa967354ee3653e795ba7b4cc15f8de6fa79c6e20e1fd1eece89222a98bdcde3"
     },
     {
-      "path": "firmware/devices/PicoMado-lcd1/board-id.txt",
+      "path": "firmware/devices/example-lcd/board-id.txt",
       "sha256": "9ad7dace15c469d67fc1ffdc3a7190dd6270060dd682ab1ee8adc513cb3bbea5"
     },
     {
-      "path": "firmware/devices/PicoMado-lcd1/config.h",
+      "path": "firmware/devices/example-lcd/config.h",
       "sha256": "8efebce22a7a54bae523e7141a6150bfa07261370fd3cb757c19bd43e490c729"
     },
     {

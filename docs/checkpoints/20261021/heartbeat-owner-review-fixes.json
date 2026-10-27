@@ -7,11 +7,11 @@
   ],
   "review_fixed": "/tmp/picomado-heartbeat-impl-review-6_n04u_d/review-outcome.json",
   "review_SHA256": "2002411e6554c9b707dac7aca8a94e0ca5d90f4a4e4de6f8b358a2e74e2182a4",
-  "worktree": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/work",
+  "worktree": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/work",
   "branch": "diag/heartbeat-capture",
-  "report": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/work/docs/heartbeat-owner-and-review-fix-results-20261021.md",
+  "report": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/work/docs/heartbeat-owner-and-review-fix-results-20261021.md",
   "validation": {
-    "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/runner-validation.json",
+    "path": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/runner-validation.json",
     "passed": 46,
     "failed": 0
   },
@@ -28,33 +28,33 @@
   "firmware": {
     "source_equivalent_to": "660583b52f6d42d86289e663fade3472e347d10a",
     "artifacts": {
-      "PicoMado-lcd1.uf2": {
-        "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/PicoMado-lcd1.uf2",
+      "example-lcd.uf2": {
+        "path": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/example-lcd.uf2",
         "SHA256": "9d4f66d1b71e07ef5c6e85b802201d0b6712b6290cd1c9133b40bdbf36479687"
       },
       "picomado_lcd.elf": {
-        "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/picomado_lcd.elf",
+        "path": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/picomado_lcd.elf",
         "SHA256": "bce25a981c62c6be149b82b4a55cc8f309bd9f774a9916fb01627e60fa21bd1b"
       },
       "picomado_lcd.elf.map": {
-        "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/picomado_lcd.elf.map",
+        "path": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/picomado_lcd.elf.map",
         "SHA256": "e1b3884b93cfd65d870413a9995586d7be1a4fa0b72be911e0a8802b9b64397d"
       }
     },
     "settings_sector_unwritten": true,
-    "expected_Flash_ID": "E661640843239D21",
+    "expected_Flash_ID": "0123456789ABCDE0",
     "RAM": {
       "static_main_RAM": 252072,
       "heap_possible": 10072,
       "stack_reserved": 4096
     },
     "rollback": {
-      "uf2": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z/artifacts/aligned-observed/PicoMado-lcd1.uf2",
+      "uf2": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z/artifacts/aligned-observed/example-lcd.uf2",
       "SHA256": "11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485"
     }
   },
   "server": {
-    "binary": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/picomado-server.heartbeat",
+    "binary": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/picomado-server.heartbeat",
     "SHA256": "cf452882458329c152f977906420eb52dcb2f44770ecc2432cd88e769588a761",
     "bytes": 17196488,
     "source_commit": "4b7987e0ab0912cad5b1e5132020fa9729e73a38",
@@ -67,7 +67,7 @@
     ],
     "fingerprints": [
       {
-        "file": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/work/service/target/release/.fingerprint/picomado-core-b375c00ab620d92b/bin-picomado-server.json",
+        "file": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/work/service/target/release/.fingerprint/picomado-core-b375c00ab620d92b/bin-picomado-server.json",
         "features": [
           "ack-path-probe",
           "boundary-observation",
@@ -89,12 +89,12 @@
     "firmware_rollback_SHA256": "11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485"
   },
   "server_rollback": {
-    "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/rollback/picomado-server.normal",
+    "path": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/rollback/picomado-server.normal",
     "SHA256": "e7b52c29d776bf9b9fbfea9125216c7b5c05613f47fadc9660618dedb76c727c"
   },
   "runner": {
-    "config_template": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/runner-config.template.json",
-    "observer_snapshot": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/runner-observer",
+    "config_template": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/runner-config.template.json",
+    "observer_snapshot": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/runner-observer",
     "template_PID": null,
     "plan_default": true,
     "automatic_rearm": false,
@@ -138,6 +138,6 @@
     "docs/periodic-heartbeat-capture-results-20261021.md"
   ],
   "historical_files_retained": true,
-  "candidate_manifest": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/runner-ready.json",
+  "candidate_manifest": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/runner-ready.json",
   "candidate_manifest_SHA256": "575a878e51c06c279a9fabba722a585a2faf7d2bd9af8b0e160cea87f4b758c6"
 }

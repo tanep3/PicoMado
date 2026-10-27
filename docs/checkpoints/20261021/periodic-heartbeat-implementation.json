@@ -20,7 +20,7 @@
     "PM_CYW43_INNER_PROBE": "ON",
     "PM_AWAY_EEX1": "ON",
     "PM_EEX1_PORT": "48116",
-    "PM_DEVICE": "PicoMado-lcd1",
+    "PM_DEVICE": "example-lcd",
     "PM_USE_SAMPLE": "OFF",
     "PM_PREPARE_UNBOUND": "OFF",
     "PM_PREPARE_UNBOUND_PANEL": "OFF",
@@ -29,19 +29,19 @@
     "PICO_SDK_SUBMODULE_AUTO_UPDATE": "OFF",
     "PICO_SDK_FETCH_FROM_GIT": "OFF",
     "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-    "PICO_SDK_PATH": "/home/tane/dev/PicoW/pico-sdk"
+    "PICO_SDK_PATH": "$HOME/dev/PicoW/pico-sdk"
   },
   "artifacts": {
-    "PicoMado-lcd1.uf2": {
-      "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/PicoMado-lcd1.uf2",
+    "example-lcd.uf2": {
+      "path": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/example-lcd.uf2",
       "SHA256": "9d4f66d1b71e07ef5c6e85b802201d0b6712b6290cd1c9133b40bdbf36479687"
     },
     "picomado_lcd.elf": {
-      "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/picomado_lcd.elf",
+      "path": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/picomado_lcd.elf",
       "SHA256": "bce25a981c62c6be149b82b4a55cc8f309bd9f774a9916fb01627e60fa21bd1b"
     },
     "picomado_lcd.elf.map": {
-      "path": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/picomado_lcd.elf.map",
+      "path": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021/artifacts/picomado_lcd.elf.map",
       "SHA256": "e1b3884b93cfd65d870413a9995586d7be1a4fa0b72be911e0a8802b9b64397d"
     }
   },
@@ -66,14 +66,14 @@
     "board-id.txt": "9ad7dace15c469d67fc1ffdc3a7190dd6270060dd682ab1ee8adc513cb3bbea5",
     "config.h": "8efebce22a7a54bae523e7141a6150bfa07261370fd3cb757c19bd43e490c729"
   },
-  "expected_Flash_ID": "E661640843239D21",
+  "expected_Flash_ID": "0123456789ABCDE0",
   "UF2_address_range": [
     268435456,
     268876288
   ],
   "settings_sector_unwritten": true,
   "rollback": {
-    "uf2": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z/artifacts/aligned-observed/PicoMado-lcd1.uf2",
+    "uf2": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-align-20261021T032923Z/artifacts/aligned-observed/example-lcd.uf2",
     "SHA256": "11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485"
   },
   "capacity_full20s_guaranteed": false,
@@ -100,7 +100,7 @@
     "raw headers+RecvQ must be saved and verified before release",
     "future firmware update targets LCD only;not performed; host candidate source tested, release server binary not built"
   ],
-  "evidence_root": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021",
+  "evidence_root": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/heartbeat-capture-20261021",
   "validation_SHA256": "a17d54fe924b76bbad22aea513d20b5fd321f21693adfeb3e9e53e655d32f4cb",
   "implementation_review": "pending; no new live operations",
   "server_release_binary": "not built in this stage"

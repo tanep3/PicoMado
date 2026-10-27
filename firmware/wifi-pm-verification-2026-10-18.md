@@ -31,11 +31,11 @@ net wifi_pm request_sdk_result=0 readback_sdk_result=0 raw=0x00000010 mode=0 non
 
 作業コピーの `bash firmware/tests/run_host_tests.sh`：31ケースPASS。既存28ケースにpm-set-error、pm-read-error、pm-read-mismatchの3ケースを追加。最初のjoin直前にも必ず要求されること、サーバだけのretryは設定/読戻しを増やさないこと、Wi-Fi再joinは読戻しが更新されることを実mainループで確認。失敗や不一致をログで区別し、遅いUSBの再掲では読戻しが増えないことも検証。LCD/E-ink、USB満杯、trace無効、時計部分更新、CRC/入力/切替の既存回帰も成功。
 
-実リポジトリでも31ケースPASS、git diff --check成功。LCD実configの通常ビルド成功（manifest OFF、pico_w）。UF2 726528B、SHA256 `44565624d3640edad6ad994b06eb3d375c9796671056a6df416e6753db1ac382`、Flash ID `E661640843239D21`。config.hとboard-id.txtはビルド前後のSHA一致。実機には未書込み。16:32 JST時点で通常USB /dev/ttyACM0 を同個体serialで確認し、BOOTSEL列挙なし。本番サーバはPID907828・active・NRestarts0で維持。新たなBOOTSEL連絡と単一ボード一致を待つ。
+実リポジトリでも31ケースPASS、git diff --check成功。LCD実configの通常ビルド成功（manifest OFF、pico_w）。UF2 726528B、SHA256 `44565624d3640edad6ad994b06eb3d375c9796671056a6df416e6753db1ac382`、Flash ID `0123456789ABCDE0`。config.hとboard-id.txtはビルド前後のSHA一致。実機には未書込み。16:32 JST時点で通常USB /dev/ttyACM0 を同個体serialで確認し、BOOTSEL列挙なし。本番サーバはPID907828・active・NRestarts0で維持。新たなBOOTSEL連絡と単一ボード一致を待つ。
 
 ## 実機比較の手順と未確認事項
 
-1. LCD用の通常UF2を `tools/build.sh --device PicoMado-lcd1` で実configから作成。manifest OFF・端末名・Flash ID E661640843239D21・SHA256・pico_wを照合する。sampleやE-inkのUF2は転送しない。
+1. LCD用の通常UF2を `tools/build.sh --device example-lcd` で実configから作成。manifest OFF・端末名・Flash ID 0123456789ABCDE0・SHA256・pico_wを照合する。sampleやE-inkのUF2は転送しない。
 2. 新しいBOOTSEL連絡と単一の対象ボードを確認してからflash.shでload/verifyする。現段階では未書込み。通常USBは個体serialで照合する。
 3. 同じ動画・6fps設定・端末選択のまま、最低3分のUSBと同時刻journalを比較する。初回要求と読戻し、stream_write_stall件数/接続断、frame_start→CRC、SPI、firmware elapsedの描画数を確認。設定や選択を勝手に変えない。
 4. 操作を伴う比較はユーザーの押下時刻とUSB button→server input→replyを対応づける。自動ログだけを実機目視やボタンの合格としない。
@@ -51,7 +51,7 @@ net wifi_pm request_sdk_result=0 readback_sdk_result=0 raw=0x00000010 mode=0 non
 
 # LCD省電力修正後の実機比較：悪化・未解決
 
-指定UF2（44565624d3640edad6ad994b06eb3d375c9796671056a6df416e6753db1ac382）をLCD個体 E661640843239D21 と照合し、load/Flash verify100% OK、通常USB起動を確認した。USBでは要求SDK結果0、読戻しSDK結果0、raw=0x00000010、mode=0、none=1を確認。しかし通信停止は解消せず、ユーザーも「悪化してるがな。」と報告した。改善したとは扱わない。
+指定UF2（44565624d3640edad6ad994b06eb3d375c9796671056a6df416e6753db1ac382）をLCD個体 0123456789ABCDE0 と照合し、load/Flash verify100% OK、通常USB起動を確認した。USBでは要求SDK結果0、読戻しSDK結果0、raw=0x00000010、mode=0、none=1を確認。しかし通信停止は解消せず、ユーザーも「悪化してるがな。」と報告した。改善したとは扱わない。
 
 ## 最初の180秒の結果
 
@@ -81,7 +81,7 @@ net wifi_pm request_sdk_result=0 readback_sdk_result=0 raw=0x00000010 mode=0 non
 
 保存UF2は以下にあった。
 
-`$HOME/dev/PicoW/PicoMado/firmware/build/.rollback/5224c30/PicoMado-lcd1.uf2`
+`$HOME/dev/PicoW/PicoMado/firmware/build/.rollback/5224c30/example-lcd.uf2`
 
 720,384B、SHA256 `c5c9fc741c94cc77fbdde036548fc17e905a9637d0313d4d29692f5db2ab1d56`。picotool info -aでpicomado_lcd/pico_wを確認し、UF2内部の端末名・個体IDも一致した。ただしこれは過去の保存版で、frame-bytes-v1はあるがlcd-push-v1がない。書換え直前に実機が広告していたlcd-push-v1と異なるため、これを「直前版そのもの」としてそのまま戻すのは適切でない。書き込みは行っていない。
 
@@ -132,11 +132,11 @@ USBを閉じた後の180秒では、大幅な描画低下は続いていない�
 
 古い .rollback/5224c30 のUF2は使用していない。保存してあった変更直前ソースをSHA照合し、現在の実configを保って、task領域の別source/buildで通常LCD版を新しく生成した。現在リポジトリの全tracked firmwareファイルと個体config/board-idは生成前後でSHA一致。
 
-UF2：`$HOME/Documents/Codex/2026-10-18/task/pm-fix/rollback-source/firmware/build/PicoMado-lcd1/PicoMado-lcd1.uf2`
+UF2：`$HOME/Documents/Codex/2026-10-18/task/pm-fix/rollback-source/firmware/build/example-lcd/example-lcd.uf2`
 
 - SHA256：`7cab7fe026a963b6865178a09ca162e9bebf7dac0611629d6cdf19ba6e32578a`
 - サイズ：724,480B
-- manifest：OFF / PicoMado-lcd1 / E661640843239D21
+- manifest：OFF / example-lcd / 0123456789ABCDE0
 - picotool info：picomado_lcd / pico_w
 - lcd-push-v1、frame-bytes-v1、端末名、個体IDの埋込みを確認
 - 変更前main.c SHA256：56b4ed8bbd45d6753666182adcb00b53f4077e86b3bc967f3bdb557e80f2e3e1

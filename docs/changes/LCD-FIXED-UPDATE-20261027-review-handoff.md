@@ -1,6 +1,6 @@
 # LCD fixed-operation implementation handoff
 
-Implementation is restricted to LCD-FIXED-UPDATE-20261027, source 17e231ffa9db9b9cc9d93ecd55444eae0b7f26b1, PicoMado-lcd1 and its fixed UF2 hash. Normal preflight remains on its existing ship path. PM_FIXED_OPERATION and PM_FIXED_OPERATION_REVIEW select the reviewed operation through the existing flash script, retaining manifest, hardware profile and unique BOOTSEL board checks.
+Implementation is restricted to LCD-FIXED-UPDATE-20261027, source 17e231ffa9db9b9cc9d93ecd55444eae0b7f26b1, example-lcd and its fixed UF2 hash. Normal preflight remains on its existing ship path. PM_FIXED_OPERATION and PM_FIXED_OPERATION_REVIEW select the reviewed operation through the existing flash script, retaining manifest, hardware profile and unique BOOTSEL board checks.
 
 The historical source subject is reconstructed from tracked files in a temporary source snapshot. Existing check-proof and build-lineage verification still validate historical logs, actual SDK/toolchain/build flags and current private device configuration. Current implementation must be committed and clean. Its exact HEAD and operation hash must be accepted by both an independent reviewer and parent. No approvals are issued by this implementation.
 

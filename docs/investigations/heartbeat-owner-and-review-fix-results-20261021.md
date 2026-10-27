@@ -72,9 +72,9 @@ Python試験名は `firmware/tests/` 配下。今回のHB修正版成功logは�
 | 成果物 | SHA256 |
 | --- | --- |
 | 新releaseサーバ `H/artifacts/picomado-server.heartbeat` | `cf452882458329c152f977906420eb52dcb2f44770ecc2432cd88e769588a761` |
-| 継承LCD UF2 `H/artifacts/PicoMado-lcd1.uf2` | `9d4f66d1b71e07ef5c6e85b802201d0b6712b6290cd1c9133b40bdbf36479687` |
+| 継承LCD UF2 `H/artifacts/example-lcd.uf2` | `9d4f66d1b71e07ef5c6e85b802201d0b6712b6290cd1c9133b40bdbf36479687` |
 | 退避した通常サーバ `H/rollback/picomado-server.normal` | `e7b52c29d776bf9b9fbfea9125216c7b5c05613f47fadc9660618dedb76c727c` |
-| 直前LCD復旧UF2 `SDK-align-20261021T032923Z/artifacts/aligned-observed/PicoMado-lcd1.uf2` | `11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485` |
+| 直前LCD復旧UF2 `SDK-align-20261021T032923Z/artifacts/aligned-observed/example-lcd.uf2` | `11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485` |
 
 新サーバはcore `4b7987e` から再buildしたaarch64 release。featuresは既存観測候補と同じdefault/stream-diagnostics/boundary-observation/ack-path-probe/caricature-retention-delete。動的依存が解決し、不正usageは設定・DB・listener開始前にexit1で終了する。`server-ready.json`とbuild/ldd/file/usage各logへ記録した。修正前に完成していた旧サーバ候補は `H/server-before-review-fix` へ区別して保存し、使用しない。
 
@@ -84,7 +84,7 @@ firmware sourceはレビュー済みUF2と同一のため、ARM成果物SHAを�
 
 新しい固定core/runnerの独立レビューは初回有限採取の範囲で受入れ済み。上表の汎用duration P3、実機のobserver effect、動的資源、CY15の任意20秒全量収容は未解消・未成立。16行目以降のoverflowを無視せず不合格とする。根因調査の追加観測用候補であり、遅延修正・解消を主張しない。
 
-将来の承認された実機工程では、対象LCD Flash ID `E661640843239D21`、候補・復旧UF2、設定sector非書込みを再照合する。サーバは既存runbookに従って停止時の設定・DB・素材を整合退避し、設定とruntime flagsを保ったまま候補へ切り替える。新binaryと接続を確認してから `H/runner-config.template.json` のPID/owned tupleを再取得する。templateのPIDはnullで、そのまま実行できない。observer2ファイルは `H/runner-observer` の既存版SHAへ固定した。
+将来の承認された実機工程では、対象LCD Flash ID `0123456789ABCDE0`、候補・復旧UF2、設定sector非書込みを再照合する。サーバは既存runbookに従って停止時の設定・DB・素材を整合退避し、設定とruntime flagsを保ったまま候補へ切り替える。新binaryと接続を確認してから `H/runner-config.template.json` のPID/owned tupleを再取得する。templateのPIDはnullで、そのまま実行できない。observer2ファイルは `H/runner-observer` の既存版SHAへ固定した。
 
 runnerは既定がplanで、実採取は明示`--execute`の1回有限窓。採取後は正規freeze/save/両端IDLE/owner終了を確認し、既存の承認範囲で通常サーバへ復帰する。サーバ異常時は上表の旧binaryへ戻す。DBの任意巻戻しはせず、LCD復旧が必要なら上表11a11556…を使う。E-ink、ai-news、OS/ネットワーク設定は対象外。今回これらの本番工程は実行していない。
 

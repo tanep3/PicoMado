@@ -44,11 +44,11 @@ stats end epoch=2 trace_dropped=...
 
 ホスト採取parserもcomplete/latest/incompleteを自己試験済み。ホストmockは実際のTinyUSB/無線IRQの時間を証明しない。
 
-実リポジトリでも35ケースPASS、git diff --check成功。LCD実configの通常版ビルド成功。UF2 730112B、SHA256 `92fd51e45967874c37f1c06af1d6c3e4d7380f35eaaedd43b8973619a0417dc9`、manifest OFF / PicoMado-lcd1 / E661640843239D21 / pico_wを照合。ARM ELFのstats symbolは0x1c0＝448B。PM_TRACE_ENABLE=1 / PM_TRACE_STATS=1 / PM_TRACE_VERBOSE=0を実コンパイル定義で確認。config.hとboard-id.txtはビルド前後SHA一致、lcd-push-v1とframe-bytes-v1も保持。下記の実機測定で書込み済み。直前の省電力修正版44565624もローカルに保全している。
+実リポジトリでも35ケースPASS、git diff --check成功。LCD実configの通常版ビルド成功。UF2 730112B、SHA256 `92fd51e45967874c37f1c06af1d6c3e4d7380f35eaaedd43b8973619a0417dc9`、manifest OFF / example-lcd / 0123456789ABCDE0 / pico_wを照合。ARM ELFのstats symbolは0x1c0＝448B。PM_TRACE_ENABLE=1 / PM_TRACE_STATS=1 / PM_TRACE_VERBOSE=0を実コンパイル定義で確認。config.hとboard-id.txtはビルド前後SHA一致、lcd-push-v1とframe-bytes-v1も保持。下記の実機測定で書込み済み。直前の省電力修正版44565624もローカルに保全している。
 
 ## 実機での手順（実施済み）
 
-1. ビルド報告を確認後、新しいLCD BOOTSELが必要。単一ボードE661640843239D21と指定UF2のSHA/manifest OFF/pico_wを照合してから書込む。他端末へ書かない。
+1. ビルド報告を確認後、新しいLCD BOOTSELが必要。単一ボード0123456789ABCDE0と指定UF2のSHA/manifest OFF/pico_wを照合してから書込む。他端末へ書かない。
 2. 起動後に同じ動画・6fps・選択のまま、3秒だけUSBを開いて最初のdumpとPM mode=0 none=1を確認する。初回がreadback=pendingなら接続成功後の初期snapshotから準備し直し、pendingを成功扱いしない。採取用capture_stats_snapshot.pyは3秒の有限期限、finallyでDTRを明示解除してFD closeする。baud変更や端末へのデータ送信はしない。
 3. 180秒、USBシリアルを開かず同じ動画を維持。journalだけを読み取る。ユーザーはこの間、動画/fps/プラグインを変更しない。変更した場合は結果へ明記し、こちらから元へ戻さない。
 4. もう一度3秒だけ開いて最新epochの全24行とendを取得して閉じる。usb=offは閉鎖中の計測、usb=onは前の短い観測期間の計測。GET状態と正確なDTR解除/再開放時刻も保存し、閉鎖中journalと対比する。
@@ -66,7 +66,7 @@ stats end epoch=2 trace_dropped=...
 
 ## 実機書込みと180秒測定結果（18:22 JST完了）
 
-ユーザーから新しいLCD BOOTSEL連絡を受け、個体E661640843239D21、730112B、SHA256 `92fd51e45967874c37f1c06af1d6c3e4d7380f35eaaedd43b8973619a0417dc9`を再照合。既存flash.shの対象確認、load、100% verify、通常起動すべて成功。通常USB列挙とサーバへの接続も確認した。省電力修正を維持し、初回・最終USB出力のcached読戻しはどちらも `sdk_result=0 raw=0x00000010 mode=0 none=1`。これは起動後の成功したgetter値であり、USB開放ごとにgetterを再実行した値ではない。
+ユーザーから新しいLCD BOOTSEL連絡を受け、個体0123456789ABCDE0、730112B、SHA256 `92fd51e45967874c37f1c06af1d6c3e4d7380f35eaaedd43b8973619a0417dc9`を再照合。既存flash.shの対象確認、load、100% verify、通常起動すべて成功。通常USB列挙とサーバへの接続も確認した。省電力修正を維持し、初回・最終USB出力のcached読戻しはどちらも `sdk_result=0 raw=0x00000010 mode=0 none=1`。これは起動後の成功したgetter値であり、USB開放ごとにgetterを再実行した値ではない。
 
 初期USB開放18:19:50.319〜18:19:53.321、DTR明示解除後の閉鎖18:19:53.321〜18:22:53.472（180.151秒）、最終開放18:22:53.472〜18:22:56.474。両方3秒で最新dump全24行とendを取得し、finallyのDTR解除・FD closeも成功。journalの取得範囲は正確な閉鎖期間に一致させた。すべて日本時間、2026-10-18。
 
@@ -146,7 +146,7 @@ TCP窓23360Bがフレーム25600Bより小さいことだけでは、この詰�
 
 ### 追加ssの結果：6fps試験とは別条件
 
-既存LCDのアドレス192.168.0.173との対応はfirmware/verification-2026-10-12.md等の既存証跡に基づく。ssはサーバ16153番とこのpeerに限定し、約20.48秒・11回、既存TCP状態だけを読み取り、同期journalも保存。USBは開かず、全コマンドは終了済み。
+既存LCDのアドレス203.0.113.10373との対応はfirmware/verification-2026-10-12.md等の既存証跡に基づく。ssはサーバ16153番とこのpeerに限定し、約20.48秒・11回、既存TCP状態だけを読み取り、同期journalも保存。USBは開かず、全コマンドは終了済み。
 
 **この追加観測時には利用者側の再生が変更されていた。** journalの全132件のstartは12fps。直後GETはMichael Jackson「Thriller」、video_id=`sOnqjkJTMaA`、変換key=`6f98153b479103e3ddfd1270`、epoch34。前の6fps・AKB48・epoch33の試験に混ぜない。LCDの選択youtube・有効化revision72等は維持されており、こちらから再生条件を変更/復元していない。
 

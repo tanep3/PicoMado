@@ -20,7 +20,7 @@ This run confirms only that Wi-Fi/IP setup failed on the Pico under the stated p
 - The Pi5 receiver had been stopped after the earlier Wi-Fi failure and was restarted **after** this Pico reconnect. It was listening on 18180/18182 when checked. Its log showed no A/C arrival.
 - The next observed Pico periodic log reported `diag-20261011-1`, uptime about 77 seconds, `link=UP(3)`, DHCP IPv4 `198.51.100.11/24`, gateway `198.51.100.232`, and Pi5 destination `192.0.2.120`.
 - A/C: **indeterminate for this reconnect**. Firmware makes at most three attempts, and the receiver started too late to establish that it was listening during those attempts. No A/C success or ACK was observed; this absence is not evidence that the phone's Tailscale ON path is blocked.
-- B: one Pi5 TCP attempt to the newly observed `198.51.100.11:18181` timed out after five seconds; no PUSH/ACK. Pi5's route to that address was via home router `192.168.0.1` on `wlan0`.
+- B: one Pi5 TCP attempt to the newly observed `198.51.100.11:18181` timed out after five seconds; no PUSH/ACK. Pi5's route to that address was via home router `203.0.113.103` on `wlan0`.
 - At that point, the Pi5 A/C receiver was left ready for a normal Pico power reconnect **without BOOTSEL**. No firmware, secret setting, or network configuration change was made for that repeat.
 
 ## Normal reconnect reported around 04:29:50 UTC — receiver already listening

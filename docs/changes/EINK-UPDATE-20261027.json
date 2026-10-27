@@ -35,7 +35,7 @@
       "evidence": [
         {
           "kind": "check",
-          "path": "/home/tane/Documents/Codex/2026-10-27/task-13/picomado/.gate/check.json",
+          "path": "$HOME/Documents/Codex/2026-10-27/task-13/picomado/.gate/check.json",
           "SHA256": "2b3f4936571686d435a4fa0bc4be050759f31375dedaed6aa969b89fec7116d9"
         }
       ]
@@ -45,7 +45,7 @@
       "evidence": [
         {
           "kind": "review",
-          "path": "/home/tane/Documents/Codex/2026-10-27/task-13/picomado/firmware/build/E-ink_1/review.json",
+          "path": "$HOME/Documents/Codex/2026-10-27/task-13/picomado/firmware/build/E-ink_1/review.json",
           "SHA256": "474964cec98b70278ae8a2d609eefc41f4c2846befe85e1fd59292b9f5fe0ae3"
         }
       ]

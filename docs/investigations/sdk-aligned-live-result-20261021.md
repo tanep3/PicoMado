@@ -8,12 +8,12 @@ SDK 2.3.1の公式gitlinkに揃えたLCDでも、風刺画→雨データの切�
 
 [比較候補の記録](sdk-alignment-results-20261021.md)に続き、独立レビュー `/tmp/picomado-sdk-alignment-review-3p1g7x5k/review-outcome.json` の受入れとユーザーのBOOTSEL報告を受けて実施した。証拠rootは `SDK-live-20261021T040833Z`（以下R）、共通親dirは `$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020`。
 
-- 対象LCDのFlash ID E661640843239D21、個別設定、binding、復旧UF2、候補SHAを再照合した。既存flash.shによるload/verify/rebootは1回だけ。2026-10-21 04:09:24 UTCにverify 100%、04:09:40 UTCにUSB再認識とframe1021493の受信・描画ACKを確認。
+- 対象LCDのFlash ID 0123456789ABCDE0、個別設定、binding、復旧UF2、候補SHAを再照合した。既存flash.shによるload/verify/rebootは1回だけ。2026-10-21 04:09:24 UTCにverify 100%、04:09:40 UTCにUSB再認識とframe1021493の受信・描画ACKを確認。
 - 現在のUF2は `11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485`。設定sectorを書かず、容量対策WIPを混ぜていない。
 - 通常サーバPID1780574、binary SHA `e7b52c29d776bf9b9fbfea9125216c7b5c05613f47fadc9660618dedb76c727c` を維持した。サービス更新・再起動0、E-ink・ai-news・OS/ネットワーク変更0、SSH・pushなし。
 - 最終Pico AP2状態0/host probe idle、EV1 OFF、単一USB owner終了・FD閉鎖を確認。新SDKのLCDファームを維持している。
 
-証拠はR/flash-complete.json、flash-reconnect.json、inner-cleanup.json。直前LCDの復旧先は `gap-p2-build/artifacts/PicoMado-lcd1/PicoMado-lcd1.uf2`、SHA `fd19ace94a80c0baf9ad97ed9e97255aca563045ee428efd1ac7aad52a2d8e3a`。さらに前のf0c6a15aとは区別する。SDK自体の復旧は先行比較契約のSDK-before.tar/旧HEAD一覧に従い、DB/configを巻き戻さない。今回復旧操作は不要だった。
+証拠はR/flash-complete.json、flash-reconnect.json、inner-cleanup.json。直前LCDの復旧先は `gap-p2-build/artifacts/example-lcd/example-lcd.uf2`、SHA `fd19ace94a80c0baf9ad97ed9e97255aca563045ee428efd1ac7aad52a2d8e3a`。さらに前のf0c6a15aとは区別する。SDK自体の復旧は先行比較契約のSDK-before.tar/旧HEAD一覧に従い、DB/configを巻き戻さない。今回復旧操作は不要だった。
 
 ## 比較条件と停止
 

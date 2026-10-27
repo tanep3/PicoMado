@@ -47,13 +47,13 @@ SPI0: CS GP17, SCK GP18, MOSI GP19, DC GP20, RESET GP21。表示窓は 160×80�
 
 既存 SDK `$HOME/dev/PicoW/pico-sdk` を使います。ローカル picotool 2.1.1 は現 SDK が要求する 2.3 より古いため、SDK の UF2 後処理を切り、ローカル picotool で RP2040 ELF を UF2 へ変換します。インストールは不要です。
 
-共有ソースは `src/` に 1 セットだけ置きます。個体設定は `devices/<端末名>/config.h`、同じ個体の Flash ID は `devices/<端末名>/board-id.txt` に分けます。実設定と `build/` は Git 除外です。`PM_DEVICE_ID` はユーザーが決めた安定名（今回 `PicoMado-lcd1`）で、Flash ID を名前に含める必要はありません。ビルド時には端末名を必須とし、`config.h` の `PM_DEVICE_ID` と選択名が異なればファームは接続しません。起動時には別ファイルの Flash ID と実ボードを照合します。
+共有ソースは `src/` に 1 セットだけ置きます。個体設定は `devices/<端末名>/config.h`、同じ個体の Flash ID は `devices/<端末名>/board-id.txt` に分けます。実設定と `build/` は Git 除外です。`PM_DEVICE_ID` はユーザーが決めた安定名（今回 `example-lcd`）で、Flash ID を名前に含める必要はありません。ビルド時には端末名を必須とし、`config.h` の `PM_DEVICE_ID` と選択名が異なればファームは接続しません。起動時には別ファイルの Flash ID と実ボードを照合します。
 
 `config.h` には画面方式、解像度、画素形式、LCD 制御 IC、配線、回転、オフセット、4 ボタン配置も定義します。画像長検査、表示初期化・描画、ボタン入力、Hello の能力申告に使用します。LCD は160×80 RGB565BE、E-ink は250×122 mono1（MSB-first、白=1、行間paddingなし、3813B）を受けます。E-ink は旧実動V4の全画面更新だけを実装し、未知のパネル版・寸法・形式はビルド時に拒否します。現 LCD は既存 YouTube 送信側が RGB565 に反転と赤青交換をかけてから送っていたため、標準 RGB565BE を送る PicoMado では `PM_LCD_COMPENSATE_INVERT_BGR=1` を LCD 転送直前に適用します。ローカル画面とサーバ画像の両方に一度だけ適用します。
 
 ```sh
-firmware/tools/build.sh --device PicoMado-lcd1
-# 出力: firmware/build/PicoMado-lcd1/PicoMado-lcd1.uf2
+firmware/tools/build.sh --device example-lcd
+# 出力: firmware/build/example-lcd/example-lcd.uf2
 ```
 
 サンプル端末は `devices/sample-a` と `devices/sample-b` にダミー値だけを置いています。`firmware/tools/build.sh --device sample-a --sample` で `build/.samples/sample-a/` にビルドします。サンプル UF2 は実機へ書き込まないでください。資格情報や認証値をログ・Git に入れず、端末名で成果物を取り違えないようにしてください。
@@ -70,7 +70,7 @@ Pico 起点で direct TCP または TailSocks SOCKS5 CONNECT を行い、TCP 161
 - 実機の自己診断は画面の向き・色を目視で確認してください。4 ボタンの反応はユーザーが確認済みです。USB CDC にはボタン番号のみ出力し、秘密値は出しません。
 - 現サーバには汎用メニュー項目を Pico へ送るメッセージがありません。ローカルの家/外設定メニューは実装済みですが、サーバ駆動の共通メニューは契約追加後に実装します。
 - 臨時 LAN ホストとの direct 接続、WebSocket Hello/Welcome、設定同期、ボタン操作の往復は実機確認済みです。最初の書込み版では TCP 受信窓が画像断片 1 通より小さく、画像転送が停滞しました。受信窓を拡大した版の実機再試験、画像 ACK、再接続、外出先 SOCKS5 経路は未確認です。WebSocket の `Sec-WebSocket-Accept` はホスト試験でも検証します。
-- ユーザー作成の実 `config.h` は `devices/PicoMado-lcd1/` に内容を変えず移動済みです。秘密値は表示していません。外出先テザリング側 IP は変わり得るため、実機試験前に現行値を確認します。
+- ユーザー作成の実 `config.h` は `devices/example-lcd/` に内容を変えず移動済みです。秘密値は表示していません。外出先テザリング側 IP は変わり得るため、実機試験前に現行値を確認します。
 - 外出先の資格情報が未設定の間はローカル設定メニューから外出先を選択できません。
 - LCD は既存端末と同じ 180 度画素回転を採用しました。BLK は修理後の実機診断で active HIGH と確認済みです。
 - 接続中の日本語ラベルは、ローカルの Noto Sans CJK JP から生成した小さな固定ビットマップを内蔵します。再生成手順は `tools/make_status_bitmaps.py` です。
@@ -80,7 +80,7 @@ Pico 起点で direct TCP または TailSocks SOCKS5 CONNECT を行い、TCP 161
 
 USBログはGPIO UARTではなくUSB CDC（個体serialで識別したttyACM）へ出します。サーバ/プロキシの失敗時は正常Wi-Fi/IPを保持し、再試行中にリンクを失った場合はWi-Fi再接続へ戻ります。CDCを後から開いた直後と15秒毎にprofile/app/transport/Wi-Fi/TCPIP/IP取得有無を出し、SSID/password/tokenや受信JSONは出しません。SOCKSはMETHOD(version5)→AUTH(version1)→CONNECT(version5)を別々に検証します。実main/netのhost回帰試験は `tests/app_timing_test.c` と `tests/net_socks_test.c` です。2026-10-13にこの修正とAWAYのLAN宛先設定を含む版を転送し、METHOD/AUTH/CONNECT、Hello、画像ACKまで実機で確認しました。
 
-書込みには `firmware/tools/flash.sh --device PicoMado-lcd1` を使います。端末名を必須とし、同名のビルド出力と manifest の端末名・ボード ID・UF2 SHA256 を照合し、BOOTSEL が 1 台かつ `board-id.txt` の ID と一致したときだけ `picotool load -v -x` を実行します。`--check-only` を付けると書込みなしで一致だけを確認できます。接続ファームは当該 Pico に書込み・Flash verify 済みです。既存 YouTube の復旧用 UF2 は `PicoW_Youtube_Player/diagnostics/artifacts/buttons-rotation-20261010/video-rotate180.uf2` です。書込み前の現 Flash に対する復旧 UF2 の verify は確認済み。戻すときは同一機を手動 BOOTSEL にして復旧用 UF2 を `picotool load -v -x` で書きます。
+書込みには `firmware/tools/flash.sh --device example-lcd` を使います。端末名を必須とし、同名のビルド出力と manifest の端末名・ボード ID・UF2 SHA256 を照合し、BOOTSEL が 1 台かつ `board-id.txt` の ID と一致したときだけ `picotool load -v -x` を実行します。`--check-only` を付けると書込みなしで一致だけを確認できます。接続ファームは当該 Pico に書込み・Flash verify 済みです。既存 YouTube の復旧用 UF2 は `PicoW_Youtube_Player/diagnostics/artifacts/buttons-rotation-20261010/video-rotate180.uf2` です。書込み前の現 Flash に対する復旧 UF2 の verify は確認済み。戻すときは同一機を手動 BOOTSEL にして復旧用 UF2 を `picotool load -v -x` で書きます。
 
 ## LCDの固定RAM計測（2026-10-18）
 

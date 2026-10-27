@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "evidence_root": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-live-20261021T040833Z",
+  "evidence_root": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-live-20261021T040833Z",
   "prior_docs_commit": "d116dd171463c2171e196917d7302c8a53d3cb9e",
   "candidate_SHA256": "11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485",
-  "rollback_UF2": "/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/gap-p2-build/artifacts/PicoMado-lcd1/PicoMado-lcd1.uf2",
+  "rollback_UF2": "$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/gap-p2-build/artifacts/example-lcd/example-lcd.uf2",
   "rollback_SHA256": "fd19ace94a80c0baf9ad97ed9e97255aca563045ee428efd1ac7aad52a2d8e3a",
   "flash": {
     "at": "2026-10-21T04:09:24.593114+00:00",
@@ -11,7 +11,7 @@
     "attempts": 1,
     "verify_100_percent": true,
     "settings_sector_unwritten": true,
-    "expected_Flash_ID": "E661640843239D21",
+    "expected_Flash_ID": "0123456789ABCDE0",
     "sha256": "11a11556e6e5c71b2f90fb98aeabca15132aabb5914b27d6ccebd217d7a5c485",
     "Eink_flashed": false
   },
@@ -567,7 +567,7 @@
         "run": "0",
         "schema": 2,
         "session": 2299,
-        "target": "PicoMado-lcd1",
+        "target": "example-lcd",
         "trigger_us": 8623908541,
         "window_us": 20000000
       },

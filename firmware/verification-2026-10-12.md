@@ -4,7 +4,7 @@
 
 ## 対象
 
-- raspi5 ローカル USB 上の BOOTSEL デバイスは作業時 1 台のみ。`picotool info -d` は RP2040、2 MiB Flash、Flash ID `0xE661640843239D21`。既存 YouTube LCD 端末の診断記録と一致。
+- raspi5 ローカル USB 上の BOOTSEL デバイスは作業時 1 台のみ。`picotool info -d` は RP2040、2 MiB Flash、Flash ID `0x0123456789ABCDE0`。既存 YouTube LCD 端末の診断記録と一致。
 - 書込み直前の `picotool info -a` は `pico_w_jpeg_player` / board `pico_w`。既存 `video-rotate180.uf2` に対する `picotool verify` は 100% OK。復旧用 UF2 の SHA256 は `65900f5224c64efdde49e9652d035ad34416fb532212f92740396825b70eaa1c`。
 - 配線は既存 `docs/wiring.md`、既存 `pico/lcd_display.h`、PicoMado `kernel.md` の GP17〜21、GP12〜15 と一致。既存ボタン実機診断も参照。
 
@@ -12,14 +12,14 @@
 
 - `PICO_BOARD=pico_w` / Release で `picomado_selftest` をビルド。対象リポジトリの `firmware/` から別の `/tmp/picomado-target-build` に再ビルド成功。UF2 SHA256 は `22ee9ec70a83a5439de3f2fad7cff2999dcddf321c02b3b93090ea56180b0a24`。
 - 初期の単一 Config 案ではダミー値だけで `picomado_lcd` をビルドし、実資格情報は扱わなかった。その後ユーザー指示で端末別構成に変更した。
-- Pico SDK の `pico_get_unique_board_id_string()` は同じ Flash unique ID を返す実装と照合。現在の接続ファームは選択端末名と `PM_DEVICE_ID` を比較し、端末別 `board-id.txt` の ID を実ボード ID と照合する。本人指定の `PM_DEVICE_ID` は `PicoMado-lcd1`。
+- Pico SDK の `pico_get_unique_board_id_string()` は同じ Flash unique ID を返す実装と照合。現在の接続ファームは選択端末名と `PM_DEVICE_ID` を比較し、端末別 `board-id.txt` の ID を実ボード ID と照合する。本人指定の `PM_DEVICE_ID` は `example-lcd`。
 - 接続ファームはダミー設定でクロスビルド成功。最終の静的 RAM (`bss`) は 188,816 B。32 KiB の TCP 受信バッファと 32 KiB の WebSocket アプリバッファを使う。TCP 受信窓は 23,360 B。受信済みデータをバッファへ取り込んだ時点で、末尾に 1 受信窓分を確保しつつ枠を返す。
 - `cc -std=c11 -Wall -Wextra -Werror` による `tests/core_test.c` と `tests/ws_accept_test.c` が成功。画像長、連続 offset、CRC、世代照合、35 ms ボタン安定判定、WebSocket Accept の RFC 6455 既知値を確認。
 - `tests/rx_flow_test.c` を同じ警告設定で実行成功。1 バイト単位を含む分割受信、17 KiB 相当のフレーム 3 通の連続受信、受信窓とバッファ容量の不変条件、容量超過の拒否、接続途中切断時のリセットを確認。現サーバの画像断片は 4096 バイトで、JSON 整数配列化しても 17 KiB 未満。将来の契約変更時は上限を再確認する。
-- ユーザー作成の `firmware/config.h` を内容変更なし・同じ inode で `firmware/devices/PicoMado-lcd1/config.h` へ移動。非秘密の `board-id.txt` は対象実機の確認済み ID を格納。両ファイルと `firmware/build/` の Git 除外を確認。旧ルート `firmware/config.h` は存在しない。
+- ユーザー作成の `firmware/config.h` を内容変更なし・同じ inode で `firmware/devices/example-lcd/config.h` へ移動。非秘密の `board-id.txt` は対象実機の確認済み ID を格納。両ファイルと `firmware/build/` の Git 除外を確認。旧ルート `firmware/config.h` は存在しない。
 - `sample-a → sample-b → sample-a` を端末別ビルドフォルダで成功。A の再ビルド UF2 SHA256 は不変、各 ELF には自身の dummy ID があり他方の ID はない。サンプル構成で秘密値や実機 ID は使わない。
-- 本人指定 `PicoMado-lcd1` の実 `config.h` を `tools/build.sh --device PicoMado-lcd1` でビルド成功。最終 UF2 は `build/PicoMado-lcd1/PicoMado-lcd1.uf2`、SHA256 `af2c7204a4e74c0c0cabf4aa6306940edcdb9cc8a8a4455481cd9b6356578401`、権限 600、Git 除外。ELF の自己 ID と期待ボード ID の存在、ダミー ID の不在を検査。`picotool info` は RP2040 UF2。
-- `tools/flash.sh --device PicoMado-lcd1 --check-only` が manifest の端末名・ボード ID・UF2 ハッシュと現在の単一 BOOTSEL ボードの一致を返した。`--check-only` は書込みを行わない。ダミー端末の明示選択は拒否を確認。実 UF2 の書込みはサーバ待受と親の段取りまで保留。
+- 本人指定 `example-lcd` の実 `config.h` を `tools/build.sh --device example-lcd` でビルド成功。最終 UF2 は `build/example-lcd/example-lcd.uf2`、SHA256 `af2c7204a4e74c0c0cabf4aa6306940edcdb9cc8a8a4455481cd9b6356578401`、権限 600、Git 除外。ELF の自己 ID と期待ボード ID の存在、ダミー ID の不在を検査。`picotool info` は RP2040 UF2。
+- `tools/flash.sh --device example-lcd --check-only` が manifest の端末名・ボード ID・UF2 ハッシュと現在の単一 BOOTSEL ボードの一致を返した。`--check-only` は書込みを行わない。ダミー端末の明示選択は拒否を確認。実 UF2 の書込みはサーバ待受と親の段取りまで保留。
 
 ## 実機
 
@@ -27,9 +27,9 @@
 - 再起動後 `lsusb` に `2e8a:000a Raspberry Pi Pico`、`/dev/ttyACM0` を確認。USB CDC の 5 秒読み取りでは出力なし。起動直後の一度きりのログはポート開放前に流れた可能性があり、シリアルログによる動作確認とは扱わない。
 - ユーザーは POWER・SUB・UP・DOWN の全ボタンが反応すると確認した。4 ボタン項目は合格。LCD の向き・色の明示的な目視確認は未取得。Wi-Fi とサーバ通信はこの自己診断 UF2 に含まれない。
 - ユーザーの再 BOOTSEL 後、単一 `RPI-RP2` の同じ Flash ID を再確認。`picotool info -a` は `picomado_selftest` / board `pico_w` を示し、書込み済み自己診断 UF2 に対する `picotool verify` は再度 100% OK。次の接続ファームは実設定とサーバ待受が揃うまで書き込まない。
-- 臨時ホストが `192.0.2.120:16153` で待受・HTTP 200 を返し、プロセス `temporary_lan_host` であることを確認。再度同じ単一 Flash ID を確認し、`tools/flash.sh --device PicoMado-lcd1` で接続ファームを書込んだ。Flash 書込み 100%、verify 100% OK、picotool は再起動を報告。
-- 初回接続ファーム再起動後の USB は `2e8a:000a Raspberry Pi Pico`、`/dev/ttyACM0`。サーバ側に `192.168.0.173` からの持続 TCP を確認。`/api/state` は `PicoMado-lcd1` online、設定 stored/confirmed revision 1。ユーザーの DOWN 操作 2 回でサーバ側選択が weather まで進み、ボタン往復が成立した。一方、画像断片の JSON 長が当初の TCP 受信窓 11,680 B より長く、フレーム受信前に枠を返さなかったため転送が停止。サーバ TCP Send-Q と outbox の画像送信から原因を特定した。
-- 受信枠を修正後、ユーザーが同じ Pico を BOOTSEL に戻した。`tools/flash.sh --device PicoMado-lcd1 --check-only` は Flash ID `E661640843239D21` と個体専用 manifest の一致を確認。`tools/flash.sh --device PicoMado-lcd1` は Flash 書込み 100%、verify 100% OK と再起動を報告。USB CDC が再列挙され、持続 TCP を確認した。サーバ `/api/state` は `PicoMado-lcd1` online、選択 weather、`last_received_frame=4`、`last_rendered_frame=4` を返した。受信 ACK と描画完了 ACK がサーバへ別々に届いたことを確認。LCD の内容・色・向きは目視未確認。
+- 臨時ホストが `192.0.2.120:16153` で待受・HTTP 200 を返し、プロセス `temporary_lan_host` であることを確認。再度同じ単一 Flash ID を確認し、`tools/flash.sh --device example-lcd` で接続ファームを書込んだ。Flash 書込み 100%、verify 100% OK、picotool は再起動を報告。
+- 初回接続ファーム再起動後の USB は `2e8a:000a Raspberry Pi Pico`、`/dev/ttyACM0`。サーバ側に `203.0.113.10373` からの持続 TCP を確認。`/api/state` は `example-lcd` online、設定 stored/confirmed revision 1。ユーザーの DOWN 操作 2 回でサーバ側選択が weather まで進み、ボタン往復が成立した。一方、画像断片の JSON 長が当初の TCP 受信窓 11,680 B より長く、フレーム受信前に枠を返さなかったため転送が停止。サーバ TCP Send-Q と outbox の画像送信から原因を特定した。
+- 受信枠を修正後、ユーザーが同じ Pico を BOOTSEL に戻した。`tools/flash.sh --device example-lcd --check-only` は Flash ID `0123456789ABCDE0` と個体専用 manifest の一致を確認。`tools/flash.sh --device example-lcd` は Flash 書込み 100%、verify 100% OK と再起動を報告。USB CDC が再列挙され、持続 TCP を確認した。サーバ `/api/state` は `example-lcd` online、選択 weather、`last_received_frame=4`、`last_rendered_frame=4` を返した。受信 ACK と描画完了 ACK がサーバへ別々に届いたことを確認。LCD の内容・色・向きは目視未確認。
 
 ## 次の縦経路に必要な条件
 
@@ -41,14 +41,14 @@
 - 自己診断と接続ファームは同じ `lcd.c` の初期化・描画処理を使う。GP17〜21、RGB565、MADCTL 0x60、回転 180 度、Y オフセット 24 は既存動作コードと一致する。GP22 BLK は両ファームで未駆動。自己診断では 4 ボタン表示をユーザーが目視できた。黒画面の確定原因は未特定。
 - 端末固有 `config.h` とダミー `config.sample.h` に非秘密のハード定義を追加し、ドライバ・ボタン・画像長検査・Hello 能力へ結線した。既存実設定のバイト列は追記前後で一致し、権限 600・Git 除外を維持。E-ink 指定はコンパイル時に拒否されることをホストで確認。
 - sample-a、sample-b のクロスビルド、CRC・ボタン・TCP 受信枠のホスト試験は成功。個体用 LCD 診断 UF2 はビルド成功、SHA256 `eebf1c2129e0b46272ed4a4bfb14c3c47045f6913b3bdd0b51d38c39a8638441`、静的 RAM 188,816 B。起動時 2.5 秒の四色帯、画像描画直前 0.5 秒の四色帯、非ゼロ画像バイト数とローカル画面遷移の USB CDC 出力で表示段階を切り分ける。
-- ユーザーが同じ実機を BOOTSEL に戻した後、`flash.sh --check-only` で単一 Flash ID `E661640843239D21` と個体 manifest の一致を確認。診断 UF2 を書込み、Flash verify 100% OK と再起動を確認。USB CDC 復帰、サーバ online、frame 10 とその後 frame 14 の受信・描画 ACK 両方を確認。USB CDC は frame 11〜13 について「非ゼロバイト 25,600/25,600」と SPI 送信完了を出した。四色帯と天気画像のユーザー目視はまだ未取得。画像が実際に見えたかは ACK からは判断しない。
+- ユーザーが同じ実機を BOOTSEL に戻した後、`flash.sh --check-only` で単一 Flash ID `0123456789ABCDE0` と個体 manifest の一致を確認。診断 UF2 を書込み、Flash verify 100% OK と再起動を確認。USB CDC 復帰、サーバ online、frame 10 とその後 frame 14 の受信・描画 ACK 両方を確認。USB CDC は frame 11〜13 について「非ゼロバイト 25,600/25,600」と SPI 送信完了を出した。四色帯と天気画像のユーザー目視はまだ未取得。画像が実際に見えたかは ACK からは判断しない。
 
 ## 色と表示位置の照合・修正版
 
 - ユーザーは診断版で「天気らしいが壊れた画面、色もおかしい」と報告。既存 YouTube 完成版の `pico/lcd_display.h` と比較すると SPI0 20 MHz、SWRESET→SLPOUT→COLMOD `0x05`→MADCTL `0x60`→INVON→E0/E1 ガンマ→DISPON、窓 X=0..159・Y=24..103、180 度画素回転、RGB565 高位バイト先は一致する。ガンマの正負各16バイトも一致。Y オフセット 24 は既存と同じ RASET 側で変更していない。
 - 差は色補正。既存 `server/streamer.py` と `pico/rgb565_transform.h` は送信画素へ反転＋赤青交換を適用するが、PicoMado の Rust 描画器は標準 RGB565BE をそのまま送っていた。端末 `config.h` と両 sample に `PM_LCD_COMPENSATE_INVERT_BGR=1` を追加し、LCD 転送前に一度だけ変換する。診断帯、ローカル画面、サーバ画像に同じ変換を使う。
 - 補正式は既存関数と全 65,536 色で一致するホスト比較を通過。`tests/lcd_transform_test.c` は黒・白・三原色、変換の往復、160×80 全画面の行ストライド・180 度回転・ビッグエンディアン保持を検査した。`pm_chunk` は 25,600 B を offset 順に静的バッファへコピーし、CRC 合格後に同期 SPI で全画面送信する。受信と描画は同一メインループで直列に行われ、SPI 送信中に次画像でバッファを書き換えない。描画後に RenderedAck を送る。
-- 色補正済み個体 UF2 SHA256 `a6d5b18d958c696331ccb753593b10be95ce1907f230e6eb60aba8ea5bba063f` をビルド。sample-a・sample-b もビルド成功。単一 BOOTSEL Flash ID `E661640843239D21` と個体 manifest を照合後に書込み、Flash verify 100% OK・再起動を確認。USB CDC が復帰し、サーバは online・選択 rain-radar・frame 27 の受信/描画 ACK を返した。色・文字・配置の実画面はユーザー目視待ち。
+- 色補正済み個体 UF2 SHA256 `a6d5b18d958c696331ccb753593b10be95ce1907f230e6eb60aba8ea5bba063f` をビルド。sample-a・sample-b もビルド成功。単一 BOOTSEL Flash ID `0123456789ABCDE0` と個体 manifest を照合後に書込み、Flash verify 100% OK・再起動を確認。USB CDC が復帰し、サーバは online・選択 rain-radar・frame 27 の受信/描画 ACK を返した。色・文字・配置の実画面はユーザー目視待ち。
 
 ## 実機写真と診断帯の再点検
 
@@ -57,13 +57,13 @@
 - 毎画像の診断帯 0.5 秒と本画像の切替途中が写真に写った可能性がある。実個体 `config.h` の `PM_DIAGNOSTIC_BOOT` だけ 1→0 に戻し、他の設定バイトは保持。診断文字列を含まないクリーン版 UF2 SHA256 `b5b5fa78ed83777582cd6306fc334f70eb7a83a3846a02e2254d85de0691772d` をビルドしたが**未書込み**。現在の実機は依然として四色帯ありの診断版。帯の持続性とサーバ再起動後の表示を確認してから次の書込みを判断する。
 - サーバ担当の Web UI 反映に伴う再起動を 14:15 UTC ごろ確認。Pico は新セッションで online、選択 weather、設定改訂維持。直後の `/api/state` は現セッションの受信/描画 ACK がともに `None`。USB CDC を 16 秒読んだ間、新たな LCD ローカル画面・画像描画の診断行は 0 件。古い写真の表示内容と現セッションの画面を同一視しない。クリーン版 UF2 の書込みはユーザーの持続表示回答まで保留する。
 - その後サーバ担当が writer 終了時の reader 残存と雨雲 gzip 応答を修正・導入。ユーザーが改めて BOOTSEL を連絡したので、現在の `config.h`（`PM_DIAGNOSTIC_BOOT=0`、色補正1、Yオフセット24、180度回転）、ソース、manifest の端末名・Flash ID・SHA256 を再照合。ホストの core、LCD 変換、TCP 受信枠、WebSocket Accept の4試験を再実行して成功。個体ビルドは同じクリーン UF2 SHA256 `b5b5fa78ed83777582cd6306fc334f70eb7a83a3846a02e2254d85de0691772d` を再生成した。
-- `flash.sh` は単一 BOOTSEL の Flash ID `E661640843239D21` を再確認してから書込み、Flash verify 100% OK と再起動を報告。USB CDC が新たに列挙され、サーバ状態は online・選択 weather・frame 63 の受信/描画 ACK を返した。これが現在の実機ファーム。診断四色帯なしの天気画面について、色・文字・配置の最終目視は未取得。
+- `flash.sh` は単一 BOOTSEL の Flash ID `0123456789ABCDE0` を再確認してから書込み、Flash verify 100% OK と再起動を報告。USB CDC が新たに列挙され、サーバ状態は online・選択 weather・frame 63 の受信/描画 ACK を返した。これが現在の実機ファーム。診断四色帯なしの天気画面について、色・文字・配置の最終目視は未取得。
 
 ## 追加写真・停止状態・スタック調査
 
 - 次の実機写真 `756(1).jpg` を Library から読み取り、2048×1536 JPEG の全体を確認。LCD のほぼ全表示領域が細かな多色ノイズで、文字・診断四色帯は読めない。先の写真の四色帯と雨雲エラー画像の混在とは異なり、瞬間的な撮影だけでは説明できない。ユーザーは「いつまでも砂嵐、ボタンも反応しない」と報告した。現在の可視表示は不合格。
 - 既知正常のボタン自己診断 ELF と通信版 ELF の LCD 初期化を比較。どちらも `pm_lcd_init` のサイズは 0x1b4、SPI0 20 MHz、ST7735S 初期化、X 0..159/Y 24..103、25,600 B の同期転送、GP12/13/14/15 ボタン配線が同じ。通信版だけがサーバ RGB565BE を既存完成版の方式へ色補正する。全色ホスト比較は既存送信器と一致。これだけでは砂嵐の原因を断定できない。
-- 2026-10-12 20:59 UTC 頃の稼働サーバ `/api/state` は対象 `online=true`、選択 rain-radar、現セッションの受信/描画 ACK はともに null。サーバ TCP の `192.168.0.173:61288` からの `bytes_received=1545` は約9分以上増えておらず、15秒 heartbeat に反する。`online` 表示は持続 TCP による見かけ上の可能性があり、メインループが停止したかはまだ未確定。入力イベントが送信されないのか、ノイズに隠れているだけかも現時点では未確定。
+- 2026-10-12 20:59 UTC 頃の稼働サーバ `/api/state` は対象 `online=true`、選択 rain-radar、現セッションの受信/描画 ACK はともに null。サーバ TCP の `203.0.113.10373:61288` からの `bytes_received=1545` は約9分以上増えておらず、15秒 heartbeat に反する。`online` 表示は持続 TCP による見かけ上の可能性があり、メインループが停止したかはまだ未確定。入力イベントが送信されないのか、ノイズに隠れているだけかも現時点では未確定。
 - 実際に書き込まれた通信版 ELF の RP2040 `__StackTop=0x20042000` / `__StackBottom=0x20041800`、予約スタック 2,048 B。逆アセンブルで `main` は約1,080 B、旧 `pm_net_poll` は単独で約2,096 B のスタックを取る。ネストした Wi-Fi/lwIP コールバックが入るためスタック範囲を超える実害があり得る。これは具体的な欠陥で、画面・通信・ボタンの複合停止の有力候補だが、実機のプログラムカウンタやスタック破損を直接観測していないため根本原因確定とはしない。
 - `net.c` の WebSocket 応答ヘッダー 2,049 B と送信パケット 1,040 B、および `main.c` の送信 JSON ワークスペースを静的 BSS に移した。いずれも単一メインループ内で使い、送信は `TCP_WRITE_FLAG_COPY`。新 ELF では `pm_net_poll` は約40 B、`pm_net_send` は約72 B のフレーム。静的 RAM 192,420 B、再ビルド成功、core/LCD transform/RX flow/WS accept のホスト試験成功。新 UF2 SHA256 `6784e2d6208aec8e95951647f7bd405351e0e1eae48f85d55e56e8cb7deca839` は**未書込み**。
 - 次の切り分けは (1) 現ファームのまま対象ボタンを1回押す前後でサーバの Pico 受信バイト、選択、ACK を同期観測して入力経路を確かめる、(2) 対象を単一 BOOTSEL/Flash ID で再識別し、既知正常の自己診断 UF2 へ戻して四色帯ではなくボタン文字画面が安定して表示されるか確かめる、(3) その後にスタック修正版を同じ対象に書き、起動画面→通信画像→各ボタンと heartbeat/ACK を別々に観測する、という順序。追加書込み前に親へこの計画を共有する。
@@ -81,28 +81,28 @@
 
 ## スタック修正版の単一実機書込みと初期通信確認
 
-- ユーザーが BOOTSEL を連絡。`flash.sh --check-only` と `picotool info -d` により単一 RP2040 2 MiB、Flash ID `E661640843239D21` を確認。端末 manifest は `OFF PicoMado-lcd1 E661640843239D21 9671e0dfcfe7014a78ceb8d0d600bc77cec631cc7cb44f2ed976aa24a1b49e4e` と実 UF2 SHA256 に一致。`PM_DIAGNOSTIC_BOOT=0`、Yオフセット24、MADCTL0x60、180度回転、反転＋赤青補正、GP12〜15ボタンを非秘密のマクロで確認。既存の完成済み YouTube 版 UF2 は復旧用として保持。
-- `flash.sh --device PicoMado-lcd1` を対象1台へ実行。Flash load 100%、verify 100% OK、picotool はアプリ再起動を報告。USB は `2e8a:000a Raspberry Pi Pico` として再列挙。サーバサービス再起動やOS/network変更は行っていない。
-- サーバ PID 964178 の新しいTCP `192.0.2.120:16153 ↔ 192.168.0.173:60310` が ESTAB。サーバ `/api/state` は `PicoMado-lcd1` online、rain-radar、`last_received_frame=65` と `last_rendered_frame=65`、設定 stored/confirmed revision1、pending=false を返した。受信ACKと描画ACKは両方成立。ただしLCDの視認表示証明ではない。
+- ユーザーが BOOTSEL を連絡。`flash.sh --check-only` と `picotool info -d` により単一 RP2040 2 MiB、Flash ID `0123456789ABCDE0` を確認。端末 manifest は `OFF example-lcd 0123456789ABCDE0 9671e0dfcfe7014a78ceb8d0d600bc77cec631cc7cb44f2ed976aa24a1b49e4e` と実 UF2 SHA256 に一致。`PM_DIAGNOSTIC_BOOT=0`、Yオフセット24、MADCTL0x60、180度回転、反転＋赤青補正、GP12〜15ボタンを非秘密のマクロで確認。既存の完成済み YouTube 版 UF2 は復旧用として保持。
+- `flash.sh --device example-lcd` を対象1台へ実行。Flash load 100%、verify 100% OK、picotool はアプリ再起動を報告。USB は `2e8a:000a Raspberry Pi Pico` として再列挙。サーバサービス再起動やOS/network変更は行っていない。
+- サーバ PID 964178 の新しいTCP `192.0.2.120:16153 ↔ 203.0.113.10373:60310` が ESTAB。サーバ `/api/state` は `example-lcd` online、rain-radar、`last_received_frame=65` と `last_rendered_frame=65`、設定 stored/confirmed revision1、pending=false を返した。受信ACKと描画ACKは両方成立。ただしLCDの視認表示証明ではない。
 - 同じTCPの Pico→サーバ `bytes_received` は 797→1185→1379 と増加。その後5秒刻みの測定で21:43:49 UTCに1670、21:44:04に1767、21:44:20に1864と毎回97 B増えた。サーバの設定値15秒と一致する周期で同じTCPにPico発信データが継続し、`lastrcv` も更新された。TCPは切断されず、ACK状態も維持。実機可視画面と4ボタン動作は親経由のユーザー確認待ち。
 
 ## YouTube基準の段階診断版（実機、画面目視待ち）
 
-- ユーザーの21:56 UTC BOOTSEL待機を受け、単一RP2040 `2e8a:0003` の Flash ID `E661640843239D21` と個体 manifest/UF2 SHA256 `fbcac607fb55776e1a9077f8c552c4aa66f71f1962c221af6740930a2b292f29` を `flash.sh --check-only` と `picotool info -d` で一致確認。診断四色帯の毎フレーム挿入はOFF、Yオフセット24・MADCTL0x60・回転180・通常画像色補正は維持。
+- ユーザーの21:56 UTC BOOTSEL待機を受け、単一RP2040 `2e8a:0003` の Flash ID `0123456789ABCDE0` と個体 manifest/UF2 SHA256 `fbcac607fb55776e1a9077f8c552c4aa66f71f1962c221af6740930a2b292f29` を `flash.sh --check-only` と `picotool info -d` で一致確認。診断四色帯の毎フレーム挿入はOFF、Yオフセット24・MADCTL0x60・回転180・通常画像色補正は維持。
 - YouTube本番と同じCYW43→LCD初期化順へ変更。`display.h`/`display.c`を共通表示入口、`lcd.c`をLCD専用バックエンドとし、未対応E-inkは明示的にビルド拒否。起動白枠＋RGB横三帯6秒、ローカルボタン診断25秒、Wi-Fi成立後同じ三帯6秒を `PM_DIAGNOSTIC_STAGE=1` で実装。通常サーバ画像ごとに診断帯を出さない。端末configのフラグ0で段階診断を無効化可能。
 - 実働YouTube `lcd_display.h` と現在LCDドライバのGPIO/SPIホストtraceは初期化・全画素送信まで完全一致。さらに新起動三帯とYouTube `show_test_pattern()` のGPIO/SPI traceは同一SHA256 `c823e132cfe3054f1a21586f26c85bd81df10c051840c7682dd639766a99f44b`。本番個体・ダミーsample-a/bのクロスビルド、core/LCD変換/RX flow/WS Acceptホスト4試験、E-ink選択の明示拒否試験が成功。最終ELF `.bss=193,256 B`、stack reserve4,096 B、`main`フレーム624 B。
-- `flash.sh --device PicoMado-lcd1` で単一対象へ一回だけ書込み、load100%、Flash verify100% OK、picotoolがアプリ再起動を報告。USBは`2e8a:000a Raspberry Pi Pico`で再列挙。USB CDCを事前監視して、22:04:58 `boot_pattern`、22:05:04 `local_buttons`、22:05:29 `wifi_connect`、22:05:32 `wifi_up_pattern`、22:05:38 `SERVER CONNECTING`、22:05:40 `welcome session=23` / `frame_spi_complete=69`を確認。22:05:55、22:06:10、22:06:25の`heartbeat_sent`が15秒間隔。サーバAPIはrain-radar、online、frame69の受信/描画ACK両方、設定改訂1 confirmed。
+- `flash.sh --device example-lcd` で単一対象へ一回だけ書込み、load100%、Flash verify100% OK、picotoolがアプリ再起動を報告。USBは`2e8a:000a Raspberry Pi Pico`で再列挙。USB CDCを事前監視して、22:04:58 `boot_pattern`、22:05:04 `local_buttons`、22:05:29 `wifi_connect`、22:05:32 `wifi_up_pattern`、22:05:38 `SERVER CONNECTING`、22:05:40 `welcome session=23` / `frame_spi_complete=69`を確認。22:05:55、22:06:10、22:06:25の`heartbeat_sent`が15秒間隔。サーバAPIはrain-radar、online、frame69の受信/描画ACK両方、設定改訂1 confirmed。
 - ローカル25秒間にはボタン押下USBログが無かった。実際に押されたか未確認なのでボタン機能の合否は判定しない。USBのSPI完了・ACKはLCD画面の視認表示を証明しない。白枠/三帯、ボタン名、サーバ画像の実機目視は親経由のユーザー確認待ち。サーバ、OS/network、他サービス、YouTube側は変更していない。
 
 ## 22:53 UTC 電源再投入後の黒画面・入力報告
 
 - ユーザーは「電源刺した。画面まっくら。１〜４ボタン押下すべて無反応。配線切れたかな？」と報告。追加書込みは行っていない。USBを開く前に確認したところ、Picoはアプリ USB `2e8a:000a` で再列挙し `/dev/ttyACM0` が存在。サーバは新session 24、online、weather、frame71・72の受信/描画ACKを記録。これはCPU・USB・Wi-Fi・画像受信・SPI API呼出しが走った証拠だが、LCD発光・配線導通の証明ではない。rain-radar→weather選択変更が見られたが、Web操作の可能性を排除できず、ボタン成功とは断定しない。
 - Pico SDK `stdio_usb_connected()` はDTRでログ出力可否を判定する。BOOTSELリセットのCDC条件は1200 baudの設定変更で、DTR単独ではない。22:54 UTC以降、baud変更・装置への送信なしでCDCを開いて読み取った。`diag heartbeat_sent` は22:54:40、:55、22:55:10、:25、:40、:55、22:56:10、:25と継続。主ループはその間動作。監視期間中に`diag button=`や`diag local_button=`は0件。ただしユーザーの4ボタン操作は監視開始前であり、起動ログと押下ログはCDCから遡れない。監視中に押下した証拠がないため、ボタン配線の合否は未判定。DTRによるログ出力状態の変化はあり得る。
-- 以前ユーザーが4ボタンすべての表示を確認した**当時の実ファイル**は `/tmp/picomado-target-build/picomado_selftest.uf2`。SHA256 `22ee9ec70a83a5439de3f2fad7cff2999dcddf321c02b3b93090ea56180b0a24`、`picotool info` は `picomado_selftest` / board `pico_w` / SDK2.3.1 / Release、2026-10-12 build。実際に対象 Flash ID `E661640843239D21` へ書込み・100% verifyし、ユーザーの全ボタン確認を受けたことは本記録上部に記載。現ソースから再ビルドされた `firmware/build/PicoMado-lcd1/PicoMado-lcd1-selftest.uf2` は SHA256 `2df4bcfae0b490874cefdac287ec142ca5c249b8d0767a36590ae0d9cdf9177b` で別物。旧実績品を作業領域 `$HOME/Documents/Codex/2026-10-12/task-5/rollback/picomado-selftest-user-verified.uf2` に同一ハッシュ・権限600で保全。今回の書込み指示はなく未書込み。
+- 以前ユーザーが4ボタンすべての表示を確認した**当時の実ファイル**は `/tmp/picomado-target-build/picomado_selftest.uf2`。SHA256 `22ee9ec70a83a5439de3f2fad7cff2999dcddf321c02b3b93090ea56180b0a24`、`picotool info` は `picomado_selftest` / board `pico_w` / SDK2.3.1 / Release、2026-10-12 build。実際に対象 Flash ID `0123456789ABCDE0` へ書込み・100% verifyし、ユーザーの全ボタン確認を受けたことは本記録上部に記載。現ソースから再ビルドされた `firmware/build/example-lcd/example-lcd-selftest.uf2` は SHA256 `2df4bcfae0b490874cefdac287ec142ca5c249b8d0767a36590ae0d9cdf9177b` で別物。旧実績品を作業領域 `$HOME/Documents/Codex/2026-10-12/task-5/rollback/picomado-selftest-user-verified.uf2` に同一ハッシュ・権限600で保全。今回の書込み指示はなく未書込み。
 
 ## 当時の自己診断UF2へ書戻し
 
-- ユーザーの新たな BOOTSEL 指示を受け、単一 USB `2e8a:0003`、RP2040 2 MiB、Flash ID `E661640843239D21` を確認。保全済み・当時ユーザーが4ボタン表示を確認した `rollback/picomado-selftest-user-verified.uf2` のSHA256は `22ee9ec70a83a5439de3f2fad7cff2999dcddf321c02b3b93090ea56180b0a24`、`picotool info` は `picomado_selftest` / `pico_w` / SDK2.3.1 / Release。再ビルドは行わなかった。
+- ユーザーの新たな BOOTSEL 指示を受け、単一 USB `2e8a:0003`、RP2040 2 MiB、Flash ID `0123456789ABCDE0` を確認。保全済み・当時ユーザーが4ボタン表示を確認した `rollback/picomado-selftest-user-verified.uf2` のSHA256は `22ee9ec70a83a5439de3f2fad7cff2999dcddf321c02b3b93090ea56180b0a24`、`picotool info` は `picomado_selftest` / `pico_w` / SDK2.3.1 / Release。再ビルドは行わなかった。
 - `picotool load -v -x` でそのファイルを対象1台へ一度だけ書戻し、Flash load100%、verify100% OK、picotoolがアプリ再起動を報告。USBは`2e8a:000a Raspberry Pi Pico` / `/dev/ttyACM0`で再列挙。ファームの実可視画面はユーザー目視待ち。自己診断はWi-Fi/サーバ通信を持たないため、サーバofflineは異常判定に使わない。
 - 期待画面は起動時 `PICO MADO` / `PRESS BUTTON`。GP12 SUB、GP13 UP、GP14 POWER、GP15 DOWN の安定した押下で `BUTTON` / `SUB|UP|POWER|DOWN` に変わり、次の押下まで保持する。これは当時の自己診断ソースとELFの文字列、先行ユーザー確認に基づく仕様であり、今回の物理表示結果を代弁しない。
 
@@ -116,7 +116,7 @@
 
 ## YouTube 実働版との比較範囲の訂正
 
-- 比較元の YouTube UF2 は `PicoW_Youtube_Player/diagnostics/artifacts/buttons-rotation-20261010/video-rotate180.uf2`。当時のビルド `/tmp/picow_video_rotate180_20261010/pico_w_jpeg_player.uf2` と SHA256 `65900f5224c64efdde49e9652d035ad34416fb532212f92740396825b70eaa1c` が一致。当時の flash-result 記録は対象 Flash ID `E661640843239D21`、Flash verify 100%、ユーザーによる画面の向き・色・収まりの確認を記す。
+- 比較元の YouTube UF2 は `PicoW_Youtube_Player/diagnostics/artifacts/buttons-rotation-20261010/video-rotate180.uf2`。当時のビルド `/tmp/picow_video_rotate180_20261010/pico_w_jpeg_player.uf2` と SHA256 `65900f5224c64efdde49e9652d035ad34416fb532212f92740396825b70eaa1c` が一致。当時の flash-result 記録は対象 Flash ID `0123456789ABCDE0`、Flash verify 100%、ユーザーによる画面の向き・色・収まりの確認を記す。
 - 当時の CMakeCache/link.txt は YouTube 本番ターゲット `pico_w_jpeg_player`、Release/pico_w、`DISPLAY_PROFILE=0`、`PLAYER_LCD_GAMMA_LGFX=ON`、`PLAYER_ROTATE_180=ON`、`PLAYER_CYW43_DIAG=ON`、`pico/pico_player.c`・JPEG decoder・診断CYW43ソースのリンクを示す。現 YouTube の LCD ヘッダ、プレイヤーソース、CMakeLists は完成時 commit `9ffb634` と同一。YouTube 実個体の非秘密 LCD 定義は 20 MHz、MADCTL 0x60、X0/Y24、INVON。
 - ホストtraceの比較元はその `pico/lcd_display.h` だが、UF2バイナリそのものを実行した試験ではない。`/tmp/picomado-lcd-mock/compare.c` と `pattern_compare.c` は、同ヘッダ/PicoMado LCD実装を共通stubへリンクし、GPIO/SPI APIの引数・呼出順・送出予定バイト列を記録した。両組のtraceは各25,927 Bでバイト一致し、SPI書込18回、画面窓 X0..159/Y24..103、25,600 B画素転送を含む。汎用画像の YouTube 側は実サーバを使わず、色補正を試験コードが事前適用した。
 - 以前の「GPIO/SPI全trace完全一致」は、この限定したホスト入力とAPI呼出しtraceの意味でのみ成立する。stubはSDKの実SPI送信、GPIO波形、割込み・電源・初期化前処理・LCD可視表示を検証しない。YouTube実績ビルドのSDKは `$HOME/pico/pico-sdk`、PicoMadoは `$HOME/dev/PicoW/pico-sdk` という別リビジョンで、前者は `pico_cyw43_arch_lwip_threadsafe_background`、後者は `pico_cyw43_arch_lwip_poll` をリンクする。両ファームの実機動作が一致すると結論できない。
@@ -128,13 +128,13 @@
 - 最小再現SDK2.1.1版は実働YouTubeの既存SDK/診断CYW43 driver/background方式を使用。SDK2.3.1版は既存PicoMado SDK/stock CYW43/background方式。後者との比較にはSDKとdriver両方の差がある。速度一因子比較は一つのUF2内で行う。background方式に合わせた再現用lwIP allocatorだけ変更し、本体poll用lwipoptsは変更しない。
 - 個体チェック付き通常ファーム、SDK2.1.1最小再現、SDK2.3.1最小再現はいずれも最終クロスビルド成功。実機書込みなし。通常ファームのbssは193,264 B、最小再現はSDK2.1.1 90,412 B/SDK2.3.1 88,696 B。生成UF2はすべて権限600、Git除外。
 - `tests/lcd_bus_test.c` を実lcd.c/core.cへリンクし、`cc -std=c11 -Wall -Wextra -Werror` で成功。制御1MHz/画素20MHz要求、CS idle時のrate切替、窓、全画素、戻り長を検査。固定画面を繰返し/1・5・20MHzで描いて全25,600 B一致、CRC `20ac31e9`。`lcd_transform_test.c` も成功。stubで電気波形/実表示は検証しない。
-- 最終UF2 SHA256: `build/PicoMado-lcd1/PicoMado-lcd1.uf2`=`fa869b9d3a89d58512817860fc0961fa6402a30866bd3bf6b3cd4ae145f9de3f`、`build/lcd-repro-sdk211/picomado_lcd_repro.uf2`=`c735ef1270f7f792fab532164a643ec5d6be513d9401e3a861a7d6127f8068cb`、`build/lcd-repro-sdk231/picomado_lcd_repro.uf2`=`0a12c19a1dfa82b488569fd926aca74ea67e53ddf43e5c242051f6e88b550f2e`。
+- 最終UF2 SHA256: `build/example-lcd/example-lcd.uf2`=`fa869b9d3a89d58512817860fc0961fa6402a30866bd3bf6b3cd4ae145f9de3f`、`build/lcd-repro-sdk211/picomado_lcd_repro.uf2`=`c735ef1270f7f792fab532164a643ec5d6be513d9401e3a861a7d6127f8068cb`、`build/lcd-repro-sdk231/picomado_lcd_repro.uf2`=`0a12c19a1dfa82b488569fd926aca74ea67e53ddf43e5c242051f6e88b550f2e`。
 - 作業接続の断続によりSDK2.3.1初回のプロセス作成が失敗したことを確認してから再開。既存ビルドsessionは継続確認した。最終ビルドと検査は実コマンドで成功し、ホスト全体が切断していたとは判断しない。書込みは親の証拠レビューと新たなBOOTSEL指示まで保留。
 
 ## 通常プラグイン版20MHz要求の転送（2026-10-13）
 
 - はんだ不良修理後、ユーザーは診断最高値20MHz要求で表示安定を確認。通常版は同じ制御/画像20MHz要求と窓指定〜画素完了までCS保持を採用し、診断画像/段階待ち/バッファ回収を除外。個体秘密configは前後バイト不変。40MHzと周辺クロック変更は導入していない。
-- 親のレビューとユーザー02:34:26「はい書き込んで」を受領。`PicoMado-lcd1-plugin-20MHz.uf2` SHA256 `d1613b61561d825fd030654d1be326d5988ef3498adbef9ac22b411c33888a52`、単一BOOTSELのFlash ID `E661640843239D21`を再確認して一度だけload/verify/restart。load100%、verify100% OK、USBアプリ再列挙。生ログ `/tmp/picomado-normal-plugin-flash.log`。
+- 親のレビューとユーザー02:34:26「はい書き込んで」を受領。`example-lcd-plugin-20MHz.uf2` SHA256 `d1613b61561d825fd030654d1be326d5988ef3498adbef9ac22b411c33888a52`、単一BOOTSELのFlash ID `0123456789ABCDE0`を再確認して一度だけload/verify/restart。load100%、verify100% OK、USBアプリ再列挙。生ログ `/tmp/picomado-normal-plugin-flash.log`。
 - 02:36:51 UTC、既存サーバのdevice_hello incarnation3/session25。frame75の25,600B送信と受信ACK/描画ACKを別々に確認、frame96までACK一致。対象接続の受動観測でもversion1/kind5のheartbeat（同incarnation/session、applied revision1）を確認。サーバ設定/再起動なし。
 - ユーザー02:40:30の写真2枚付き報告で天気/雨雲の通常画面表示成功。字形/拡大要望はサーバ担当へ引継ぎ。ファーム追加編集なし。起動USB速度行はttyACM0の権限エラーで取り逃し、今回実速度未取得（15.625MHzは計算上の見込み）。4ボタン全操作成功は今回ログだけから断定しない。
 - 詳細と観測終了の制約は `$HOME/Documents/Codex/2026-10-12/task-5/normal-plugin-20MHz-flash-verification.md`。USB読取りは正常終了。作業専用受動capture PID1031102はSIGINTがカーネルに拒否され残存、親へ終了を引継ぎ。
@@ -146,7 +146,7 @@
 - 接続先の決定／取消しや待機復帰で処理時刻が進むため、ボタン処理後に単調時計を再取得してから接続期限を比較する。受信処理後も同様に再取得し、Welcome後の即heartbeatを防ぐ。古い時計から新しい開始時刻を引くunsigned差分が、AWAY決定直後にtimeoutとして扱われる再現を修正した。
 - 実mainループを使う `tests/app_timing_test.c` は旧コードで期待失敗、新コードで成功。Wi-Fi／サーバtimeout境界、再試行、メニュー取消し、HOME選択、Welcome、待機復帰を検証。既存core、ws_accept、rx_flow、lcd_transform、normal_lcd20の5ホスト試験も通過した。
 - 接続診断はHOME/AWAYの選択、SDK戻り値、Wi-Fi/TCPIP状態、IP取得の有無だけを記録する。SSID、password、認証情報、実IP値を出さない。個体の秘密Configは変更していない。
-- 最終 `PicoMado-lcd1-switch-timing.uf2` のSHA256は `3e03b366d292295e58569ce20314b623499a578cc2a8e886e4179f135738afab`。03:28:05 UTCにFlash verify 100%、03:28:10 UTCにHelloを確認し、後続のframe158まで受信／描画ACKを確認した。UF2、実Config、board-id、ビルド出力と生ログはコミット対象外。
+- 最終 `example-lcd-switch-timing.uf2` のSHA256は `3e03b366d292295e58569ce20314b623499a578cc2a8e886e4179f135738afab`。03:28:05 UTCにFlash verify 100%、03:28:10 UTCにHelloを確認し、後続のframe158まで受信／描画ACKを確認した。UF2、実Config、board-id、ビルド出力と生ログはコミット対象外。
 - Rustサーバの文字修正は、天気の47文字索引と232文字atlasの不一致を解消し、既存Noto Sans CJK JP Boldのface 0から原寸字形とmetricsを同時生成する。日付16px、地域12px、気温22px、雨雲出典12px。保存済み雨雲画像は配送時に文字だけ更新する。全国139地点、文字領域、欠損／負の気温、キャッシュ再描画、模擬端末を含む89テスト、fmt、clippyが通過した。
 
 ### 未解決・未検証（03:28 UTCチェックポイント時点）
@@ -170,24 +170,24 @@
 ## 2026-10-13 BLK配線の断線確認（07:24 UTC）
 
 - 接続済みフラグを有効にした通常版では、06:20:07 UTCのCDCログが `pin=22 on=0 output=0 gpio_read=0` を記録した。これはPico側GPIOのLOWを示すが、LCD側BLK電圧と可視消灯を証明しない。
-- ユーザーの07:05 UTCのBOOTSEL表明後、同じ単一個体 `E661640843239D21` へ極性診断版を一度だけ転送した。load/verifyとも100% OK、07:08:44 UTCにCDC起動を確認。生ログは `/tmp/picomado-polarity-flash.log` と `/tmp/picomado-polarity-usb.log`。診断版UF2のSHA256は `99fe1e6e6d559b660fabd9ab6dbe29d0a1047a1df47f5fa1f54c90f48879a81f`。
+- ユーザーの07:05 UTCのBOOTSEL表明後、同じ単一個体 `0123456789ABCDE0` へ極性診断版を一度だけ転送した。load/verifyとも100% OK、07:08:44 UTCにCDC起動を確認。生ログは `/tmp/picomado-polarity-flash.log` と `/tmp/picomado-polarity-usb.log`。診断版UF2のSHA256は `99fe1e6e6d559b660fabd9ab6dbe29d0a1047a1df47f5fa1f54c90f48879a81f`。
 - 診断版は固定画面を一度だけ描画し、UPはGP22 HIGH、DOWNはLOW、POWERは生の出力レベルを反転、SUBは状態報告のみ。ネットワークへの接続は行わない。07:13:02 UTCのUPで `requested=HIGH gpio_read=1`、07:13:03 UTCのDOWNで `requested=LOW gpio_read=0` を記録。方向1・SIO mux5・drive_code1・画面CRC `20ac31e9`・描画回数1は維持され、GPIOの駆動設定を強めていない。
 - ユーザーは修理前のHIGH/LOW比較で「どちらも光る。あかるさかわらん」と報告。続いて07:24 UTCに、現物のBLK配線が切れていたことを確認したと報告した。断線確認はユーザーによる現物確認であり、こちらの電圧測定や目視による確認ではない。修理前の比較だけでは実モジュールの極性を判定できない。
 - 親は電源を抜いて配線を修理し、同じ診断版のUP/DOWNで再確認するよう案内済み。修理後のHIGH/LOWによる発光差・極性・完全消灯は未確認。追加の原因探索、設定変更、駆動変更、書込みは行わず、修理後の結果を待つ。
-- 通常版 `build/PicoMado-lcd1/PicoMado-lcd1-backlight.uf2` は保全済み。SHA256 `f61c129f63950f987210c4c9ac42bf8b5983e66fd6ba5f8d6eb637c4642a2ad5` を再確認し、診断版ともにGit除外を確認した。通常版の `PM_LCD_BLK_ACTIVE_HIGH=1` は修理後の実測待ち。通常版へ戻す際は新たなBOOTSEL表明と同一個体の識別を確認し、load/verify後のログと待機時の可視消灯を別々に記録する。SSH・サービス変更は行っていない。
+- 通常版 `build/example-lcd/example-lcd-backlight.uf2` は保全済み。SHA256 `f61c129f63950f987210c4c9ac42bf8b5983e66fd6ba5f8d6eb637c4642a2ad5` を再確認し、診断版ともにGit除外を確認した。通常版の `PM_LCD_BLK_ACTIVE_HIGH=1` は修理後の実測待ち。通常版へ戻す際は新たなBOOTSEL表明と同一個体の識別を確認し、load/verify後のログと待機時の可視消灯を別々に記録する。SSH・サービス変更は行っていない。
 
 
 ## 2026-10-13 BLK修理後の極性確認と通常版復帰準備（07:38 UTC）
 
 - ユーザーは配線修理後、07:38 UTCに「右上を押すと光り３V、左下を押すと消え０Vになったぞ。」と報告した。診断版の右上UPはGP22 HIGH、左下POWERは出力レベルのトグルであり、点灯／消灯と電圧の報告はその仕様と整合する。計測・目視はユーザーによる現物確認。実個体のBLKはactive HIGHと確定した。07:24 UTC時点の極性未確認をこの結果で更新する。
 - 通常版の `PM_LCD_BLK_CONNECTED=1`、`PM_LCD_BLK_PIN=22`、`PM_LCD_BLK_ACTIVE_HIGH=1` を維持する。待機はLCD黒転送後にLOW、復帰はHIGH。新たな診断、極性変更、駆動強化、設定変更、再ビルドは不要。
-- 保全済み `build/PicoMado-lcd1/PicoMado-lcd1-backlight.uf2` と通常転送対象 `build/PicoMado-lcd1/PicoMado-lcd1.uf2` のSHA256は両方 `f61c129f63950f987210c4c9ac42bf8b5983e66fd6ba5f8d6eb637c4642a2ad5`。個体manifestも同じSHAと `PicoMado-lcd1`／`E661640843239D21` を示す。ファイル側の `picotool info -a` は `picomado_lcd`、SDK2.3.1、pico_w、Releaseを確認。UF2は権限600、Git除外。
-- この段階では新たなBOOTSEL応答前のため、実機照合／転送／再起動は行っていない。次のBOOTSEL表明後、既存 `tools/flash.sh --device PicoMado-lcd1 --check-only` で単一個体とmanifestを照合し、同じ通常版をload/verifyする準備ができている。復帰後のUSBログ、接続・ACK、通常待機時の消灯と再押下時の点灯は別々に確認する。SSH・サービス変更は行っていない。
+- 保全済み `build/example-lcd/example-lcd-backlight.uf2` と通常転送対象 `build/example-lcd/example-lcd.uf2` のSHA256は両方 `f61c129f63950f987210c4c9ac42bf8b5983e66fd6ba5f8d6eb637c4642a2ad5`。個体manifestも同じSHAと `example-lcd`／`0123456789ABCDE0` を示す。ファイル側の `picotool info -a` は `picomado_lcd`、SDK2.3.1、pico_w、Releaseを確認。UF2は権限600、Git除外。
+- この段階では新たなBOOTSEL応答前のため、実機照合／転送／再起動は行っていない。次のBOOTSEL表明後、既存 `tools/flash.sh --device example-lcd --check-only` で単一個体とmanifestを照合し、同じ通常版をload/verifyする準備ができている。復帰後のUSBログ、接続・ACK、通常待機時の消灯と再押下時の点灯は別々に確認する。SSH・サービス変更は行っていない。
 
 
 ## 2026-10-13 通常版復帰の転送とUSB確認（07:44–07:45 UTC）
 
-- ユーザー07:41 UTCのBOOTSEL表明と07:42 UTCの「転送すすめて」を受領。既存 `tools/flash.sh --device PicoMado-lcd1 --check-only` で単一BOOTSEL個体 `E661640843239D21`、端末manifest、pico_wを照合した。保全版と転送対象UF2のSHA256は両方 `f61c129f63950f987210c4c9ac42bf8b5983e66fd6ba5f8d6eb637c4642a2ad5`。
+- ユーザー07:41 UTCのBOOTSEL表明と07:42 UTCの「転送すすめて」を受領。既存 `tools/flash.sh --device example-lcd --check-only` で単一BOOTSEL個体 `0123456789ABCDE0`、端末manifest、pico_wを照合した。保全版と転送対象UF2のSHA256は両方 `f61c129f63950f987210c4c9ac42bf8b5983e66fd6ba5f8d6eb637c4642a2ad5`。
 - 通常版を一度だけ転送し、07:44:33 UTCにload100%、verify100% OK、終了コード0、アプリ再起動の報告を確認。生ログは `/tmp/picomado-normal-restore-20261013.log`。再ビルド・追加改修・設定変更は行っていない。
 - USB CDC `/dev/ttyACM0` と同じUIDのby-idリンクを確認。単一readerが07:45:08および07:45:23 UTCに `profile=HOME app=ACTIVE transport=READY wifi=JOIN tcpip=UP ip_assigned=1` を取得した。通常アプリの起動と接続状態の確認であり、起動時の一度だけのLCD初期化行や実表示の目視確認を代用しない。
 - reader PID1131280／tool session23694は既存権限のまま非秘密診断行だけを最大15分読み取り、ログ `/tmp/picomado-normal-restore-usb.log` を権限600で保持する。新たなUSB読取りを重ねない。通常版のPOWER待機によるLOW・消灯、再押下によるHIGH・点灯の実機受入はユーザー操作と目視待ち。SSH・サービス変更・commit/pushは行っていない。
@@ -207,13 +207,13 @@
 - `src/trace.c` は32件の固定RAMキューへ単調マイクロ秒時刻、フレームID、イベントと数値だけを記録する。アプリの通常ログも同じキューへ入れる。満杯時は古い未出力レコードを落とし `dropped` を増やす。`trace_usb.c` は接続・空き容量を一度確認し、1回の有界書込みだけを行い、USB待ち／sleep／tud_task呼出しをしない。FIFO操作を同一コアIRQに対して保護する。残余のSDK標準出力のtimeout／stdio mutex待ちも0に設定した。診断による待ちは導入しないが、ログ欠落はあり得る。
 - イベントは debounced button（a=SUB0/UP1/POWER2/DOWN3、b=処理前状態）、frame_start、crc_ok、receipt_begin/end、実LCDのspi_begin/end、render_begin/end、tcp_write、tcp_output、50ms以上のpoll／loop。ACK endのa=1はTCPへの投入成功であり、線路到達／サーバ受付ではない。SPI endのaはSDK戻りバイト数、bはSDK読出しbaudであり、LCDの画素読戻しや可視表示の証明ではない。TCPイベントのaはSDK戻り値、bは所要us。
 - ホスト一括試験 `tests/run_host_tests.sh` はダミーconfigだけで成功。実mainでSUB/UP/DOWNの無視とPOWER復帰、USBキュー満杯のままネット／ボタン処理、CRC→受信ACK→SPI→描画ACKの順序、世代変更後の描画ACK抑止を確認。実net.cでtcp_output負値・60msとtcp_write結果をログへ保持し、従来の投入成功の意味を変更していない。実LCDソースの窓・25,600B・回転色変換・CS保持・転送境界ログ、BLK未接続／active HIGH／LOWのダミー回帰も成功。独立USB試験は未接続／満杯／部分書込み、10,000回のボタン・ネット処理継続、overflow計数、元イベント時刻の保持を確認した。旧mainを新しい復帰回帰へ入れるとSUBで待機を出て期待失敗、新mainでは成功。
-- 個体通常ビルドはpico_w／Release／SDK2.3.1で成功。`build/PicoMado-lcd1/PicoMado-lcd1-power-wake-trace.uf2` と通常転送対象 `.uf2` は SHA256 `7857108860e87179c4c49424dd50d0ecffe04f87e8795424550f78b4e5557820`。manifestも同じ値と個体 `E661640843239D21`。text365,100B／bss198,648B、stack4KiB。UF2権限600・Git除外、秘密configの前後バイト一致を確認。元通常版 `PicoMado-lcd1-backlight.uf2` のSHA256 `f61c129f63950f987210c4c9ac42bf8b5983e66fd6ba5f8d6eb637c4642a2ad5` を保全。
+- 個体通常ビルドはpico_w／Release／SDK2.3.1で成功。`build/example-lcd/example-lcd-power-wake-trace.uf2` と通常転送対象 `.uf2` は SHA256 `7857108860e87179c4c49424dd50d0ecffe04f87e8795424550f78b4e5557820`。manifestも同じ値と個体 `0123456789ABCDE0`。text365,100B／bss198,648B、stack4KiB。UF2権限600・Git除外、秘密configの前後バイト一致を確認。元通常版 `example-lcd-backlight.uf2` のSHA256 `f61c129f63950f987210c4c9ac42bf8b5983e66fd6ba5f8d6eb637c4642a2ad5` を保全。
 - ビルド生ログ `/tmp/picomado-power-wake-trace-final-build.log`、ホスト全結果 `/tmp/picomado-power-wake-trace-host.log`、旧実装の期待失敗 `/tmp/picomado-old-wake-regression.log`。この修正版は未転送。現在の実機は07:44にload/verifyしたf61版のまま。08:20の「正しく動くようになった」「約1秒の遷移待ち」、08:22の「プラグイン画面では反応しないことがある、WiFi選択画面は快適」は親経由の実機証言であり、未転送修正版の効果と結び付けない。現USB保存ログには入力→受信→描画→ACKの時刻がないため、秒単位遅延の原因は未確定。新しいBOOTSEL表明後の転送・実測待ち。SSH・サービス変更・commit/pushなし。
 
 
 ## 2026-10-13 診断入り修正版の転送と時刻採取開始（08:26 UTC）
 
-- ユーザー08:24 UTC「BOOTSELしたよ」と親の転送指示を受領。単一BOOTSEL `E661640843239D21` と個体manifestを照合し、SHA256 `7857108860e87179c4c49424dd50d0ecffe04f87e8795424550f78b4e5557820` を転送直前に再確認。一度だけload/verifyし、08:26:45.793 UTCに両100%、verify OK、終了コード0、アプリ再起動を確認した。生ログは `/tmp/picomado-power-wake-trace-flash.log`。
+- ユーザー08:24 UTC「BOOTSELしたよ」と親の転送指示を受領。単一BOOTSEL `0123456789ABCDE0` と個体manifestを照合し、SHA256 `7857108860e87179c4c49424dd50d0ecffe04f87e8795424550f78b4e5557820` を転送直前に再確認。一度だけload/verifyし、08:26:45.793 UTCに両100%、verify OK、終了コード0、アプリ再起動を確認した。生ログは `/tmp/picomado-power-wake-trace-flash.log`。
 - 単一readerを転送前から再列挙待機させ、同じUIDの `/dev/ttyACM0` を開いて非秘密 `timing` 行と既存診断を取得した。起動LCDログは要求20MHz／SDK actual15,625,000Hz／CS保持、GP22 ON/read1。Wi-Fi IP取得後、frame356でframe_start・CRC完了・受信ACK前後・実SPI開始終了・描画ACK前後を確認し、いずれも `dropped=0`。
 - frame356の端末単調時刻はCRC完了8,055,954us、receipt_begin8,056,115us、receipt_end8,056,393us、spi_begin8,059,951us、spi_end8,075,560us、render_begin8,075,702us、render_end8,075,823us。実SPI区間15,609us、CRC完了から描画ACK投入完了19,869us。この1フレームで秒単位の端末描画待ちは観測されていないが、ユーザー押下に対応する遅延の解決を意味しない。TCP戻り値は0、ACK投入成功でありサーバ到着の証明ではない。
 - tool session23132のreaderは最大15分で終了し、ログ `/tmp/picomado-power-wake-trace-usb.log` を権限600で保存する。他担当は新しいreaderを重ねずこのログを読む。現物はここから78571088版であり、直前のf61版での08:20／08:22証言と区別する。押下の実機受入・遅延原因はこのログの次の操作との照合待ち。元f61 UF2は引き続き保全。SSH・サービス変更・commit/pushなし。

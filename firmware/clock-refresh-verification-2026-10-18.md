@@ -45,7 +45,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## その後の本番対応
 
-ユーザーの対象指定とBOOTSEL完了を受け、E-ink_0だけを実config／binding付き本番UF2で更新した。唯一の接続Flash ID `E6614864D3813227` を照合し、load/verify/起動、同IDのUSB再認識、ACTIVE/READY、サーバへの `eink-clock-v1` 申告とRenderedAckを確認した。続いてユーザーの「E-ink_1 Bootselしました」を受け、E-ink_1も実config／唯一の接続Flash ID `E6614864D34F8E22` を照合しload/verify/起動した。同IDのUSB再認識、新能力申告、ACTIVE/READYと描画ACKを確認した。LCDには書き込んでいない。
+ユーザーの対象指定とBOOTSEL完了を受け、E-ink_0だけを実config／binding付き本番UF2で更新した。唯一の接続Flash ID `0123456789ABCDE1` を照合し、load/verify/起動、同IDのUSB再認識、ACTIVE/READY、サーバへの `eink-clock-v1` 申告とRenderedAckを確認した。続いてユーザーの「E-ink_1 Bootselしました」を受け、E-ink_1も実config／唯一の接続Flash ID `0123456789ABCDE2` を照合しload/verify/起動した。同IDのUSB再認識、新能力申告、ACTIVE/READYと描画ACKを確認した。LCDには書き込んでいない。
 
 本番サーバも保持削除機能と実環境値を維持して `14:43:27 JST` に更新・再起動した。更新直前の選択／ON/OFFは保持し、時計への強制切替は行っていない。部分更新の残像・フラッシュ間隔と物理表示はユーザー目視待ち。バイナリSHA、PID、最小DB退避と実機配送の留保は[本番検証記録](../service/clock-verification-2026-10-18.md)を参照する。
 

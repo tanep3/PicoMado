@@ -1,6 +1,6 @@
 # 2026-10-20 LCD切替の実測と観測不足
 
-対象はPicoMado-lcd1、session2282。受入済みruntime `52d8fdd` と同じcodeの `8ef0919` から、既存全診断flagsを保ちEV1を追加したLCD UF2と観測serverを使用した。利用者の申告は23:08:12 UTCの「時計からYoutubeで気持ち遅延」。従来の数秒遅延と同じ事象とは断定しない。
+対象はexample-lcd、session2282。受入済みruntime `52d8fdd` と同じcodeの `8ef0919` から、既存全診断flagsを保ちEV1を追加したLCD UF2と観測serverを使用した。利用者の申告は23:08:12 UTCの「時計からYoutubeで気持ち遅延」。従来の数秒遅延と同じ事象とは断定しない。
 
 停止・両ログ保存・通常server復帰と3端末の受信／描画ACKは23:09:20 UTCに確認済み。設定差分0、元flags保持、DB巻戻しなし。以後の追加再起動、USB再採取、再フラッシュ、SSHはない。
 

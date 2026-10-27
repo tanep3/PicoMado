@@ -106,7 +106,7 @@
     }
   },
   "builds": {
-    "PicoMado-lcd1": {
+    "example-lcd": {
       "uf2_sha256": "fd19ace94a80c0baf9ad97ed9e97255aca563045ee428efd1ac7aad52a2d8e3a",
       "elf_sha256": "827f556716e32d4afbf78a78406ae3963d85a5ef07eb1c83c76983626af2edd8",
       "memory": {
@@ -125,7 +125,7 @@
         "PM_CYW43_INNER_PROBE": "ON",
         "PM_AWAY_EEX1": "ON",
         "PM_EEX1_PORT": "48116",
-        "PM_DEVICE": "PicoMado-lcd1",
+        "PM_DEVICE": "example-lcd",
         "PM_USE_SAMPLE": "OFF",
         "PM_PREPARE_UNBOUND": "OFF",
         "PM_PREPARE_UNBOUND_PANEL": "OFF",
@@ -337,7 +337,7 @@
         }
       ]
     },
-    "PicoMado-lcd1-off": {
+    "example-lcd-off": {
       "uf2_sha256": "3da9da4ad4c412fb29162af6f81569bc90f15e95a1bb485037eb06b6f3f413ce",
       "elf_sha256": "5c83262c0a154c9b70a6e51e646576248cb7e98fe38640e1ef1b984506fcb664",
       "memory": {
@@ -356,7 +356,7 @@
         "PM_CYW43_INNER_PROBE": "ON",
         "PM_AWAY_EEX1": "ON",
         "PM_EEX1_PORT": "48116",
-        "PM_DEVICE": "PicoMado-lcd1",
+        "PM_DEVICE": "example-lcd",
         "PM_USE_SAMPLE": "OFF",
         "PM_PREPARE_UNBOUND": "OFF",
         "PM_PREPARE_UNBOUND_PANEL": "OFF",

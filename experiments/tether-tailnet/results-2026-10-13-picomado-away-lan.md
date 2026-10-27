@@ -2,7 +2,7 @@
 
 # PicoMado AWAY → TailSocks → LAN宛先の実機検証
 
-日付: 2026-10-13。以下の時刻はUTC。対象はLCD端末 `PicoMado-lcd1` １台と、その時点の既存ネットワーク環境。
+日付: 2026-10-13。以下の時刻はUTC。対象はLCD端末 `example-lcd` １台と、その時点の既存ネットワーク環境。
 
 ## 結果と適用範囲
 
@@ -14,7 +14,7 @@ LAN宛先への到達は、本環境で既に利用できるsubnet routingに依
 
 ## 使用版
 
-- ファーム: `PicoMado-lcd1-away-lan-test.uf2`、SHA256 `c37ce90bee98b009f249679acdaaaff30210f83682e2ccbb8a8f8ddec83f7c8a`。05:06:46にFlash load/verify100%完了。実config・UF2・生ログはGit管理外。
+- ファーム: `example-lcd-away-lan-test.uf2`、SHA256 `c37ce90bee98b009f249679acdaaaff30210f83682e2ccbb8a8f8ddec83f7c8a`。05:06:46にFlash load/verify100%完了。実config・UF2・生ログはGit管理外。
 - Rustサーバ: ACK競合修正版。95試験通過、fmt・clippy・releaseビルド成功。05:05:57に `picomado.service` のみ再起動、PID `1069457`。導入SHA256 `6bbf1a1978c1929c6ad50c0f3e64bf5a511aaf43986aa0190baeb2f50df171ae`。
 - 既存待受: `192.0.2.120:16153` のみ。Web `/` と `/api/state` はHTTP200。端末incarnation3、設定改訂1、利用設定改訂4を保持。
 
@@ -43,7 +43,7 @@ LAN宛先への到達は、本環境で既に利用できるsubnet routingに依
 
 ## 最後の一回のセッション確認
 
-確認時刻 `2026-10-13T05:31:15.577854+00:00`。サービス・設定を変更せず、最新ジャーナルとAPIを一度取得した。HTTP 200、PicoMado-lcd1 online=false、最新session=36、selected=weather、受信ACK=None、描画ACK=None。最新sessionの終了ログは1件。最後のheartbeatは05:22:56 UTC、05:23:11 UTCに `read_error` で終了した（接続時間375,199ms、終了直前のidle105ms）。この終了にはACK拒否・送信stallの記録はない。端末操作との因果は未断定。約6分15秒の継続と、その後の終了を確認した結果であり、長期・全操作の受入完了とは扱わない。
+確認時刻 `2026-10-13T05:31:15.577854+00:00`。サービス・設定を変更せず、最新ジャーナルとAPIを一度取得した。HTTP 200、example-lcd online=false、最新session=36、selected=weather、受信ACK=None、描画ACK=None。最新sessionの終了ログは1件。最後のheartbeatは05:22:56 UTC、05:23:11 UTCに `read_error` で終了した（接続時間375,199ms、終了直前のidle105ms）。この終了にはACK拒否・送信stallの記録はない。端末操作との因果は未断定。約6分15秒の継続と、その後の終了を確認した結果であり、長期・全操作の受入完了とは扱わない。
 
 ## 証拠の参照先
 

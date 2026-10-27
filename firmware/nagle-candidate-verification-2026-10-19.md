@@ -77,6 +77,6 @@ bash tests/run_host_tests.sh
 
 ## 後続の反映履歴（2026-10-19）
 
-別途ユーザー承認後、通常版に NODELAY だけを加えた LCD UF2 を対象 PicoMado-lcd1 に 1 回 load/verify して使用している。UF2 SHA256 は `a455b5bb75672b187bc0a1d0ccdb8644c99eb881c51ebe9d980ee6d00928fa82`。ACK observer は含まず、既存 PM/EEX/EOF 回復と通常診断を維持する。SDK ソースは変更していない。通常版との全 211 object 比較では net.o 以外が同一であることを確認した。
+別途ユーザー承認後、通常版に NODELAY だけを加えた LCD UF2 を対象 example-lcd に 1 回 load/verify して使用している。UF2 SHA256 は `a455b5bb75672b187bc0a1d0ccdb8644c99eb881c51ebe9d980ee6d00928fa82`。ACK observer は含まず、既存 PM/EEX/EOF 回復と通常診断を維持する。SDK ソースは変更していない。通常版との全 211 object 比較では net.o 以外が同一であることを確認した。
 
 実機では遅い Hello による稼働 session の置換も観測されたため、NODELAY 単独で通信障害全般を解決したとは扱わない。保存ログの解析とサーバ側受付順ガードは別の変更として [サーバ検証記録](../docs/design/hello-accept-order.md) に分離した。今回のソース保存・コミット作業では再書込み、USB、新規 packet 採取をしていない。既存の端末固有 config、資格情報、生成バイナリ、private 採取物はコミットに含めない。

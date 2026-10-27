@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 OPERATION = 'LCD-FIXED-UPDATE-20261027'
 SOURCE = '17e231ffa9db9b9cc9d93ecd55444eae0b7f26b1'
-DEVICE = 'PicoMado-lcd1'
+DEVICE = 'example-lcd'
 PROFILE = 'pico_w_lcd_160x80_4'
 ARTIFACT = '7e0dce0b72b1676604705a0dc6a01015014895a88ffc5abfc2bea4467d7cde41'
 

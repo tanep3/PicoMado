@@ -1,6 +1,6 @@
 # LCD EEX1実装・転送確認（2026-10-18 UTC）
 
-完了時刻: 2026-10-18T15:09:18.795198+00:00 / 2026-10-19T00:09:18.795198+09:00。対象PicoMado-lcd1、USB Flash ID E661640843239D21。ユーザー承認に基づき、完成候補を**一回だけ**転送した。
+完了時刻: 2026-10-18T15:09:18.795198+00:00 / 2026-10-19T00:09:18.795198+09:00。対象example-lcd、USB Flash ID 0123456789ABCDE0。ユーザー承認に基づき、完成候補を**一回だけ**転送した。
 
 ## ソフトウェア確認
 
@@ -23,8 +23,8 @@
 
 転送後に5秒USB取得を2回行い、両方で完全snapshot・DTR低下・FD閉鎖を確認。ボタン・テザリング・アプリの操作は当方で行っていない。
 
-- AWAYでIP取得成功。Pico IPv4は10.244.95.120、gateway10.244.95.133、netmask255.255.255.0。
-- EEX1の受領と結果のKを確認: receipt=1 / result=1、verified=1、UDPは終了済み(udp_open=0)。candidate10.244.95.133:48115、報告UDP port48116、tx_error0。
+- AWAYでIP取得成功。Pico IPv4は203.0.113.100、gateway203.0.113.101、netmask255.255.255.0。
+- EEX1の受領と結果のKを確認: receipt=1 / result=1、verified=1、UDPは終了済み(udp_open=0)。candidate203.0.113.101:48115、報告UDP port48116、tx_error0。
 - 既存SOCKS METHOD/AUTH/CONNECTが全てresult1。PicoはACTIVE/READY。認証を省略していない。
 - PM読戻しraw0x10/mode0/none1、SDK戻り値0を維持。
 - Pi APIでもLCD online / selected youtube。受信・描画ACKのframe IDが421188→421249へ更新。これは最新IDの進行であり、差61を描画枚数や実効FPSとは扱わない。

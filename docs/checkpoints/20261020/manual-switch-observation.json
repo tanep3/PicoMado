@@ -2,7 +2,7 @@
   "capture_date_UTC": "2026-10-20",
   "source_commit": "8ef09191e101cd833e6e97264cee89353fad861d",
   "runtime_unchanged_from": "52d8fddfd301f7f79c092c1ceca10d3c9fbb30f6",
-  "device": "PicoMado-lcd1",
+  "device": "example-lcd",
   "session": 2282,
   "user_report": "時計からYoutubeで気持ち遅延",
   "transitions": [
