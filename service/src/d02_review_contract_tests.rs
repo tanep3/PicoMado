@@ -254,8 +254,8 @@ async fn d02_review_real_reader_duplicate_confirmation_does_not_block_following_
     let temp = tempfile::tempdir().unwrap();
     let mut state = app_at_fixture_date(&temp.path().join("db"));
     let order = ["weather", "rain-radar", "youtube", "caricature", "clock"]
-        .map(str::to_owned)
-        .to_vec();
+        .into_iter().chain(crate::plugins::DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
+        .map(str::to_owned).collect();
     state.set_order(1, order.clone()).unwrap();
     let _token = state
         .hello(

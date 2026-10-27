@@ -3170,7 +3170,7 @@ mod tests {
         for (index, (selected, display_epoch)) in responses.iter().enumerate() {
             assert_eq!(
                 selected.as_deref(),
-                Some(["caricature", "weather", "rain-radar", "clock", "youtube"][index % 5])
+                Some(crate::plugins::DEFAULT_ORDER[(index + 1) % crate::plugins::DEFAULT_ORDER.len()])
             );
             assert_eq!(*display_epoch, epoch + index as u64 + 1);
         }

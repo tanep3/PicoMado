@@ -67,6 +67,8 @@ impl CausalDevice {
         use std::io::BufRead;
         use std::process::{Command, Stdio};
         let exe = out.join(profile);
+        let hardware_profile = std::fs::read_to_string(firmware.join("devices").join(profile).join("profile.txt")).unwrap();
+        let profile_header = firmware.join("profiles").join(format!("{}.h", hardware_profile.trim()));
         let result = Command::new("cc")
             .current_dir(firmware)
             .args([
@@ -82,6 +84,7 @@ impl CausalDevice {
                 "-Isrc",
                 "-Itests/app_stubs",
             ])
+            .arg("-include").arg(profile_header)
             .arg(format!("-DPM_BUILD_DEVICE=\"{profile}\""))
             .arg(format!("-Idevices/{profile}"))
             .args([
