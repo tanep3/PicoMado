@@ -15,7 +15,7 @@
   "status": "in_progress",
   "stages": {
     "design": {"state": "verified", "evidence": [{"kind": "commit", "commit": "b773188"}]},
-    "implementation": {"state": "in_progress", "evidence": []},
+    "implementation": {"state": "verified", "evidence": [{"kind": "check", "path": "/tmp/picomado-public-docs-20261027-profile-status-check/check.json", "SHA256": "d1827f445355a19d51244448b2864bc375395c6ce33046a5c7a982ef0816adca"}]},
     "independent_verification": {"state": "not_started", "evidence": []},
     "operational_application": {"state": "not_started", "evidence": []},
     "effectiveness_confirmation": {"state": "not_started", "evidence": []}
