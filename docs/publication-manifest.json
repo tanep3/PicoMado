@@ -4,7 +4,7 @@
   "buildable": false,
   "standalone_document": false,
   "not_for_distribution": true,
-  "primary_reader_preview": "Self-contained Japanese README HTML with embedded photos, kept outside this repository; links to omitted guides are noninteractive.",
+  "primary_reader_preview": "Self-contained Japanese README HTML with embedded device photos and YouTube GIF, kept outside this repository; links to omitted guides are noninteractive.",
   "includes": [
     "README.md",
     "README.ja.md",
@@ -12,6 +12,7 @@
     "docs/publication-manifest.json",
     "docs/publication-scope.md",
     "docs/media/picomado-devices.jpg",
+    "docs/media/picomado-youtube.gif",
     "docs/media/youtube-lcd.jpg",
     "docs/media/weather-lcd-eink.jpg",
     "docs/media/rain-radar-lcd-eink.jpg",

@@ -9,13 +9,13 @@
   "deliverables": ["public README and setup guide", "hardware support and documentation index", "publication scope and privacy audit"],
   "dependencies": ["Preserve historical evidence and active device data", "Parent owns independent approval and final closure"],
   "design_artifacts": ["docs/changes/PUBLIC-DOCS-20261027.md"],
-  "design_commit": "537fd19",
+  "design_commit": "044d4bf",
   "domain_authority": "docs/changes/PUBLIC-DOCS-20261027.md",
   "standard": "development/standard/v1/standard.md",
   "status": "in_progress",
   "stages": {
-    "design": {"state": "verified", "evidence": [{"kind": "commit", "commit": "537fd19"}]},
-    "implementation": {"state": "verified", "evidence": [{"kind": "check", "path": "/tmp/picomado-public-docs-20261027-committed-check/check.json", "SHA256": "c36ce89eb42d2d892b03d6e7098f843b6ea09bee40a4190731c1965f7d165a5a"}]},
+    "design": {"state": "verified", "evidence": [{"kind": "commit", "commit": "044d4bf"}]},
+    "implementation": {"state": "in_progress", "evidence": []},
     "independent_verification": {"state": "not_started", "evidence": []},
     "operational_application": {"state": "not_started", "evidence": []},
     "effectiveness_confirmation": {"state": "not_started", "evidence": []}

@@ -14,9 +14,9 @@ PicoMado already has five built-in experiences:
 
 Choose a video in the web interface, prepare it on the server, then watch it play on the 160×80 LCD. Saved sources and frame-rate variants can be managed in the browser. This feature uses the LCD; the small screen is part of the fun, not a replacement for a full-size player.
 
-![PicoMado LCD device playing a video](docs/media/youtube-lcd.jpg)
+![Animated recording of YouTube video playing on a PicoMado LCD device](docs/media/picomado-youtube.gif)
 
-*The upper LCD is playing video. The E-ink device underneath is showing a different plugin.*
+*A seven-second loop of the real LCD device playing video; it is not a software render.*
 
 ### Weather to glance at
 
