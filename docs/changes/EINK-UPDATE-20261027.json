@@ -16,17 +16,22 @@
   "design_artifacts": [
     "docs/changes/EINK-UPDATE-20261027.md"
   ],
-  "design_commit": "pending",
+  "design_commit": "81abecd",
   "domain_authority": "docs/changes/EINK-UPDATE-20261027.md",
   "standard": "development/standard/v1/standard.md",
   "status": "in_progress",
   "stages": {
     "design": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "81abecd"
+        }
+      ]
     },
     "implementation": {
-      "state": "not_started",
+      "state": "in_progress",
       "evidence": []
     },
     "independent_verification": {
