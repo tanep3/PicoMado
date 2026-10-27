@@ -8,6 +8,7 @@ path = "src/lib.rs"
 
 [features]
 default = []
+word-tutorial = []
 stream-diagnostics = []
 boundary-observation = []
 ack-path-probe = []

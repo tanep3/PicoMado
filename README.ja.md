@@ -75,6 +75,6 @@ Web 操作 ──> Linux サーバ：プラグイン、表示内容、設定、�
 2. [初回設定ガイド](docs/guides/first-setup.md)に沿って Linux サーバと端末を準備する。
 3. 既存端末を更新する場合は先に[退避と復旧](docs/guides/release-and-recovery.md)を読む。
 
-詳しくは [ファームウェア](firmware/README.md)、[サーバ](service/README.md)、[文書案内](docs/README.md)を参照してください。開発ルールと証拠記録は [AGENTS.md](AGENTS.md)にあります。
+詳しくは [ファームウェア](firmware/README.md)、[サーバ](service/README.md)、[文書案内](docs/README.md)を参照してください。
 
 コードは [MIT License](LICENSE)、著作権者は Tane Channel Technology です。フォントなど第三者の素材には[個別の権利表示](service/assets/NOTO-COPYRIGHT)が適用されます。

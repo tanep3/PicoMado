@@ -23,7 +23,7 @@ cp -n service/deploy/config.toml "$HOME/.config/PicoMado/config.toml"
 
 `firmware/devices/sample-a/config.sample.h` はダミーの Wi-Fi 値を持つ LCD 例です。対応表にある自分の構成を選び、`firmware/devices/<自分の端末名>/` に `profile.txt`、`config.h`、`board-id.txt` を用意します。`profile.txt` はプロファイル名を 1 行で指定します。`config.h` はサンプルの `PM_DEVICE_ID` をディレクトリ名に、HOME の SSID・パスワード・サーバ IPv4 を自分の値に変えます。`main.c` は AWAY のマクロも常に参照するため、HOME だけで使う場合もサンプルと同じ AWAY 項目をすべて定義します。未使用の AWAY 項目にはサンプルの説明用値を残し、AWAY を選択しません。実際に AWAY を使う場合は Wi-Fi と SOCKS5 の値を個別に設定します。サンプルの予約済み IP アドレスやパスワードでは接続できません。`board-id.txt` は対象の実機から確認した Flash ID を入れるファイルです。BOOTSEL で対象の Pico W を 1 台だけ接続し、`picotool info -d` の `flash id` が 16 桁であることを確認します。値を推測してはいけません。秘密の `config.h` と実機 ID を Git に追加しないでください。
 
-新しく作る `config.h` には画面・ボタンの定義も `#include` も書きません。ビルドが `profile.txt` に対応する追跡済みプロファイルを読み込みます。個体設定で選べるハード項目は LCD バックライトの接続・極性、または E-ink パネル接続の有無だけです。旧 config はプロファイルとハード定義が完全に一致する場合だけ利用できます。
+新しく作る `config.h` には画面・ボタンの定義も `#include` も書きません。ビルドが `profile.txt` に対応する選んだプロファイルを読み込みます。個体設定で選べるハード項目は LCD バックライトの接続・極性、または E-ink パネル接続の有無だけです。旧 config はプロファイルとハード定義が完全に一致する場合だけ利用できます。
 
 LCD の新しい端末なら次のように例を複製できます。`my-pico` を自分で決めた端末名に変え、複製した `config.h` の `PM_DEVICE_ID` と接続値を編集してください。E-ink の場合は、対応表で選んだボタン数に合う `firmware/devices/E-ink_0` または `E-ink_1` の例を使います。
 
@@ -42,10 +42,9 @@ cp firmware/devices/sample-a/profile.txt "firmware/devices/$PM_DEVICE/profile.tx
 
 ## 5. ビルドできる配布物か確認する
 
-現行リポジトリには一般利用者向けの配布済みバイナリ・UF2 がありません。ソースから作る経路は開発用 root gate に依存します。Git から除外された自分の `config.h` と `board-id.txt` を追加するだけなら、gate が計算する追跡ソースの digest は変わらず、新しい設計コミットは要りません。しかし現行の変更記録は過去のローカル検査ファイルを絶対パスで参照するため、別の PC に clone しただけでは `check` が通りません。**新規利用者がこのリポジトリだけでビルドから実機導入まで完走できる公開配布経路は、まだありません。** ここを飛ばして直接 CMake や `picotool load` を使う案内はしません。
+ソースからのビルドはプロジェクトの gate を通します。配線を変更する場合は `firmware/profiles/` に別名の `.h` と `.board` を作り、`profile.txt` で選びます。新しい profile はビルド前にローカル Git コミットへ入れてください。gate は使用したソースと設定を照合しますが、実物の配線や表示を保証しません。導入前には別の確認者によるレビューが必要です。
 
-以下は、この PC で有効な gate 証拠を持つ作業者が成果物を作り、端末所有者がそれを自分の機器に入れる際の順序です。ビルド先は毎回新しい空ディレクトリを使います。
-
+検査とビルドは次の順です。
 ```sh
 python3 tools/project_gate.py check
 python3 tools/project_gate.py build --kind server --build-dir /tmp/picomado-server-build
@@ -58,7 +57,7 @@ firmware/tools/build.sh --device "$PM_DEVICE"
 
 ## 6. 新しい端末へ入れる
 
-以下は有効な候補・レビュー記録と offline preflight が揃った後に、**自分のサーバと端末の所有者が実行する操作例**です。この文書を読むこと自体は、エージェントにサービス操作や書込みを許可しません。`PM_RELEASE_BIN` は検査済みサーバ成果物の実際の場所に変更します。
+以下は有効な候補・レビュー記録と offline preflight が揃った後に、**自分のサーバと端末の所有者が実行する操作例**です。`PM_RELEASE_BIN` は検査済みサーバ成果物の実際の場所に変更します。
 
 ```sh
 PM_RELEASE_BIN=/tmp/picomado-server-build/release/picomado-server
@@ -91,4 +90,4 @@ AWAY は HOME の初回動作を確認してから設定します。製品用フ
 
 ## 9. 困ったとき
 
-困ったときは、サーバ設定を読めない場合は TOML の書式と指定パス、接続しない場合はサーバと端末に設定した IPv4、SSID、ポート、画面が出ない場合はプロファイルと実際の画面型番・配線を順に確認します。確認用ログや質問に Wi-Fi パスワードや実機 ID を貼り付けないでください。E-ink 2 ボタン完成端末の実機動作はまだ未確認です。
+困ったときは、サーバ設定を読めない場合は TOML の書式と指定パス、接続しない場合はサーバと端末に設定した IPv4、SSID、ポート、画面が出ない場合はプロファイルと実際の画面型番・配線を順に確認します。確認用ログや質問に Wi-Fi パスワードや実機 ID を貼り付けないでください。

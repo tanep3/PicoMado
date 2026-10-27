@@ -1,6 +1,6 @@
 # 操作ガイド
 
-操作・復旧・編集の手順。実行前に対象機種、接続、現行ファームと承認範囲を確認する。
+端末の組み立てから使い方、カスタマイズ、更新時の復旧までの手順です。
 
 ## 文書一覧
 
@@ -10,8 +10,8 @@
 - [First setup (English)](first-setup.en.md)
 - [Supported hardware (English)](hardware-support.en.md)
 - [Customize PicoMado (English)](customization.en.md)
-- [小さなプラグインから始める](plugin-author.md)
-- [Start with a small plugin (English)](plugin-author.en.md)
+- [好きな言葉のプラグインを作る](plugin-author.md)
+- [Make a favorite words plugin (English)](plugin-author.en.md)
 - [更新前の退避と復旧](release-and-recovery.md)
 - [風刺画のプロンプトを編集する](caricature-prompts.md)
 - [自宅・外出先接続 技術検証ガイド](home-away-connectivity-technical-guide.md)

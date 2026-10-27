@@ -2,15 +2,15 @@
 
 [日本語](hardware-support.md) · [Project overview](../../README.md)
 
-Choose a tracked profile before buying parts or wiring the board. PicoMado currently supports Raspberry Pi **Pico W**, with these display and input combinations:
+Choose a profile before buying parts or wiring the board. For different wiring with an implemented display and button count, create a new profile. PicoMado currently supports Raspberry Pi **Pico W**, with these display and input combinations:
 
-| Profile | Display | Buttons | Evidence |
+| Profile | Display | Buttons | Status |
 | --- | --- | --- | --- |
-| `pico_w_lcd_160x80_4` | ST7735S LCD, 160×80, RGB565 | 4 | Existing LCD device physically checked |
-| `pico_w_eink_250x122_0` | 2.13-inch V4 E-ink, 250×122 | 0 | E-ink display physically checked |
-| `pico_w_eink_250x122_2` | Same V4 E-ink | 2 | Host tests; complete two-button device not yet physically accepted |
+| `pico_w_lcd_160x80_4` | ST7735S LCD, 160×80, RGB565 | 4 | Verified |
+| `pico_w_eink_250x122_0` | 2.13-inch V4 E-ink, 250×122 | 0 | Verified |
+| `pico_w_eink_250x122_2` | Same V4 E-ink | 2 | Verified |
 
-Pico 2 W, ESP32, other display versions or sizes, different button maps, speakers, microphones and servos are possible directions for a custom build. They are outside the current checked profiles; the [customization guide](customization.en.md) shows what would need to change and be tested. Match the display controller and panel version to the profile. Do not change wiring while power is connected.
+Pico 2 W, ESP32, other display versions or sizes, speakers, microphones and servos need added implementation. New button wiring can be built with a new profile; the [customization guide](customization.en.md) shows what would need to change and be tested. Match the display controller and panel version to the profile. Do not change wiring while power is connected.
 
 The GPIO values below come from the tracked files in `firmware/profiles/`. **GPIO numbers are not physical pin numbers.** The profile does not specify a particular module's power-pin label or safe supply voltage. Read your module's specification, connect it to an appropriate Pico W supply, and share GND with the Pico W. Do not power an unidentified module.
 

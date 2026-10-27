@@ -1,0 +1,53 @@
+{
+  "id": "PUBLIC-WORD-PLUGIN-20261027",
+  "title": "Favorite words plugin tutorial",
+  "owner": "parent thread 01a17217-ba4c-76ec-9c07-ca50f54160db",
+  "implementer": "delegated firmware and docs task",
+  "cause": "Existing minimal plugin example does not render useful text or enter server selection",
+  "introduction_cause": "Documentation used an abstract black frame skeleton",
+  "escape_cause": "No reader reproduction of server registration and delivery",
+  "deliverables": [
+    "opt-in phrase plugin",
+    "image maker",
+    "Japanese and English tutorial",
+    "isolated server-side delivery test"
+  ],
+  "dependencies": [
+    "Default builtins remain five plugins",
+    "No physical deployment by this task"
+  ],
+  "design_artifacts": [
+    "docs/changes/PUBLIC-WORD-PLUGIN-20261027.md"
+  ],
+  "design_commit": "6f4ee3c",
+  "domain_authority": "docs/changes/PUBLIC-WORD-PLUGIN-20261027.md",
+  "standard": "development/standard/v1/standard.md",
+  "status": "in_progress",
+  "stages": {
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "6f4ee3c"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}

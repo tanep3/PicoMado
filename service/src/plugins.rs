@@ -6,7 +6,10 @@ use std::collections::BTreeMap;
 use crate::content::ContentPlugin;
 use crate::{Engine, Registry};
 
+#[cfg(not(feature = "word-tutorial"))]
 pub const DEFAULT_ORDER: [&str; 5] = ["youtube", "caricature", "weather", "rain-radar", "clock"];
+#[cfg(feature = "word-tutorial")]
+pub const DEFAULT_ORDER: [&str; 6] = ["youtube", "caricature", "weather", "rain-radar", "clock", "my-words"];
 
 /// One registration owns matching rules and content. The application does not
 /// add an ID branch when another plugin is registered.
@@ -47,6 +50,8 @@ pub fn builtins() -> PluginSet {
     set.register(Box::new(crate::weather::WeatherPlugin), Box::new(crate::weather::WeatherContent::default())).expect("unique plugin");
     set.register(Box::new(crate::radar::RadarPlugin), Box::new(crate::radar::RadarContent::default())).expect("unique plugin");
     set.register(Box::new(crate::clock::ClockPlugin), Box::new(crate::clock::ClockContent::default())).expect("unique plugin");
+    #[cfg(feature = "word-tutorial")]
+    set.register(Box::new(crate::word::WordRules), Box::new(crate::word::WordContent)).expect("unique plugin");
     debug_assert_eq!(set.order, DEFAULT_ORDER);
     set
 }

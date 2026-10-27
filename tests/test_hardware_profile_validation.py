@@ -9,6 +9,9 @@ SOURCE = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('hardware_profile_validation', SOURCE/'firmware/tools/validate_hardware_profile.py')
 validator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(validator)
+lineage_spec = importlib.util.spec_from_file_location('build_lineage', SOURCE/'tools/build_lineage.py')
+lineage = importlib.util.module_from_spec(lineage_spec)
+lineage_spec.loader.exec_module(lineage)
 
 
 class HardwareProfileValidation(unittest.TestCase):
@@ -28,6 +31,39 @@ class HardwareProfileValidation(unittest.TestCase):
     def check(self, text):
         self.config.write_text(text)
         validator.validate(self.config, self.profile, self.cc)
+
+    def test_custom_wiring_uses_implemented_eink_driver(self):
+        source = SOURCE/'firmware/profiles/pico_w_eink_250x122_2.h'
+        self.profile.write_text(source.read_text().replace('PM_BUTTON_UP_PIN 20', 'PM_BUTTON_UP_PIN 18').replace('PM_BUTTON_DOWN_PIN 21', 'PM_BUTTON_DOWN_PIN 19'))
+        self.config.write_text('#define PM_EINK_PANEL_CONNECTED 1\n')
+        self.assertEqual(validator.validate(self.config, self.profile, self.cc), 'profile')
+        self.profile.write_text(self.profile.read_text().replace('PM_BUTTON_DOWN_PIN 19', 'PM_BUTTON_DOWN_PIN 18'))
+        with self.assertRaisesRegex(ValueError, 'collide'):
+            validator.validate(self.config, self.profile, self.cc)
+
+    def test_contradictory_display_capability_is_rejected(self):
+        self.profile.write_text(self.profile.read_text().replace('PM_DISPLAY_CAPABILITY "lcd"', 'PM_DISPLAY_CAPABILITY "eink"'))
+        with self.assertRaisesRegex(ValueError, 'contradicts'):
+            self.check('')
+
+    def test_missing_display_implementation_is_not_accepted(self):
+        self.profile.write_text(self.profile.read_text().replace('PM_LCD_CONTROLLER_ST7735S', 'PM_LCD_CONTROLLER_UNKNOWN'))
+        with self.assertRaisesRegex(ValueError, 'driver unavailable'):
+            self.check('')
+
+    def test_new_profile_name_is_accepted_but_missing_mcu_is_not(self):
+        folder = self.root/'firmware/profiles'
+        folder.mkdir(parents=True)
+        device = self.root/'firmware/devices/custom'
+        device.mkdir(parents=True)
+        (device/'profile.txt').write_text('my_eink_wiring\n')
+        (folder/'my_eink_wiring.h').write_text((SOURCE/'firmware/profiles/pico_w_eink_250x122_2.h').read_text())
+        board = folder/'my_eink_wiring.board'
+        board.write_text('pico_w\n')
+        self.assertEqual(lineage.hardware_profile(self.root, 'custom')[0], 'my_eink_wiring')
+        board.write_text('pico2_w\n')
+        with self.assertRaisesRegex(ValueError, 'implementation unavailable'):
+            lineage.hardware_profile(self.root, 'custom')
 
     def test_verified_samples(self):
         for device in ('sample-a', 'sample-b', 'E-ink_0', 'E-ink_1'):

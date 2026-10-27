@@ -223,6 +223,21 @@ impl Runtime {
                 .checked_add(1)
                 .ok_or(AppError::Conflict("order revision exhausted"))?;
         }
+        // A server upgraded with the optional phrase tutorial retains each
+        // device's selection and enabled set while adding the new catalog ID.
+        #[cfg(feature = "word-tutorial")]
+        {
+            let before_word: BTreeSet<_> =
+                ["youtube", "caricature", "weather", "rain-radar", "clock"].into();
+            if catalog.iter().any(|id| id == "my-words")
+                && state.world.plugin_order.len() == before_word.len()
+                && state.world.plugin_order.iter().map(String::as_str).collect::<BTreeSet<_>>() == before_word
+            {
+                state.world.plugin_order.push("my-words".into());
+                state.order_revision = state.order_revision.checked_add(1)
+                    .ok_or(AppError::Conflict("order revision exhausted"))?;
+            }
+        }
         for record in state.settings.devices.values_mut() {
             record.online = false;
         }
@@ -2444,6 +2459,8 @@ mod tests {
             for id in ["youtube", "caricature", "rain-radar", "clock"] {
                 web_enabled(&mut app, "desk", id, false);
             }
+            #[cfg(feature = "word-tutorial")]
+            web_enabled(&mut app, "desk", "my-words", false);
             app.button(&token, ButtonAction::Sub).unwrap();
             app.button(&token, ButtonAction::Down).unwrap();
             assert_eq!(app.plugin_position(&token).unwrap().index, 1);
@@ -2626,8 +2643,8 @@ mod tests {
         app.set_order(
             1,
             ["weather", "rain-radar", "youtube", "caricature", "clock"]
-                .map(str::to_owned)
-                .to_vec(),
+                .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
+                .map(str::to_owned).collect(),
         )
         .unwrap();
         let first = app.hello("desk", caps(), 1).unwrap();
@@ -2773,8 +2790,8 @@ mod tests {
             app.set_order(
                 1,
                 ["weather", "youtube", "caricature", "rain-radar", "clock"]
-                    .map(str::to_owned)
-                    .to_vec(),
+                    .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
+                    .map(str::to_owned).collect(),
             )
             .unwrap();
         }
@@ -3282,6 +3299,8 @@ mod clock_tests {
         let t = app.hello("old", ["lcd".into()].into(), 1).unwrap();
         app.set_enabled("old", t.incarnation, 1, "clock", false)
             .unwrap();
+        #[cfg(feature = "word-tutorial")]
+        app.runtime.world.devices.get_mut("old").unwrap().enabled.remove("my-words");
         let selection = app.runtime.world.devices["old"].selected.clone();
         let enabled = app.runtime.world.devices["old"].enabled.clone();
         let settings_rev = app.runtime.world.devices["old"].settings_revision;
@@ -3291,13 +3310,15 @@ mod clock_tests {
             "youtube".into(),
             "caricature".into(),
         ];
+        #[cfg(feature = "word-tutorial")]
+        app.runtime.world.plugin_order.push("clock".into());
         App::persist(&mut app.connection.lock().unwrap(), &app.runtime).unwrap();
         drop(app);
         let mut app = App::open(&path).unwrap();
-        assert_eq!(
-            app.view().order,
-            ["rain-radar", "weather", "youtube", "caricature", "clock"]
-        );
+        let expected = ["rain-radar", "weather", "youtube", "caricature", "clock"]
+            .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
+            .collect::<Vec<_>>();
+        assert_eq!(app.view().order, expected);
         assert_eq!(app.runtime.world.devices["old"].selected, selection);
         assert_eq!(app.runtime.world.devices["old"].enabled, enabled);
         assert_eq!(

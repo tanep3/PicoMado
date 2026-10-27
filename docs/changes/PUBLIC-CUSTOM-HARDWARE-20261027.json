@@ -1,0 +1,52 @@
+{
+  "id": "PUBLIC-CUSTOM-HARDWARE-20261027",
+  "title": "Configurable implemented hardware profiles",
+  "owner": "parent thread 01a17217-ba4c-76ec-9c07-ca50f54160db",
+  "implementer": "delegated firmware and docs task",
+  "cause": "Verified-only whitelist prevents users with valid different wiring from building",
+  "introduction_cause": "Physical support status was used as build admission",
+  "escape_cause": "Prior tests exercised only registered layouts",
+  "deliverables": [
+    "profile build admission and structural validation",
+    "user-facing setup and support docs",
+    "offline regression evidence"
+  ],
+  "dependencies": [
+    "Pico W and implemented display/input paths only",
+    "Parent owns independent approval and closure"
+  ],
+  "design_artifacts": [
+    "docs/changes/PUBLIC-CUSTOM-HARDWARE-20261027.md"
+  ],
+  "design_commit": "9632b9c",
+  "domain_authority": "docs/changes/PUBLIC-CUSTOM-HARDWARE-20261027.md",
+  "standard": "development/standard/v1/standard.md",
+  "status": "in_progress",
+  "stages": {
+    "design": {
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "9632b9c"
+        }
+      ]
+    },
+    "implementation": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}

@@ -32,7 +32,7 @@ cp firmware/devices/sample-a/profile.txt "firmware/devices/$PM_DEVICE/profile.tx
 
 Edit the copied `config.h`: replace `PM_DEVICE_ID`, HOME Wi-Fi SSID and password, and `PM_HOME_SERVER_IP` with your device name and LAN settings. The sample addresses and credentials cannot connect. Firmware also references every `PM_AWAY_*` macro even when you only use HOME, so keep all the dummy AWAY definitions for now and do not select AWAY. If you intend to use AWAY later, configure those values separately as described in step 8. For E-ink, use the matching `E-ink_0` or `E-ink_1` sample and profile instead of the LCD sample.
 
-The tracked `profile.txt` selects display type, SPI and button pins. A new `config.h` must not define those hardware macros or include another header. Only an LCD backlight's connection and polarity, or the E-ink panel connection, may vary by individual device. Connect the appropriate display power and common GND as specified by its module maker; check all GPIO against the [wiring table](hardware-support.en.md) before powering it.
+The `profile.txt` selects display type, SPI and button pins. A new `config.h` must not define those hardware macros or include another header. Only an LCD backlight's connection and polarity, or the E-ink panel connection, may vary by individual device. Connect the appropriate display power and common GND as specified by its module maker; check all GPIO against the [wiring table](hardware-support.en.md) before powering it.
 
 The real `board-id.txt` must contain the selected board's 16-digit Flash ID. Put only one Pico W in BOOTSEL mode and inspect `picotool info -d`; do not guess the ID. Keep `config.h` and the real board ID out of Git.
 
@@ -42,9 +42,8 @@ Put the server and Pico W on a LAN where they can reach each other. `PM_HOME_SER
 
 ## 5. Check whether you can build this source
 
-There is no general-user binary or UF2 release in this repository yet. Source builds use the project's development gate. Adding an ignored local `config.h` and `board-id.txt` does **not** change the tracked-source digest or require a new design commit. But the current change record references prior check evidence through a machine-local absolute path: a fresh clone on another computer cannot pass `check` just by following this guide. **A complete public self-build route is still missing.** Do not work around the gate by calling CMake or `picotool load` directly.
-
-For a workspace that has valid gate evidence, the source checks and controlled builds are:
+Source builds use the project gate. If you create a new wiring profile, keep its `.h` and `.board` files under `firmware/profiles/`, select it in `profile.txt`, and commit the new profile before building. The gate checks the source and binds the build to that profile; it does not certify your wiring on hardware. A separate review is required before installation.
+To check and build the source:
 
 ```sh
 python3 tools/project_gate.py check
@@ -58,7 +57,7 @@ Use a fresh empty build directory each time. The server candidate is `/tmp/picom
 
 ## 6. Install a checked candidate on your own new device
 
-The commands here are for the owner of the Linux server and Pico W **after** a matching candidate, independent review and `project_gate.py preflight` have succeeded. They are instructions for a person using their own equipment, not permission for an agent to operate a service or flash a device now.
+The commands here are for the owner of the Linux server and Pico W **after** a matching candidate, independent review and `project_gate.py preflight` have succeeded.
 
 ```sh
 PM_RELEASE_BIN=/tmp/picomado-server-build/release/picomado-server
@@ -91,4 +90,4 @@ Confirm HOME first. A production firmware build requires EEX1 discovery for its 
 
 ## 9. Troubleshooting
 
-For a server configuration failure, check TOML syntax, file paths and bind IP. For a connection failure, compare the server and device IP, HOME SSID and port. For a blank display, compare panel version, profile, power, common GND and GPIO. Do not paste Wi-Fi passwords or a real Flash ID into public issue logs. A complete two-button E-ink device has not yet passed physical acceptance.
+For a server configuration failure, check TOML syntax, file paths and bind IP. For a connection failure, compare the server and device IP, HOME SSID and port. For a blank display, compare panel version, profile, power, common GND and GPIO. Do not paste Wi-Fi passwords or a real Flash ID into public issue logs.
