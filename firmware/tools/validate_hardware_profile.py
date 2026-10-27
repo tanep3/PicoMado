@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the compiler-visible hardware macros against one verified profile."""
+"""Validate compiler-visible hardware macros against an implemented Pico W layout."""
 import argparse
 import os
 from pathlib import Path
@@ -111,6 +111,47 @@ def effective(body):
     return result
 
 
+def validate_layout(macros):
+    """Accept new wiring, but require a display/input path implemented here."""
+    kind = macros.get('PM_DISPLAY_TYPE')
+    lcd = kind == 'PM_DISPLAY_LCD'
+    eink = kind == 'PM_DISPLAY_EINK'
+    if not (lcd or eink):
+        raise ValueError('display driver unavailable: expected LCD or E-ink')
+    expected = ('160', '80', 'PM_PIXEL_RGB565BE', '4') if lcd else ('250', '122', 'PM_PIXEL_MONO1', None)
+    if (macros.get('PM_DISPLAY_WIDTH'), macros.get('PM_DISPLAY_HEIGHT'),
+            macros.get('PM_PIXEL_FORMAT')) != expected[:3]:
+        raise ValueError('display geometry or pixel format unsupported by driver')
+    count = macros.get('PM_BUTTON_COUNT')
+    if count not in (('4',) if lcd else ('0', '2')):
+        raise ValueError('button count unsupported by display/input implementation')
+    if lcd and macros.get('PM_LCD_CONTROLLER') != 'PM_LCD_CONTROLLER_ST7735S':
+        raise ValueError('LCD controller driver unavailable')
+    if eink and macros.get('PM_EINK_PANEL_VERSION') != '4':
+        raise ValueError('E-ink panel driver unavailable')
+    prefix = 'PM_LCD_PIN_' if lcd else 'PM_EINK_PIN_'
+    pins = {name: value for name, value in macros.items() if name.startswith(prefix) and name != 'PM_LCD_BLK_PIN'}
+    if lcd and 'PM_LCD_BLK_PIN' in macros:
+        pins['PM_LCD_BLK_PIN'] = macros['PM_LCD_BLK_PIN']
+    buttons = {name: value for name, value in macros.items() if name.startswith('PM_BUTTON_') and name.endswith('_PIN')}
+    required_buttons = {'PM_BUTTON_SUB_PIN', 'PM_BUTTON_UP_PIN', 'PM_BUTTON_POWER_PIN', 'PM_BUTTON_DOWN_PIN'} if lcd else {'PM_BUTTON_UP_PIN', 'PM_BUTTON_DOWN_PIN'}
+    if set(buttons) != required_buttons:
+        raise ValueError('button pin definitions incomplete or unsupported')
+    used = list(pins.values()) + (list(buttons.values()) if count != '0' else [])
+    if any(not re.fullmatch(r'[0-9]+', value) or int(value) > 29 for value in used):
+        raise ValueError('GPIO pin must be 0..29')
+    if len(used) != len(set(used)):
+        raise ValueError('display and button GPIO pins collide')
+    spi = ('PM_LCD_' if lcd else 'PM_EINK_')
+    index = macros.get(spi + 'SPI_INDEX')
+    sck = macros.get(prefix + 'SCK')
+    mosi = macros.get(prefix + 'MOSI')
+    valid = {'0': {(2, 3), (6, 7), (18, 19), (22, 23)},
+             '1': {(10, 11), (14, 15), (26, 27)}}
+    if index not in valid or (int(sck), int(mosi)) not in valid[index]:
+        raise ValueError('SCK/MOSI GPIO incompatible with selected Pico W SPI controller')
+
+
 def validate(config, profile, compiler):
     config, profile = Path(config).resolve(), Path(profile).resolve()
     name = profile.stem
@@ -124,6 +165,7 @@ def validate(config, profile, compiler):
     profile_definitions = effective(compiler_output(compiler, profile, profile.parent, '-dM'))
     if not profile_definitions:
         raise ValueError('empty hardware profile')
+    validate_layout(profile_definitions)
     require_flat_source(source)
     local = directives(directive_text(source))
     names = [macro for _, macro in local if protected(macro)]
@@ -136,7 +178,7 @@ def validate(config, profile, compiler):
         if any(action == 'undef' for action, macro in local if protected(macro)):
             raise ValueError('legacy hardware undefinition')
     forced = profile if style == 'profile' else None
-    allowed = {'PM_LCD_BLK_CONNECTED', 'PM_LCD_BLK_ACTIVE_HIGH'} if 'lcd' in name else {'PM_EINK_PANEL_CONNECTED'}
+    allowed = {'PM_LCD_BLK_CONNECTED', 'PM_LCD_BLK_ACTIVE_HIGH'} if profile_definitions['PM_DISPLAY_TYPE'] == 'PM_DISPLAY_LCD' else {'PM_EINK_PANEL_CONNECTED'}
     optional = [(action, macro) for action, macro in local if macro in OPTIONAL]
     if any(action != 'define' or macro not in allowed for action, macro in optional):
         raise ValueError('device config changes unsupported optional hardware')

@@ -75,6 +75,6 @@ The server prepares images and media; the Pico W receives them, draws them and r
 2. Follow [first setup](docs/guides/first-setup.en.md) to prepare the Linux server and device.
 3. Before updating an existing device, read [backup and recovery](docs/guides/release-and-recovery.md).
 
-For deeper detail, see the [firmware](firmware/README.md), [server](service/README.md) and [documentation index](docs/README.md). Development rules and evidence are in [AGENTS.md](AGENTS.md).
+For deeper detail, see the [firmware](firmware/README.md), [server](service/README.md) and [documentation index](docs/README.md).
 
 Code is licensed under [MIT](LICENSE), copyright Tane Channel Technology. Fonts and other third-party assets have [separate notices](service/assets/NOTO-COPYRIGHT).

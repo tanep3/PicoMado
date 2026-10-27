@@ -34,17 +34,16 @@ def sdk_snapshot(path):
     visit(root);return dict(root=str(root),repositories=repos)
 
 
-KNOWN_PROFILES = {'pico_w_lcd_160x80_4', 'pico_w_eink_250x122_0', 'pico_w_eink_250x122_2'}
-
 def hardware_profile(root, device):
     require(device and device.replace('-', '').replace('_', '').isalnum(), 'invalid device')
     path = Path(root)/'firmware/devices'/device/'profile.txt'
     name = path.read_text().strip()
-    require(name in KNOWN_PROFILES and path.read_text() == name+'\n', 'unverified hardware profile')
+    require(name and name.replace('-', '').replace('_', '').isalnum() and path.read_text() == name+'\n', 'invalid hardware profile name')
     header = Path(root)/'firmware/profiles'/(name+'.h')
     board_file = Path(root)/'firmware/profiles'/(name+'.board')
+    require(header.is_file() and board_file.is_file(), 'hardware profile header or board file missing')
     board = board_file.read_text().strip()
-    require(board == 'pico_w', 'unverified MCU board')
+    require(board == 'pico_w', 'MCU board implementation unavailable: only pico_w is implemented')
     return name, board, (path, header, board_file)
 
 def cache(path):

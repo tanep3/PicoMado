@@ -29,6 +29,8 @@ pub mod shared;
 pub mod time_frames;
 pub mod transport;
 pub mod weather;
+#[cfg(feature = "word-tutorial")]
+pub mod word;
 pub mod web;
 pub mod workers;
 pub mod youtube;

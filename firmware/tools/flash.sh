@@ -26,10 +26,12 @@ if [[ ! $expected =~ ^[[:xdigit:]]{16}$ ]]; then
 fi
 read -r mode built_device built_board built_hash built_profile built_profile_hash < "$manifest"
 profile=$(tr -d '\r\n' < "$root/devices/$device/profile.txt")
-case "$profile" in pico_w_lcd_160x80_4|pico_w_eink_250x122_0|pico_w_eink_250x122_2) ;; *) echo 'unverified hardware profile' >&2; exit 2;; esac
+if [[ ! $profile =~ ^[A-Za-z0-9_-]+$ || ! -f $root/profiles/$profile.h || ! -f $root/profiles/$profile.board ]]; then
+  echo 'invalid or missing hardware profile' >&2; exit 2
+fi
 profile_file="$root/profiles/$profile.h"
 profile_board=$(tr -d '\r\n' < "$root/profiles/$profile.board")
-if [[ $profile_board != pico_w ]]; then echo 'unverified MCU board' >&2; exit 2; fi
+if [[ $profile_board != pico_w ]]; then echo 'MCU board implementation unavailable: only pico_w is implemented' >&2; exit 2; fi
 profile_hash=$(sha256sum "$profile_file" | cut -d' ' -f1)
 actual_hash=$(sha256sum "$image" | cut -d' ' -f1)
 if [[ $mode != OFF || $built_device != "$device" ||

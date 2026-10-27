@@ -1,5 +1,5 @@
 #pragma once
-// Verified Pico W hardware layout. See docs/guides/hardware-support.md.
+// Pico W hardware layout. Physical support status: docs/guides/hardware-support.md.
 #define PM_DISPLAY_LCD 1
 #define PM_DISPLAY_EINK 2
 #define PM_DISPLAY_TYPE PM_DISPLAY_EINK

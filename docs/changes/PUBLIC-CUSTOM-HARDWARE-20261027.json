@@ -18,14 +18,19 @@
   "design_artifacts": [
     "docs/changes/PUBLIC-CUSTOM-HARDWARE-20261027.md"
   ],
-  "design_commit": "PENDING",
+  "design_commit": "9632b9c",
   "domain_authority": "docs/changes/PUBLIC-CUSTOM-HARDWARE-20261027.md",
   "standard": "development/standard/v1/standard.md",
   "status": "in_progress",
   "stages": {
     "design": {
-      "state": "not_started",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "9632b9c"
+        }
+      ]
     },
     "implementation": {
       "state": "not_started",

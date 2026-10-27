@@ -19,14 +19,19 @@
   "design_artifacts": [
     "docs/changes/PUBLIC-WORD-PLUGIN-20261027.md"
   ],
-  "design_commit": "PENDING",
+  "design_commit": "6f4ee3c",
   "domain_authority": "docs/changes/PUBLIC-WORD-PLUGIN-20261027.md",
   "standard": "development/standard/v1/standard.md",
   "status": "in_progress",
   "stages": {
     "design": {
-      "state": "not_started",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "6f4ee3c"
+        }
+      ]
     },
     "implementation": {
       "state": "not_started",
