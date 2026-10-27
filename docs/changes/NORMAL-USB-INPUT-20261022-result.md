@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # 正式USB操作API + 200 ms案内のソフトウェア検証
 
 仕様先行 `1e622a9` / `170864a` / `fc25aac`、固定実装 `98fc95fa3cb6e8b1a94215b72621ab7086be4a3e`。独立実装確認・親受入れ・実機適用は未完了である。受入済みの200 ms案内だけの候補へ新APIの承認を流用しない。
@@ -37,7 +39,7 @@ GPIO数と操作能力maskは独立したデータである。0 GPIOでも四つ
 
 ## 完了済みの実行結果と限界
 
-保存先は`/home/tane/Documents/Codex/2026-10-18/task/picomado-usb-input-20261022/results/`。
+保存先は`$HOME/Documents/Codex/2026-10-18/task/picomado-usb-input-20261022/results/`。
 
 - `host-verified.log`: host一式成功、先頭`PASS`行221件（内部scenario数とは別）。
 - `usb-domain.log`: 既存USB/SIM/TX診断回帰成功。

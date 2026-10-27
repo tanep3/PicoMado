@@ -1,8 +1,10 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # SDK整合化とLCD比較候補（2026-10-21）
 
 この文書は候補作成時点の記録。後続の承認済みLCD書込み・実機比較は[実機結果](sdk-aligned-live-result-20261021.md)を参照。新SDKでも1.497秒の間欠遅延を記録し、全区間CY診断の容量超過を検出した1試行で品質停止した。
 
-[比較契約](../design/sdk-alignment-comparison-contract.md)の設計コミットf4474f6を先行し、/home/tane/dev/PicoW/pico-sdkの本体2.3.1 /079c6f39023649b154152db30f1d781e884879bcを維持してsubmoduleを公式gitlinkへ揃えた。[公式SDKのlib tree](https://github.com/raspberrypi/pico-sdk/tree/2.3.1/lib)を固定commitのGitHub tree APIでも照合・保存した。全repo clean、recursive6件すべて指定に一致。SDKフォルダ変更は以後の他projectのbuildにも使用されるが、既存Pico/サーバbinaryは更新していない。
+[比較契約](../design/sdk-alignment-comparison-contract.md)の設計コミットf4474f6を先行し、$HOME/dev/PicoW/pico-sdkの本体2.3.1 /079c6f39023649b154152db30f1d781e884879bcを維持してsubmoduleを公式gitlinkへ揃えた。[公式SDKのlib tree](https://github.com/raspberrypi/pico-sdk/tree/2.3.1/lib)を固定commitのGitHub tree APIでも照合・保存した。全repo clean、recursive6件すべて指定に一致。SDKフォルダ変更は以後の他projectのbuildにも使用されるが、既存Pico/サーバbinaryは更新していない。
 
 | submodule | 更新前 | 整合後 |
 | --- | --- | --- |

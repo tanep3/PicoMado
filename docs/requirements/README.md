@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # ピコ窓 要件定義書 v1.1
 
 - 初版作成：2026-10-11 JST
@@ -109,7 +111,7 @@ Web UI と API、Pico の端末通信は自宅 LAN と Tailnet 内でのみ利�
 
 **ユーザーの Want。** 所有する Echo Show 5 と第２世代 Echo を、Pico W と Bluetooth 接続するスピーカーとして使い、Web UI で接続先を指定したい。Web UI が機器選択・接続を制御し、Pico が音声を送信する構成を検討する。BTstack 公式の [A2DP Source デモ](https://github.com/bluekitchen/btstack/blob/master/example/a2dp_source_demo.c) と Amazon による [Echo／Echo Show の Bluetooth スピーカー利用説明](https://www.aboutamazon.com/news/devices/connect-alexa-bluetooth) は、この構成を検討する根拠となる。ただし、今回の Pico W と所有する Echo の実機接続、連続再生、Wi-Fi 動画との併用は未検証で、対応や安定動作を保証しない（U-16）。
 
-Pico の A2DP Source → Echo の Sink を想定するが、音源、デコード分担、SBC 処理とバッファ、音画同期の要否、Wi-Fi との共存、Pico W の資源量、ペアリングと接続先切替の操作は未決。`/home/tane/dev/PicoW/` 配下の `pico-sdk`、`pico-examples`、`btstack` はユーザーが更新済みとの申告があるが、本書では中身を調査しておらず現在バージョンは推定しない。Bluetooth は初期受入の対象に含めない。
+Pico の A2DP Source → Echo の Sink を想定するが、音源、デコード分担、SBC 処理とバッファ、音画同期の要否、Wi-Fi との共存、Pico W の資源量、ペアリングと接続先切替の操作は未決。`$HOME/dev/PicoW/` 配下の `pico-sdk`、`pico-examples`、`btstack` はユーザーが更新済みとの申告があるが、本書では中身を調査しておらず現在バージョンは推定しない。Bluetooth は初期受入の対象に含めない。
 
 ## 未確定事項と設計時の選択
 

@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # 次回の反映・退避・復旧・採取手順
 
 ## Current staging gate
@@ -30,12 +32,12 @@ The worker never manufactures a production approval. Existing accepted binaries 
 ```bash
 set -euo pipefail
 umask 077
-PM_SOURCE=/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/work
+PM_SOURCE=$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/work
 : "${PM_SOURCE_REF:?set the independently accepted full commit hash}"
 : "${PM_RELEASE_STAGE:?set a new private absolute staging directory}"
 PM_UNIT=picomado.service
-PM_BIN=/home/tane/bin/picomado-server
-PM_CONFIG_ROOT=/home/tane/.config/PicoMado
+PM_BIN=$HOME/bin/picomado-server
+PM_CONFIG_ROOT=$HOME/.config/PicoMado
 mkdir -m 700 -- "$PM_RELEASE_STAGE"
 mkdir -m 700 -- "$PM_RELEASE_STAGE/source" "$PM_RELEASE_STAGE/backup"
 git -C "$PM_SOURCE" archive "$PM_SOURCE_REF" | tar -xf - -C "$PM_RELEASE_STAGE/source"
@@ -70,7 +72,7 @@ test "$(systemctl --user show "$PM_UNIT" -p ActiveState --value)" = inactive
 test "$(systemctl --user show "$PM_UNIT" -p MainPID --value)" = 0
 test ! -e "$PM_RELEASE_STAGE/backup/PicoMado.tar"
 tar --acls --xattrs -cpf "$PM_RELEASE_STAGE/backup/PicoMado.tar" \
-  -C /home/tane/.config PicoMado
+  -C $HOME/.config PicoMado
 sha256sum "$PM_RELEASE_STAGE/backup/PicoMado.tar" > "$PM_RELEASE_STAGE/content.sha256"
 ```
 
@@ -103,7 +105,7 @@ install -m 755 -- "$PM_RELEASE_STAGE/target/release/picomado-server" "$PM_BIN.ne
 mv -T -- "$PM_BIN.new" "$PM_BIN"
 systemctl --user start "$PM_UNIT"
 systemctl --user is-active "$PM_UNIT"
-curl --connect-timeout 3 --max-time 10 --fail --silent --show-error http://192.168.0.120:16153/api/state \
+curl --connect-timeout 3 --max-time 10 --fail --silent --show-error http://192.0.2.120:16153/api/state \
   > "$PM_RELEASE_STAGE/state-after.json"
 journalctl --user -u "$PM_UNIT" -n 100 --no-pager > "$PM_RELEASE_STAGE/journal-after.txt"
 ```

@@ -11,12 +11,12 @@ use picomado_core::youtube::*;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
-    if args.len() != 3 {
-        return Err("usage: local-video-check CACHE_ROOT SNAPSHOT_OUTPUT".into());
+    if args.len() != 4 {
+        return Err("usage: local-video-check INPUT_JPEG_DIR CACHE_ROOT SNAPSHOT_OUTPUT".into());
     }
-    let root = PathBuf::from(&args[1]);
-    let snapshot = PathBuf::from(&args[2]);
-    let input = Path::new("/home/tane/Videos/voltesV_6frame");
+    let input = Path::new(&args[1]);
+    let root = PathBuf::from(&args[2]);
+    let snapshot = PathBuf::from(&args[3]);
     let count = std::fs::read_dir(input)?
         .filter_map(Result::ok)
         .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "jpg"))

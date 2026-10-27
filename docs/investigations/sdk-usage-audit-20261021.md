@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # 書込み済みLCDのSDK使用法監査（2026-10-21）
 
 最後に書込み/verify・再接続を確認したLCDのUF2 fd19ace94a80c0baf9ad97ed9e97255aca563045ee428efd1ac7aad52a2d8e3aを基準とする。SDK原本・アプリruntime・実機を変更せず、保存証拠、当該source、実SDK、隔離host試験で照合した。秒単位の画面遅延の根因を確定するものではない。
@@ -7,7 +9,7 @@
 | 項目 | 照合結果 |
 | --- | --- |
 | accepted app source | f2bdc7b2e17cc620e5d568c16842ee6ea871e7b0。build sourceのC/header/CMake/lwipoptsは同commitと一致 |
-| SDK実パス | /home/tane/dev/PicoW/pico-sdk。gap-p2-build/PicoMado-lcd1.private.log:1、LCD CMakeCache.txt:300で一致 |
+| SDK実パス | $HOME/dev/PicoW/pico-sdk。gap-p2-build/PicoMado-lcd1.private.log:1、LCD CMakeCache.txt:300で一致 |
 | SDK | 2.3.1、079c6f39023649b154152db30f1d781e884879bc |
 | CYW43 checkout | c1075d4bc440422cf2b2fd12c64a1f53f77660ee |
 | lwIP checkout | 2.2.0、0a0452b2c39bdd91e252aef045c115f88f6ca773 |

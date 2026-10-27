@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # ピコ窓 システム設計書ドラフト v0.4
 
 - 作成日：2026-10-12 UTC
@@ -27,7 +29,7 @@ flowchart LR
 
 Pi5 では単一 Rust サービスが Web/API と端末通信を同じポートで受ける。`systemd` は起動・監視に限り、端末のオンライン判定はサービスが行う。カーネルは端末 ID、能力、接続、選択プラグイン、共通入力モード、送信経路を管理する。プラグインは内容、取得・更新、固有設定、エラー描画、共有範囲、宛先を決める。カーネルは「同じプラグインの全端末に同じ内容を送る」と仮定しない。端末側は Wi-Fi 接続、待機、接続中表示、共通メニューの局所的な入力・描画を扱う。[R-03～R-05](../requirements/README.md#要件-id-と移動先受入条件の対応)
 
-自宅では Pico から Pi5 の自宅 LAN へ直接 TCP 接続する。外出時は Pico からスマートフォンの TailSocks SOCKS5 へ接続し、同ノードから到達を確認した Pi5 宛先へ進む。2026-10-13の本環境では既存 subnet routing により LAN 宛先 `192.168.0.120:16153` を利用でき、追加 listener は不要だった。Tailnet参加だけでLAN到達を保証せず、別環境では経路受入・アクセス許可・対象待受を確認する。どちらも **Pico が発起した接続**上でサーバから画面を PUSH し、Pico が ACK を返す。外出接続方式（旧 U-19）は家 direct TCP／外 TailSocks として要件化済み。2026-10-11の実験は SOCKS5 認証後の TCP と PUSH/ACKまで、2026-10-13のLCD端末試験はLAN宛先のHTTP Upgrade、Hello、画像受信ACK・描画ACKまで確認した。長時間接続、動画帯域、HOME全操作の安定性は追加検証が必要。スマートフォンのテザリング全体を透過 VPN とみなさない。[接続技術ガイド](../guides/home-away-connectivity-technical-guide.md)、[R-05](../requirements/README.md#要件-id-と移動先受入条件の対応)
+自宅では Pico から Pi5 の自宅 LAN へ直接 TCP 接続する。外出時は Pico からスマートフォンの TailSocks SOCKS5 へ接続し、同ノードから到達を確認した Pi5 宛先へ進む。2026-10-13の本環境では既存 subnet routing により LAN 宛先 `192.0.2.120:16153` を利用でき、追加 listener は不要だった。Tailnet参加だけでLAN到達を保証せず、別環境では経路受入・アクセス許可・対象待受を確認する。どちらも **Pico が発起した接続**上でサーバから画面を PUSH し、Pico が ACK を返す。外出接続方式（旧 U-19）は家 direct TCP／外 TailSocks として要件化済み。2026-10-11の実験は SOCKS5 認証後の TCP と PUSH/ACKまで、2026-10-13のLCD端末試験はLAN宛先のHTTP Upgrade、Hello、画像受信ACK・描画ACKまで確認した。長時間接続、動画帯域、HOME全操作の安定性は追加検証が必要。スマートフォンのテザリング全体を透過 VPN とみなさない。[接続技術ガイド](../guides/home-away-connectivity-technical-guide.md)、[R-05](../requirements/README.md#要件-id-と移動先受入条件の対応)
 
 ## 2. 遷移を契約で組み立てる
 

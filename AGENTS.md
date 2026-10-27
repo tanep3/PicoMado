@@ -6,7 +6,7 @@ Associate each change with an open ID in `docs/changes/`. Fix the domain model/c
 
 No device/service/SSH/permission/push operations are authorized by this file. Test fixtures use temporary paths and fresh PTYs only. Direct build/flash/deploy commands bypassing the root gate are unsupported. See the process for known enforcement limits and the approved work root.
 
-開発の正本は `/home/tane/dev/PicoW/PicoMado` の `main` とする。別cloneを無断で増やさない。作業分離が必要なら、開始前に正本との関係と統合先をユーザーへ説明する。完了時は正本 `main` への統合と検証を確認し、コミットの所在と未反映差分を報告する。既存cloneはこの指針だけを理由に削除しない。
+開発の正本は、このリポジトリの `main` とする。別cloneを無断で増やさない。作業分離が必要なら、開始前に正本との関係と統合先をユーザーへ説明する。完了時は正本 `main` への統合と検証を確認し、コミットの所在と未反映差分を報告する。既存cloneはこの指針だけを理由に削除しない。
 
 ## 調査と委任の共通参照
 

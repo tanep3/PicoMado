@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # LCD送信直前RAMの全量回収
 
 診断専用 `PM_REPRO_CAPTURE=ON` で初回・2回目・7回目の25,600 Bを保存する。通常版とE-inkには回収処理をリンクしない。
@@ -17,7 +19,7 @@
 ```sh
 umask 077
 cmake -S firmware/diagnostics/lcd-repro -B firmware/build/lcd-repro-sdk231-capture-held-cs \
-  -DPICO_SDK_PATH=/home/tane/dev/PicoW/pico-sdk -DPICO_BOARD=pico_w \
+  -DPICO_SDK_PATH=$HOME/dev/PicoW/pico-sdk -DPICO_BOARD=pico_w \
   -DCMAKE_BUILD_TYPE=Release -DPM_REPRO_DEVICE=PicoMado-lcd1 \
   -DPM_REPRO_SAMPLE=OFF -DPM_REPRO_WIFI_HOME=ON \
   -DPM_REPRO_YOUTUBE_CYW43=OFF -DPM_REPRO_SPI_BAUD=5000000 \

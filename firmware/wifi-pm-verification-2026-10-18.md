@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # Wi-Fi省電力の起動経路修正と検証（2026-10-18）
 
 現在の方針：省電力設定漏れ修正を維持し、旧版復帰案はユーザー指示で撤回済み。過去の対照UF2は転送しない。以後の計測は [固定RAM計測記録](runtime-stats-verification-2026-10-18.md) を参照。
@@ -79,7 +81,7 @@ net wifi_pm request_sdk_result=0 readback_sdk_result=0 raw=0x00000010 mode=0 non
 
 保存UF2は以下にあった。
 
-`/home/tane/dev/PicoW/PicoMado/firmware/build/.rollback/5224c30/PicoMado-lcd1.uf2`
+`$HOME/dev/PicoW/PicoMado/firmware/build/.rollback/5224c30/PicoMado-lcd1.uf2`
 
 720,384B、SHA256 `c5c9fc741c94cc77fbdde036548fc17e905a9637d0313d4d29692f5db2ab1d56`。picotool info -aでpicomado_lcd/pico_wを確認し、UF2内部の端末名・個体IDも一致した。ただしこれは過去の保存版で、frame-bytes-v1はあるがlcd-push-v1がない。書換え直前に実機が広告していたlcd-push-v1と異なるため、これを「直前版そのもの」としてそのまま戻すのは適切でない。書き込みは行っていない。
 
@@ -130,7 +132,7 @@ USBを閉じた後の180秒では、大幅な描画低下は続いていない�
 
 古い .rollback/5224c30 のUF2は使用していない。保存してあった変更直前ソースをSHA照合し、現在の実configを保って、task領域の別source/buildで通常LCD版を新しく生成した。現在リポジトリの全tracked firmwareファイルと個体config/board-idは生成前後でSHA一致。
 
-UF2：`/home/tane/Documents/Codex/2026-10-18/task/pm-fix/rollback-source/firmware/build/PicoMado-lcd1/PicoMado-lcd1.uf2`
+UF2：`$HOME/Documents/Codex/2026-10-18/task/pm-fix/rollback-source/firmware/build/PicoMado-lcd1/PicoMado-lcd1.uf2`
 
 - SHA256：`7cab7fe026a963b6865178a09ca162e9bebf7dac0611629d6cdf19ba6e32578a`
 - サイズ：724,480B

@@ -13,10 +13,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         || args[1] != "--temporary"
         || args[2] != "--bind"
         || args[4] != "--db"
-        || args[3] != "192.168.0.120:16153"
+        || args[3] != "192.0.2.120:16153"
     {
         return Err(
-            "usage: temporary_lan_host --temporary --bind 192.168.0.120:16153 --db PATH".into(),
+            "usage: temporary_lan_host --temporary --bind 192.0.2.120:16153 --db PATH".into(),
         );
     }
     let db = PathBuf::from(&args[5]);

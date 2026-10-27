@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # ローカル切替案内: 開発検証結果
 
 通常書込み入口への接続は、このP2修正の受入れ後に別途進める。最新の実build/candidate/親承認/オフライン確認の結果は、work親の `normal-flash-20261022/handoff.json` を参照する。以下の「未作成」は各検証段階当時の記録である。
@@ -8,7 +10,7 @@
 
 - 仕様先行: `eb6bc60ee8243ba78215c0a1a384ead9395d26ea`。候補画素の寿命を補足した文書先行コミット: `99aea78f3e2d3d3c77845a9ddd1656621ec4be2b`。
 - 既存の受入済みE-ink NODELAY差分を継承: `44f08344c673ebcadc482f0b2206caf9d76a89ed`（元 `34b4849` の製品/試験差分）。
-- 実装固定: `2a5693e2aa3cde29c652717602f0e624c077bc50`。隔離場所: `/home/tane/Documents/Codex/2026-10-18/task/picomado-input-feedback-20261022/work`。
+- 実装固定: `2a5693e2aa3cde29c652717602f0e624c077bc50`。隔離場所: `$HOME/Documents/Codex/2026-10-18/task/picomado-input-feedback-20261022/work`。
 - `switch_feedback.h` は単調時刻、接続内要求/応答、世代下限、保管されているCRC済み候補を所有する純粋モデル。mainは入力通知を先に送信し、既存のフレーム検証と描画経路へ接続する。UP/DOWNとSUBに同じ200 ms条件を使う。ネットワークcallback内の描画・待機sleep・新しいwire/ACKは追加しない。
 - LCDは既存local bufferに直前の変換済み画素を保持し、案内だけscanline描画。no-opの復元は二重変換しない。E-inkは既存queued/ram bufferと非同期jobを使い、未開始/準備中の案内を取消し、本画像を優先する。局所案内/復元はremote描画ACKを生成しない。
 - 限定点検で「SUB案内→同epoch候補CRC完了→次FrameStartで画素置換→no-op返信」に候補tokenだけ残る不整合を発見した。画素寿命を先に仕様へ反映し、未移譲候補の破棄と同じ呼出経路で一致tokenを失効させた。動画copy/描画adapterへ渡した画素は失効しない。元の反例はLCD/E-ink両個体で再試験し、`waiting=0 / received=0 / restores=1`を確認。

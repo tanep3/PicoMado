@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # 2026-10-12 PicoMado LCD firmware verification
 
 ## 対象
@@ -25,7 +27,7 @@
 - 再起動後 `lsusb` に `2e8a:000a Raspberry Pi Pico`、`/dev/ttyACM0` を確認。USB CDC の 5 秒読み取りでは出力なし。起動直後の一度きりのログはポート開放前に流れた可能性があり、シリアルログによる動作確認とは扱わない。
 - ユーザーは POWER・SUB・UP・DOWN の全ボタンが反応すると確認した。4 ボタン項目は合格。LCD の向き・色の明示的な目視確認は未取得。Wi-Fi とサーバ通信はこの自己診断 UF2 に含まれない。
 - ユーザーの再 BOOTSEL 後、単一 `RPI-RP2` の同じ Flash ID を再確認。`picotool info -a` は `picomado_selftest` / board `pico_w` を示し、書込み済み自己診断 UF2 に対する `picotool verify` は再度 100% OK。次の接続ファームは実設定とサーバ待受が揃うまで書き込まない。
-- 臨時ホストが `192.168.0.120:16153` で待受・HTTP 200 を返し、プロセス `temporary_lan_host` であることを確認。再度同じ単一 Flash ID を確認し、`tools/flash.sh --device PicoMado-lcd1` で接続ファームを書込んだ。Flash 書込み 100%、verify 100% OK、picotool は再起動を報告。
+- 臨時ホストが `192.0.2.120:16153` で待受・HTTP 200 を返し、プロセス `temporary_lan_host` であることを確認。再度同じ単一 Flash ID を確認し、`tools/flash.sh --device PicoMado-lcd1` で接続ファームを書込んだ。Flash 書込み 100%、verify 100% OK、picotool は再起動を報告。
 - 初回接続ファーム再起動後の USB は `2e8a:000a Raspberry Pi Pico`、`/dev/ttyACM0`。サーバ側に `192.168.0.173` からの持続 TCP を確認。`/api/state` は `PicoMado-lcd1` online、設定 stored/confirmed revision 1。ユーザーの DOWN 操作 2 回でサーバ側選択が weather まで進み、ボタン往復が成立した。一方、画像断片の JSON 長が当初の TCP 受信窓 11,680 B より長く、フレーム受信前に枠を返さなかったため転送が停止。サーバ TCP Send-Q と outbox の画像送信から原因を特定した。
 - 受信枠を修正後、ユーザーが同じ Pico を BOOTSEL に戻した。`tools/flash.sh --device PicoMado-lcd1 --check-only` は Flash ID `E661640843239D21` と個体専用 manifest の一致を確認。`tools/flash.sh --device PicoMado-lcd1` は Flash 書込み 100%、verify 100% OK と再起動を報告。USB CDC が再列挙され、持続 TCP を確認した。サーバ `/api/state` は `PicoMado-lcd1` online、選択 weather、`last_received_frame=4`、`last_rendered_frame=4` を返した。受信 ACK と描画完了 ACK がサーバへ別々に届いたことを確認。LCD の内容・色・向きは目視未確認。
 
@@ -81,7 +83,7 @@
 
 - ユーザーが BOOTSEL を連絡。`flash.sh --check-only` と `picotool info -d` により単一 RP2040 2 MiB、Flash ID `E661640843239D21` を確認。端末 manifest は `OFF PicoMado-lcd1 E661640843239D21 9671e0dfcfe7014a78ceb8d0d600bc77cec631cc7cb44f2ed976aa24a1b49e4e` と実 UF2 SHA256 に一致。`PM_DIAGNOSTIC_BOOT=0`、Yオフセット24、MADCTL0x60、180度回転、反転＋赤青補正、GP12〜15ボタンを非秘密のマクロで確認。既存の完成済み YouTube 版 UF2 は復旧用として保持。
 - `flash.sh --device PicoMado-lcd1` を対象1台へ実行。Flash load 100%、verify 100% OK、picotool はアプリ再起動を報告。USB は `2e8a:000a Raspberry Pi Pico` として再列挙。サーバサービス再起動やOS/network変更は行っていない。
-- サーバ PID 964178 の新しいTCP `192.168.0.120:16153 ↔ 192.168.0.173:60310` が ESTAB。サーバ `/api/state` は `PicoMado-lcd1` online、rain-radar、`last_received_frame=65` と `last_rendered_frame=65`、設定 stored/confirmed revision1、pending=false を返した。受信ACKと描画ACKは両方成立。ただしLCDの視認表示証明ではない。
+- サーバ PID 964178 の新しいTCP `192.0.2.120:16153 ↔ 192.168.0.173:60310` が ESTAB。サーバ `/api/state` は `PicoMado-lcd1` online、rain-radar、`last_received_frame=65` と `last_rendered_frame=65`、設定 stored/confirmed revision1、pending=false を返した。受信ACKと描画ACKは両方成立。ただしLCDの視認表示証明ではない。
 - 同じTCPの Pico→サーバ `bytes_received` は 797→1185→1379 と増加。その後5秒刻みの測定で21:43:49 UTCに1670、21:44:04に1767、21:44:20に1864と毎回97 B増えた。サーバの設定値15秒と一致する周期で同じTCPにPico発信データが継続し、`lastrcv` も更新された。TCPは切断されず、ACK状態も維持。実機可視画面と4ボタン動作は親経由のユーザー確認待ち。
 
 ## YouTube基準の段階診断版（実機、画面目視待ち）
@@ -96,7 +98,7 @@
 
 - ユーザーは「電源刺した。画面まっくら。１〜４ボタン押下すべて無反応。配線切れたかな？」と報告。追加書込みは行っていない。USBを開く前に確認したところ、Picoはアプリ USB `2e8a:000a` で再列挙し `/dev/ttyACM0` が存在。サーバは新session 24、online、weather、frame71・72の受信/描画ACKを記録。これはCPU・USB・Wi-Fi・画像受信・SPI API呼出しが走った証拠だが、LCD発光・配線導通の証明ではない。rain-radar→weather選択変更が見られたが、Web操作の可能性を排除できず、ボタン成功とは断定しない。
 - Pico SDK `stdio_usb_connected()` はDTRでログ出力可否を判定する。BOOTSELリセットのCDC条件は1200 baudの設定変更で、DTR単独ではない。22:54 UTC以降、baud変更・装置への送信なしでCDCを開いて読み取った。`diag heartbeat_sent` は22:54:40、:55、22:55:10、:25、:40、:55、22:56:10、:25と継続。主ループはその間動作。監視期間中に`diag button=`や`diag local_button=`は0件。ただしユーザーの4ボタン操作は監視開始前であり、起動ログと押下ログはCDCから遡れない。監視中に押下した証拠がないため、ボタン配線の合否は未判定。DTRによるログ出力状態の変化はあり得る。
-- 以前ユーザーが4ボタンすべての表示を確認した**当時の実ファイル**は `/tmp/picomado-target-build/picomado_selftest.uf2`。SHA256 `22ee9ec70a83a5439de3f2fad7cff2999dcddf321c02b3b93090ea56180b0a24`、`picotool info` は `picomado_selftest` / board `pico_w` / SDK2.3.1 / Release、2026-10-12 build。実際に対象 Flash ID `E661640843239D21` へ書込み・100% verifyし、ユーザーの全ボタン確認を受けたことは本記録上部に記載。現ソースから再ビルドされた `firmware/build/PicoMado-lcd1/PicoMado-lcd1-selftest.uf2` は SHA256 `2df4bcfae0b490874cefdac287ec142ca5c249b8d0767a36590ae0d9cdf9177b` で別物。旧実績品を作業領域 `/home/tane/Documents/Codex/2026-10-12/task-5/rollback/picomado-selftest-user-verified.uf2` に同一ハッシュ・権限600で保全。今回の書込み指示はなく未書込み。
+- 以前ユーザーが4ボタンすべての表示を確認した**当時の実ファイル**は `/tmp/picomado-target-build/picomado_selftest.uf2`。SHA256 `22ee9ec70a83a5439de3f2fad7cff2999dcddf321c02b3b93090ea56180b0a24`、`picotool info` は `picomado_selftest` / board `pico_w` / SDK2.3.1 / Release、2026-10-12 build。実際に対象 Flash ID `E661640843239D21` へ書込み・100% verifyし、ユーザーの全ボタン確認を受けたことは本記録上部に記載。現ソースから再ビルドされた `firmware/build/PicoMado-lcd1/PicoMado-lcd1-selftest.uf2` は SHA256 `2df4bcfae0b490874cefdac287ec142ca5c249b8d0767a36590ae0d9cdf9177b` で別物。旧実績品を作業領域 `$HOME/Documents/Codex/2026-10-12/task-5/rollback/picomado-selftest-user-verified.uf2` に同一ハッシュ・権限600で保全。今回の書込み指示はなく未書込み。
 
 ## 当時の自己診断UF2へ書戻し
 
@@ -117,7 +119,7 @@
 - 比較元の YouTube UF2 は `PicoW_Youtube_Player/diagnostics/artifacts/buttons-rotation-20261010/video-rotate180.uf2`。当時のビルド `/tmp/picow_video_rotate180_20261010/pico_w_jpeg_player.uf2` と SHA256 `65900f5224c64efdde49e9652d035ad34416fb532212f92740396825b70eaa1c` が一致。当時の flash-result 記録は対象 Flash ID `E661640843239D21`、Flash verify 100%、ユーザーによる画面の向き・色・収まりの確認を記す。
 - 当時の CMakeCache/link.txt は YouTube 本番ターゲット `pico_w_jpeg_player`、Release/pico_w、`DISPLAY_PROFILE=0`、`PLAYER_LCD_GAMMA_LGFX=ON`、`PLAYER_ROTATE_180=ON`、`PLAYER_CYW43_DIAG=ON`、`pico/pico_player.c`・JPEG decoder・診断CYW43ソースのリンクを示す。現 YouTube の LCD ヘッダ、プレイヤーソース、CMakeLists は完成時 commit `9ffb634` と同一。YouTube 実個体の非秘密 LCD 定義は 20 MHz、MADCTL 0x60、X0/Y24、INVON。
 - ホストtraceの比較元はその `pico/lcd_display.h` だが、UF2バイナリそのものを実行した試験ではない。`/tmp/picomado-lcd-mock/compare.c` と `pattern_compare.c` は、同ヘッダ/PicoMado LCD実装を共通stubへリンクし、GPIO/SPI APIの引数・呼出順・送出予定バイト列を記録した。両組のtraceは各25,927 Bでバイト一致し、SPI書込18回、画面窓 X0..159/Y24..103、25,600 B画素転送を含む。汎用画像の YouTube 側は実サーバを使わず、色補正を試験コードが事前適用した。
-- 以前の「GPIO/SPI全trace完全一致」は、この限定したホスト入力とAPI呼出しtraceの意味でのみ成立する。stubはSDKの実SPI送信、GPIO波形、割込み・電源・初期化前処理・LCD可視表示を検証しない。YouTube実績ビルドのSDKは `/home/tane/pico/pico-sdk`、PicoMadoは `/home/tane/dev/PicoW/pico-sdk` という別リビジョンで、前者は `pico_cyw43_arch_lwip_threadsafe_background`、後者は `pico_cyw43_arch_lwip_poll` をリンクする。両ファームの実機動作が一致すると結論できない。
+- 以前の「GPIO/SPI全trace完全一致」は、この限定したホスト入力とAPI呼出しtraceの意味でのみ成立する。stubはSDKの実SPI送信、GPIO波形、割込み・電源・初期化前処理・LCD可視表示を検証しない。YouTube実績ビルドのSDKは `$HOME/pico/pico-sdk`、PicoMadoは `$HOME/dev/PicoW/pico-sdk` という別リビジョンで、前者は `pico_cyw43_arch_lwip_threadsafe_background`、後者は `pico_cyw43_arch_lwip_poll` をリンクする。両ファームの実機動作が一致すると結論できない。
 
 ## LCD低速制御候補と固定画面の最小再現（未書込み）
 
@@ -135,7 +137,7 @@
 - 親のレビューとユーザー02:34:26「はい書き込んで」を受領。`PicoMado-lcd1-plugin-20MHz.uf2` SHA256 `d1613b61561d825fd030654d1be326d5988ef3498adbef9ac22b411c33888a52`、単一BOOTSELのFlash ID `E661640843239D21`を再確認して一度だけload/verify/restart。load100%、verify100% OK、USBアプリ再列挙。生ログ `/tmp/picomado-normal-plugin-flash.log`。
 - 02:36:51 UTC、既存サーバのdevice_hello incarnation3/session25。frame75の25,600B送信と受信ACK/描画ACKを別々に確認、frame96までACK一致。対象接続の受動観測でもversion1/kind5のheartbeat（同incarnation/session、applied revision1）を確認。サーバ設定/再起動なし。
 - ユーザー02:40:30の写真2枚付き報告で天気/雨雲の通常画面表示成功。字形/拡大要望はサーバ担当へ引継ぎ。ファーム追加編集なし。起動USB速度行はttyACM0の権限エラーで取り逃し、今回実速度未取得（15.625MHzは計算上の見込み）。4ボタン全操作成功は今回ログだけから断定しない。
-- 詳細と観測終了の制約は `/home/tane/Documents/Codex/2026-10-12/task-5/normal-plugin-20MHz-flash-verification.md`。USB読取りは正常終了。作業専用受動capture PID1031102はSIGINTがカーネルに拒否され残存、親へ終了を引継ぎ。
+- 詳細と観測終了の制約は `$HOME/Documents/Codex/2026-10-12/task-5/normal-plugin-20MHz-flash-verification.md`。USB読取りは正常終了。作業専用受動capture PID1031102はSIGINTがカーネルに拒否され残存、親へ終了を引継ぎ。
 
 
 ## 2026-10-13 チェックポイント：通常版の表示と接続時刻修正
@@ -155,8 +157,8 @@
 
 ## 2026-10-13 続報：ACK修正とAWAYのLAN宛先接続
 
-- ACK修正版Rustサーバを05:05:57 UTCに導入・再起動。95試験、fmt、clippyとreleaseビルドが通過。待受は既存の `192.168.0.120:16153` のまま。
-- ファーム側はユーザー承認でAWAYのサーバIPだけを `192.168.0.120` へ変更し、SOCKS認証返信の段階別version判定、サーバ再試行時のWi-Fi維持、非秘密CDC診断を含む版を転送した。資格情報・LCD条件を変更していない。
+- ACK修正版Rustサーバを05:05:57 UTCに導入・再起動。95試験、fmt、clippyとreleaseビルドが通過。待受は既存の `192.0.2.120:16153` のまま。
+- ファーム側はユーザー承認でAWAYのサーバIPだけを `192.0.2.120` へ変更し、SOCKS認証返信の段階別version判定、サーバ再試行時のWi-Fi維持、非秘密CDC診断を含む版を転送した。資格情報・LCD条件を変更していない。
 - AWAYのMETHOD/AUTH/CONNECT成功とACTIVE/READYをCDCで確認し、05:16:30のHello/session35・画像217の両ACK、05:16:56のHello/session36・画像218、05:17:01の219、05:17:07の220の両ACKと照合した。実機LCDの全表示品質はこの通信ACKだけから判定しない。
 - 本端末・本環境では既存subnet routingによりTailSocksからLAN宛先へ到達でき、追加listenerは不要だった。Tailnet参加だけで任意のLANへ到達できるとは扱わない。別環境は実際のTailSocksノードで経路利用・アクセス許可・対象待受を確認する。
 - 05:13:09と05:13:21の旧receipt ACKは `ack_ignored` となり、session34で後続入力が処理された。これは遅延ACK修正の実機証拠。05:16:46のsession35終了はPower入力直後のread_errorで、ACK拒否／送信stallは記録なし。端末操作との因果はCDCを含めて評価する。

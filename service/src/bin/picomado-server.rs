@@ -126,7 +126,7 @@ mod tests {
             config.database_path,
             home.join(".config/PicoMado/data/picomado.db")
         );
-        let legacy = "bind = '192.168.0.120:16153'\ndatabase_path = '/home/tane/.config/PicoMado/data/picomado.db'\nplugins_root = '/home/tane/.config/PicoMado'\n";
+        let legacy = "bind = '192.0.2.20:16153'\ndatabase_path = '/tmp/example-user/.config/PicoMado/data/picomado.db'\nplugins_root = '/tmp/example-user/.config/PicoMado'\n";
         assert!(parse(legacy).resolve_and_validate(home).is_ok());
         for bad in ["0.0.0.0", "224.0.0.1"] {
             assert!(parse(&valid.replace("192.0.2.20", bad))

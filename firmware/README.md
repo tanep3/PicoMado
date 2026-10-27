@@ -1,4 +1,14 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 > 新規導入は [ハード対応表](../docs/guides/hardware-support.md) と [初回設定](../docs/guides/first-setup.md) を参照してください。現在は検証済み Pico W プロファイルだけをビルドできます。
+
+以下の時刻付き節は開発当時の記録です。ホームパスとネットワーク値は公開用に置き換えており、現在の実行先ではありません。現行の個体設定は `profile.txt` が画面・GPIO を選び、`config.h` は個体固有の値を保持します。旧形式のハード定義は選択プロファイルと完全一致する場合だけ受け入れます。
+
+## 現在の導入入口
+
+[初回設定](../docs/guides/first-setup.md)で部品、依存ツール、個体設定、HOME 接続を準備し、[対応表](../docs/guides/hardware-support.md)で GPIO を照合してください。ビルドは root gate に結び付いた `firmware/tools/build.sh --device "$PM_DEVICE"` を使用します。実機用には確認済みの `board-id.txt` が必要です。書込みは承認済み候補に対する offline preflight と対象照合の後だけです。下の古い SDK 場所、ビルド、picotool コマンドは当時の記録であり、新しい端末の手順ではありません。
+
+## 過去の実装・検証記録
 
 # PicoMado firmware (LCD / E-ink)
 
@@ -13,7 +23,7 @@ LCD 接続で小さい制御送信が ACK 待ちに重なる条件に対し、�
 
 通常 `picomado_lcd` は `PM_NORMAL_BUILD=1` で診断画像/段階待ち/バッファ回収を無効にします。個体configを編集せず、制御速度を `PM_LCD_SPI_BAUD` と同じ20MHz要求へ結線し、窓指定から全25,600B画素完了までCSを保持します。同速度の描画中再設定はしません。既存125MHz周辺クロックでは実速度は15.625MHzになる見込みで、起動USBの `lcd ready` がSDK読戻し値を記録します。40MHz要求は今回採用しません。通常USBログは診断画像ではありません。
 
-2026-10-13、ユーザーははんだ不良修理後、診断の最高速度で表示の乱れがないことを確認しました。診断UPの最高値は20MHz要求です。通常版はこの同速度/CS保持条件を引き継ぎ、プラグイン画像の実表示とサーバ側で拡大した日本語文字の読みやすさもユーザー確認済みです。2026-10-13の後続試験では、AWAYからTailSocksと既存subnet routing経由で `192.168.0.120:16153` に接続し、Hello・画像受信／描画ACKまで確認しました。追加listenerは不要でした。HOME全操作の再接続・長期安定性の受入は継続し、ACK修正の実機証拠と区別します。[今回の接続記録](../experiments/tether-tailnet/results-2026-10-13-picomado-away-lan.md)。[現時点の検証・残件](verification-2026-10-12.md)を参照してください。今回変更した個体設定はAWAYのサーバ宛先だけです。Wi-Fi/SOCKS資格情報、GPIO、offset24、180度、色補正、ガンマは維持しました。
+2026-10-13、ユーザーははんだ不良修理後、診断の最高速度で表示の乱れがないことを確認しました。診断UPの最高値は20MHz要求です。通常版はこの同速度/CS保持条件を引き継ぎ、プラグイン画像の実表示とサーバ側で拡大した日本語文字の読みやすさもユーザー確認済みです。2026-10-13の後続試験では、AWAYからTailSocksと既存subnet routing経由で `192.0.2.120:16153` に接続し、Hello・画像受信／描画ACKまで確認しました。追加listenerは不要でした。HOME全操作の再接続・長期安定性の受入は継続し、ACK修正の実機証拠と区別します。[今回の接続記録](../experiments/tether-tailnet/results-2026-10-13-picomado-away-lan.md)。[現時点の検証・残件](verification-2026-10-12.md)を参照してください。今回変更した個体設定はAWAYのサーバ宛先だけです。Wi-Fi/SOCKS資格情報、GPIO、offset24、180度、色補正、ガンマは維持しました。
 
 ## 配線
 
@@ -33,7 +43,7 @@ SPI0: CS GP17, SCK GP18, MOSI GP19, DC GP20, RESET GP21。表示窓は 160×80�
 
 ## ビルド
 
-既存 SDK `/home/tane/dev/PicoW/pico-sdk` を使います。ローカル picotool 2.1.1 は現 SDK が要求する 2.3 より古いため、SDK の UF2 後処理を切り、ローカル picotool で RP2040 ELF を UF2 へ変換します。インストールは不要です。
+既存 SDK `$HOME/dev/PicoW/pico-sdk` を使います。ローカル picotool 2.1.1 は現 SDK が要求する 2.3 より古いため、SDK の UF2 後処理を切り、ローカル picotool で RP2040 ELF を UF2 へ変換します。インストールは不要です。
 
 共有ソースは `src/` に 1 セットだけ置きます。個体設定は `devices/<端末名>/config.h`、同じ個体の Flash ID は `devices/<端末名>/board-id.txt` に分けます。実設定と `build/` は Git 除外です。`PM_DEVICE_ID` はユーザーが決めた安定名（今回 `PicoMado-lcd1`）で、Flash ID を名前に含める必要はありません。ビルド時には端末名を必須とし、`config.h` の `PM_DEVICE_ID` と選択名が異なればファームは接続しません。起動時には別ファイルの Flash ID と実ボードを照合します。
 

@@ -1,6 +1,8 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # SDK整合版の先行TCP hole追解析
 
-[実機結果](sdk-aligned-live-result-20261021.md)の同一run `18e0701e35d08e10` を、保存済み証拠と固定sourceだけで追解析した。新規USB/実機/サービス/ネットワーク操作0、品質停止条件の変更0。証拠root Rは `/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-live-20261021T040833Z`。
+[実機結果](sdk-aligned-live-result-20261021.md)の同一run `18e0701e35d08e10` を、保存済み証拠と固定sourceだけで追解析した。新規USB/実機/サービス/ネットワーク操作0、品質停止条件の変更0。証拠root Rは `$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/SDK-live-20261021T040833Z`。
 
 **確認できたTCP holeはSEQ[8064,8163)の99B。受信message順と固定符号化からheartbeat message13に対応するとの推定が得られた。** 先行データの初回送信TX/CY行は今回の窓に存在せず、その時刻も未記録。最終TXのCY欠測1件とは別である。通知がPiに届いても先行holeで順序待ちになることと、初回packetが失われた場所がunknownであることを区別する。
 

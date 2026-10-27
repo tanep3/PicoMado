@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # 継続収集器のオフライン受入（第2-A単位）
 
 時点の区別：本文の未修正・未受入は各保存点の記録。D01〜D05の最新状態、残る設計差と実機未検証は[最終照合](../history/refactor-final-acceptance-20261020.md)を正本とする。
@@ -14,7 +16,7 @@
 
 ## 試験と証拠
 
-Git外の証拠は `/home/tane/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/`。
+Git外の証拠は `$HOME/Documents/Codex/2026-10-18/task/architecture-refactor-20261020/`。
 
 | 試験 | 結果 |
 | --- | --- |

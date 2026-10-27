@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # LCD の小さい送信と ACK 待ちを分離する候補
 
 2026-10-19、基準 commit `492a710121c009ee2a32cf5e2abd3443a167b5d0` から隔離した候補。製品コードの変更は `src/net.c` のみで、新しい LCD 用 PCB を取得した直後に `tcp_nagle_disable(pcb)` を呼ぶ。`core.h` の追加は端末の display type を既存 config から取得するため。サーバー、SDK、端末設定、動画 FPS、描画処理、タイマー、ロック範囲は変更しない。
@@ -48,7 +50,7 @@
 
 ```sh
 python3 tests/run_nagle_sdk_tests.py \
-  --sdk /home/tane/dev/PicoW/pico-sdk \
+  --sdk $HOME/dev/PicoW/pico-sdk \
   --baseline-net /path/to/baseline/net.c \
   --out /path/to/isolated/results
 bash tests/run_host_tests.sh

@@ -1,3 +1,5 @@
+> 公開用注記: 本文のホームパス・ネットワーク値は匿名化した例示値です。時刻付き観測の原値や現在の設定先を示しません。
+
 # D03B plugin maintenance の実装・検証
 
 先行契約は`69d6187`の[plugin-maintenance-contract.md](../design/plugin-maintenance-contract.md)。D03AとD02の保存・一時view境界を保ち、D04 `bae0575`の差分へ干渉しない。
@@ -42,7 +44,7 @@ D03Bはサーバ側のみで追加ファーム更新は不要。削除gateは既
 
 1. 独立レビューで確定したサーバ側commitを通常featureのままrelease buildする。`caricature-retention-delete`を追加せず、削除環境変数も変更しない。
 2. 現在のbinary、設定、schema 2のDB、各pluginのdata/cacheを既存の権限で退避する。DBと素材の整合した退避は、承認されたservice停止で生成・公開を止めて行う。稼働中WALのDB本体だけを単純copyしない。
-3. [既存のuser-service配置](../../service/deploy/README.md)に従い、`/home/tane/bin/picomado-server`だけをレビュー済みbuildへ更新して既存user unitを起動する。既存configと端末の選択・有効化・共通順序を上書きしない。
+3. [既存のuser-service配置](../../service/deploy/README.md)に従い、`$HOME/bin/picomado-server`だけをレビュー済みbuildへ更新して既存user unitを起動する。既存configと端末の選択・有効化・共通順序を上書きしない。
 4. Web/API、再接続、保存済み選択、静止画/動画/時計の通常動作とjournalを確認する。問題時は退避binaryへ戻し、DB/素材の復元が必要な場合は反映後の変更を確認してから判断する。
 
 E-inkのD04 firmwareを同時に書き込むことは前提にしない。採用する場合は別の承認範囲で実board IDと既存端末設定を使い、端末ごとにfirmware更新と物理受入を行う。今回保存したsample UF2は実機に使用しない。
