@@ -51,7 +51,7 @@ pub fn builtins() -> PluginSet {
     set.register(Box::new(crate::radar::RadarPlugin), Box::new(crate::radar::RadarContent::default())).expect("unique plugin");
     set.register(Box::new(crate::clock::ClockPlugin), Box::new(crate::clock::ClockContent::default())).expect("unique plugin");
     #[cfg(feature = "word-tutorial")]
-    set.register(Box::new(crate::word::WordRules), Box::new(crate::word::WordContent)).expect("unique plugin");
+    set.register(Box::new(crate::word::WordRules), Box::new(crate::word::WordContent::default())).expect("unique plugin");
     debug_assert_eq!(set.order, DEFAULT_ORDER);
     set
 }

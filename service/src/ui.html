@@ -133,6 +133,7 @@
       current.order.forEach((id,index)=>{
         const row=el('div',undefined,'order-row');row.append(el('span',String(index+1).padStart(2,'0'),'order-number'),el('span',labels[id]||id,'order-name'));
         const actions=el('div',undefined,'row-actions');
+        if(id==='my-words'){const settings=el('a','編集','button secondary');settings.href='/plugins/my-words';actions.append(settings)}
         for(const [symbol,offset,name] of [['↑',-1,'上'],['↓',1,'下']]){
           const move=el('button',symbol,'icon-button');move.type='button';move.setAttribute('aria-label',`${labels[id]||id} を${name}へ`);
           move.disabled=index+offset<0||index+offset>=current.order.length;
@@ -219,6 +220,7 @@
       document.getElementById('page-title').textContent=labels[id]||id;
       document.getElementById('page-lead').textContent='このプラグインの共通設定を管理します。';
       if(id==='clock'){renderClock();return}
+      if(id==='my-words'){renderWords();return}
       if(['youtube','caricature'].includes(id)){renderManaged(id);return}
       const s=section('プラグイン設定','設定の変更は次のジョブから反映します。','plugin-card');
       const breadcrumb=el('div',undefined,'plugin-breadcrumb'),home=el('a','← ホームへ戻る');home.href='/';breadcrumb.append(home);s.prepend(breadcrumb);
@@ -286,7 +288,7 @@
     }
     async function loadManaged(){
       const id=location.pathname.split('/')[2];
-      if(['youtube','caricature'].includes(id))managedViews[id]=await api(`/api/plugins/${id}`);
+      if(['youtube','caricature','my-words'].includes(id))managedViews[id]=await api(`/api/plugins/${id}`);
       if(id==='caricature')protectionView=await api('/api/plugins/caricature/protections');
     }
     async function saveCaricatureProtections(protect){
@@ -347,6 +349,33 @@
         }catch(error){say(error.message,true)}
         finally{deleting=false;confirm.disabled=cancel.disabled=false}
       };dialog.showModal();cancel.focus();
+    }
+    function renderWords(){
+      const view=managedViews['my-words'];if(!view)return;
+      const panel=section('好きな言葉','入力してプレビューを確認し、保存すると表示中の LCD に反映されます。','plugin-card');
+      const form=el('form'), input=textField(form,'言葉（40文字まで）','text',drafts.words??view.data.words,true);
+      input.maxLength=40;input.autocomplete='off';
+      const canvas=el('canvas');canvas.width=160;canvas.height=80;canvas.style.width='320px';canvas.style.maxWidth='100%';canvas.style.imageRendering='pixelated';
+      canvas.setAttribute('aria-label','表示プレビュー');form.append(canvas);
+      const message=el('p','','plugin-note');form.append(message);
+      const save=button('保存して端末に反映','primary');save.type='submit';form.append(save);panel.append(form);
+      const ctx=canvas.getContext('2d');
+      function preview(){
+        const words=input.value;drafts.words=words;
+        ctx.fillStyle='#102030';ctx.fillRect(0,0,160,80);ctx.font='bold 24px "Noto Sans CJK JP", "Noto Sans JP", sans-serif';ctx.textBaseline='alphabetic';
+        const m=ctx.measureText(words),x=8,y=40;
+        const valid=words.trim().length>0 && Array.from(words).length<=40 && new TextEncoder().encode(words).length<=160 && !/[\x00-\x1f\x7f]/.test(words) &&
+          x-m.actualBoundingBoxLeft>=0 && x+m.actualBoundingBoxRight<=160 && y-m.actualBoundingBoxAscent>=0 && y+m.actualBoundingBoxDescent<=80;
+        input.setCustomValidity(valid?'':'文字が空か長すぎます。画面に収まる言葉を入力してください。');
+        ctx.fillStyle='#ffffff';ctx.fillText(words,x,y);
+        message.textContent=valid?'文字が正しく表示されているか確認してください。':'文字が空か長すぎます。画面に収まる言葉を入力してください。';
+        save.disabled=!valid;return valid;
+      }
+      input.addEventListener('input',preview);preview();
+      form.onsubmit=async event=>{event.preventDefault();if(!preview()||!form.reportValidity())return;
+        const png=canvas.toDataURL('image/png').split(',')[1];
+        if(await managedCommand('my-words',{kind:'save',words:input.value,png},'言葉を保存しました')){delete drafts.words;render()}
+      };
     }
     function renderManaged(id){
       const view=managedViews[id];if(!view)return;const data=view.data||{};
