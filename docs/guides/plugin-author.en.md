@@ -8,7 +8,9 @@ Put “おはよう” in white on a dark blue 160×80 color LCD. Change the ima
 
 Set up a server and LCD device using [first setup](first-setup.en.md), then run the commands below from the repository root. You need Rust, Cargo, Python 3, Pillow and a Japanese font. Check Pillow with `python3 -c 'from PIL import Image'` and find a font with `fc-list :lang=ja file | head`. If needed, install Pillow in a Python virtual environment with `python3 -m pip install Pillow`.
 
-The repository already contains the finished example: `service/src/word.rs` is the plugin, `service/examples/make-word-card.py` generates the image, and `service/assets/word-card.png` is the image it uses. You can use these files as they are. To write them yourself, save the following code at those paths.
+**To try the bundled example:** The repository already contains the finished example: `service/src/word.rs` is the plugin, `service/examples/make-word-card.py` generates the image, and `service/assets/word-card.png` is the image it uses. Use these files as they are, generate the image in step 2, and proceed to the build in step 4. Do not add the registrations again.
+
+**To learn how to create it:** Follow steps 2–4 in order. The repository already contains these files and registrations, so inspect the existing entries instead of adding duplicates.
 
 ## 2. Make the image
 
@@ -110,7 +112,40 @@ impl ContentPlugin for WordContent {
 
 ## 4. Register and display it
 
-Registration is already in place: `service/src/lib.rs` loads the module, `service/src/plugins.rs` registers `WordRules` and `WordContent` under the same ID and adds it to the display order, and `service/src/ui.html` labels it “好きな言葉”. These are enabled by the `word-tutorial` feature.
+To create the plugin yourself, connect the parts in this order. The bundled example already has all these entries; inspect them instead of adding duplicates.
+
+1. Add this to `[features]` in `service/Cargo.toml` so the feature can be selected at build time:
+
+   ```toml
+   word-tutorial = []
+   ```
+
+2. Add this to the module declarations in `service/src/lib.rs` to load the module when the feature is enabled:
+
+   ```rust
+   #[cfg(feature = "word-tutorial")]
+   pub mod word;
+   ```
+
+3. In `service/src/plugins.rs`, add this inside `builtins()` before `debug_assert_eq!`. It registers the rules and content together:
+
+   ```rust
+   #[cfg(feature = "word-tutorial")]
+   set.register(Box::new(crate::word::WordRules), Box::new(crate::word::WordContent)).expect("unique plugin");
+   ```
+
+4. In the same file, define `DEFAULT_ORDER` as follows to include `my-words` in the selection order when enabled:
+
+   ```rust
+   #[cfg(not(feature = "word-tutorial"))]
+   pub const DEFAULT_ORDER: [&str; 5] = ["youtube", "caricature", "weather", "rain-radar", "clock"];
+   #[cfg(feature = "word-tutorial")]
+   pub const DEFAULT_ORDER: [&str; 6] = ["youtube", "caricature", "weather", "rain-radar", "clock", "my-words"];
+   ```
+
+5. Add `'my-words':'好きな言葉'` to the `labels` object in `service/src/ui.html`, separated from the other entries by a comma. This supplies the name shown in the management screen.
+
+Check that the ID is `my-words` throughout.
 
 When building the server in [first setup](first-setup.en.md), add `--features word-tutorial` to the server build command. For example, use a new empty build directory:
 
@@ -123,4 +158,12 @@ Follow the server installation steps in first setup using this build's `release/
 
 ## 5. Make it yours
 
-Replace the quoted phrase in step 2. Add options such as `--size 20 --x 12 --y 28` to set the font size and top-left position. If the text does not fit, shorten it or adjust the size and position. The image is embedded at server build time, so regenerate the PNG and repeat the build and installation in step 4 after changing it.
+Replace the quoted phrase in step 2. Add options such as `--size 20 --x 12 --y 28` to set the font size and top-left position. If the text does not fit, shorten it or adjust the size and position. The image is embedded at server build time, so regenerate the PNG and rebuild and reinstall after changing it. Use a new empty build directory each time, for example:
+
+```sh
+PM_BUILD=$(mktemp -d /tmp/picomado-word-build.XXXXXX)
+python3 tools/project_gate.py check
+python3 tools/project_gate.py build --kind server --features word-tutorial --build-dir "$PM_BUILD"
+```
+
+Install `"$PM_BUILD/release/picomado-server"` following first setup.

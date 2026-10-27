@@ -8,7 +8,9 @@
 
 [初回設定](first-setup.md)に従ってサーバーと LCD 端末を用意し、リポジトリのルートで以下の操作をします。Rust、Cargo、Python 3、Pillow、日本語フォントが必要です。`python3 -c 'from PIL import Image'` で Pillow、`fc-list :lang=ja file | head` でフォントを確認できます。Pillow がなければ Python の仮想環境などに `python3 -m pip install Pillow` でインストールしてください。
 
-このリポジトリには完成版が入っています。プラグイン本体は `service/src/word.rs`、画像生成プログラムは `service/examples/make-word-card.py`、生成画像の置き場所は `service/assets/word-card.png` です。既存ファイルを使えるので、コピーを作る必要はありません。コードを自分で書く場合は、それぞれ次の内容を同じ場所に保存します。
+**同梱サンプルを試す場合:** このリポジトリには完成版が入っています。手順2で画像を生成し、手順4のビルドへ進んでください。登録コードは追加しないでください。
+
+**仕組みを学んで自分で作る場合:** 手順2〜4を順に読み、各ファイルと登録を用意します。既存のリポジトリには同じコードがあるので、重複して追加せず対応箇所を確認してください。プラグイン本体は `service/src/word.rs`、画像生成プログラムは `service/examples/make-word-card.py`、生成画像の置き場所は `service/assets/word-card.png` です。既存ファイルを使えるので、コピーを作る必要はありません。コードを自分で書く場合は、それぞれ次の内容を同じ場所に保存します。
 
 ## 2. 画像を作るコード
 
@@ -110,7 +112,40 @@ impl ContentPlugin for WordContent {
 
 ## 4. 登録して表示する
 
-登録は既に用意されています。`service/src/lib.rs` がモジュールを読み込み、`service/src/plugins.rs` が `WordRules` と `WordContent` を同じ ID で登録し、表示順に追加します。`service/src/ui.html` は名前を「好きな言葉」と表示します。これらは `word-tutorial` 機能を有効にしたときに使われます。
+自分で作る場合は、以下の接続を順に用意します。同梱サンプルではすべて登録済みです。既存行を確認し、同じ行を二重に追加しないでください。
+
+1. `service/Cargo.toml` の `[features]` に次を追加します。機能を指定してビルドできるようになります。
+
+   ```toml
+   word-tutorial = []
+   ```
+
+2. `service/src/lib.rs` のモジュール宣言に次を追加します。機能を有効にしたときだけ本体を読み込みます。
+
+   ```rust
+   #[cfg(feature = "word-tutorial")]
+   pub mod word;
+   ```
+
+3. `service/src/plugins.rs` の `builtins()` 内で `debug_assert_eq!` の前に次を追加します。同じ ID を持つルールと表示内容を組にして登録します。
+
+   ```rust
+   #[cfg(feature = "word-tutorial")]
+   set.register(Box::new(crate::word::WordRules), Box::new(crate::word::WordContent)).expect("unique plugin");
+   ```
+
+4. 同ファイルの `DEFAULT_ORDER` を次のようにします。機能有効時の選択順に `my-words` が入ります。
+
+   ```rust
+   #[cfg(not(feature = "word-tutorial"))]
+   pub const DEFAULT_ORDER: [&str; 5] = ["youtube", "caricature", "weather", "rain-radar", "clock"];
+   #[cfg(feature = "word-tutorial")]
+   pub const DEFAULT_ORDER: [&str; 6] = ["youtube", "caricature", "weather", "rain-radar", "clock", "my-words"];
+   ```
+
+5. `service/src/ui.html` の `labels` オブジェクトに `'my-words':'好きな言葉'` を追加します。管理画面で ID の代わりに名前が表示されます。既存の項目とカンマで区切ってください。
+
+各箇所で ID が `my-words` に揃っていることを確認してください。
 
 [初回設定](first-setup.md)のサーバービルドでは、サーバーの `build` コマンドに `--features word-tutorial` を加えてください。例えば次の通りです。ビルド先は空の新しいディレクトリを指定します。
 
@@ -123,4 +158,12 @@ python3 tools/project_gate.py build --kind server --features word-tutorial --bui
 
 ## 5. 自分の言葉に変える
 
-手順 2 の引用符内を好きな言葉に変え、`--size 20 --x 12 --y 28` のように文字サイズと左上の位置を指定できます。画像からはみ出すとエラーになります。文字を短くするか、サイズや位置を調整してください。画像はサーバーのビルド時に埋め込まれるため、変更後は PNG を生成し直し、手順 4 のビルドと導入をもう一度行います。
+手順 2 の引用符内を好きな言葉に変え、`--size 20 --x 12 --y 28` のように文字サイズと左上の位置を指定できます。画像からはみ出すとエラーになります。文字を短くするか、サイズや位置を調整してください。画像はサーバーのビルド時に埋め込まれるため、変更後は PNG を生成し直し、毎回新しい空のビルドディレクトリを使ってビルドと導入をもう一度行います。例えば次のコマンドは一意の空ディレクトリを作ります。
+
+```sh
+PM_BUILD=$(mktemp -d /tmp/picomado-word-build.XXXXXX)
+python3 tools/project_gate.py check
+python3 tools/project_gate.py build --kind server --features word-tutorial --build-dir "$PM_BUILD"
+```
+
+生成された `"$PM_BUILD/release/picomado-server"` を初回設定の手順で導入してください。
