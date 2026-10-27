@@ -145,25 +145,26 @@ impl ContentPlugin for WordContent {
 
 5. `service/src/ui.html` の `labels` オブジェクトに `'my-words':'好きな言葉'` を追加します。管理画面で ID の代わりに名前が表示されます。既存の項目とカンマで区切ってください。
 
-各箇所で ID が `my-words` に揃っていることを確認してください。
+各箇所で ID が `my-words` に揃っていることを確認してください。画像やコードを変更した場合は、必要なファイルだけを確認してローカル Git にコミットします。gate のビルドはコミット済みのクリーンな作業ツリーを必要とします。秘密設定や実機 ID は追加しないでください。
 
 [初回設定](first-setup.md)のサーバービルドでは、サーバーの `build` コマンドに `--features word-tutorial` を加えてください。例えば次の通りです。ビルド先は空の新しいディレクトリを指定します。
 
 ```sh
-python3 tools/project_gate.py check
-python3 tools/project_gate.py build --kind server --features word-tutorial --build-dir /tmp/picomado-word-build
+PM_RUN=$(mktemp -d /tmp/picomado-word.XXXXXX)
+python3 tools/project_gate.py check --out "$PM_RUN/check"
+python3 tools/project_gate.py build --kind server --features word-tutorial --report "$PM_RUN/check/check.json" --build-dir "$PM_RUN/build"
 ```
 
-初回設定のサーバー導入手順で、このビルドの `release/picomado-server` を使います。サーバーを起動し、LCD 端末を HOME に接続したら、本体の次へ進む操作で「好きな言葉」まで切り替えます。濃い青の画面に白い「おはよう」が見えれば完成です。選択肢がない場合は、実行中のサーバーが `word-tutorial` 付きでビルドされたか確認してください。
+初回設定のサーバー導入手順で、このビルドの `"$PM_RUN/build/release/picomado-server"` を使います。サーバーを起動し、LCD 端末を HOME に接続したら、本体の次へ進む操作で「好きな言葉」まで切り替えます。濃い青の画面に白い「おはよう」が見えれば完成です。選択肢がない場合は、実行中のサーバーが `word-tutorial` 付きでビルドされたか確認してください。
 
 ## 5. 自分の言葉に変える
 
 手順 2 の引用符内を好きな言葉に変え、`--size 20 --x 12 --y 28` のように文字サイズと左上の位置を指定できます。画像からはみ出すとエラーになります。文字を短くするか、サイズや位置を調整してください。画像はサーバーのビルド時に埋め込まれるため、変更後は PNG を生成し直し、毎回新しい空のビルドディレクトリを使ってビルドと導入をもう一度行います。例えば次のコマンドは一意の空ディレクトリを作ります。
 
 ```sh
-PM_BUILD=$(mktemp -d /tmp/picomado-word-build.XXXXXX)
-python3 tools/project_gate.py check
-python3 tools/project_gate.py build --kind server --features word-tutorial --build-dir "$PM_BUILD"
+PM_RUN=$(mktemp -d /tmp/picomado-word.XXXXXX)
+python3 tools/project_gate.py check --out "$PM_RUN/check"
+python3 tools/project_gate.py build --kind server --features word-tutorial --report "$PM_RUN/check/check.json" --build-dir "$PM_RUN/build"
 ```
 
-生成された `"$PM_BUILD/release/picomado-server"` を初回設定の手順で導入してください。
+変更した PNG をローカル Git にコミットしてから上記を実行し、生成された `"$PM_RUN/build/release/picomado-server"` を初回設定の手順で導入してください。

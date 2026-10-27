@@ -145,25 +145,26 @@ To create the plugin yourself, connect the parts in this order. The bundled exam
 
 5. Add `'my-words':'好きな言葉'` to the `labels` object in `service/src/ui.html`, separated from the other entries by a comma. This supplies the name shown in the management screen.
 
-Check that the ID is `my-words` throughout.
+Check that the ID is `my-words` throughout. If you changed the image or code, review and commit only the necessary files to local Git. The gate requires a committed, clean worktree for the build. Do not add private configuration or device IDs.
 
 When building the server in [first setup](first-setup.en.md), add `--features word-tutorial` to the server build command. For example, use a new empty build directory:
 
 ```sh
-python3 tools/project_gate.py check
-python3 tools/project_gate.py build --kind server --features word-tutorial --build-dir /tmp/picomado-word-build
+PM_RUN=$(mktemp -d /tmp/picomado-word.XXXXXX)
+python3 tools/project_gate.py check --out "$PM_RUN/check"
+python3 tools/project_gate.py build --kind server --features word-tutorial --report "$PM_RUN/check/check.json" --build-dir "$PM_RUN/build"
 ```
 
-Follow the server installation steps in first setup using this build's `release/picomado-server`. Start the server, connect the LCD device on HOME, and use its next control until “好きな言葉” is selected. A white “おはよう” on a dark blue background is the finished result. If the item is absent, check that the running server was built with `word-tutorial`.
+Follow the server installation steps in first setup using this build’s `"$PM_RUN/build/release/picomado-server"`. Start the server, connect the LCD device on HOME, and use its next control until “好きな言葉” is selected. A white “おはよう” on a dark blue background is the finished result. If the item is absent, check that the running server was built with `word-tutorial`.
 
 ## 5. Make it yours
 
 Replace the quoted phrase in step 2. Add options such as `--size 20 --x 12 --y 28` to set the font size and top-left position. If the text does not fit, shorten it or adjust the size and position. The image is embedded at server build time, so regenerate the PNG and rebuild and reinstall after changing it. Use a new empty build directory each time, for example:
 
 ```sh
-PM_BUILD=$(mktemp -d /tmp/picomado-word-build.XXXXXX)
-python3 tools/project_gate.py check
-python3 tools/project_gate.py build --kind server --features word-tutorial --build-dir "$PM_BUILD"
+PM_RUN=$(mktemp -d /tmp/picomado-word.XXXXXX)
+python3 tools/project_gate.py check --out "$PM_RUN/check"
+python3 tools/project_gate.py build --kind server --features word-tutorial --report "$PM_RUN/check/check.json" --build-dir "$PM_RUN/build"
 ```
 
-Install `"$PM_BUILD/release/picomado-server"` following first setup.
+Commit the changed PNG to local Git before running these commands, then install `"$PM_RUN/build/release/picomado-server"` following first setup.
