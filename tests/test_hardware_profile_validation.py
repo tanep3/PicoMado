@@ -41,6 +41,11 @@ class HardwareProfileValidation(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'collide'):
             validator.validate(self.config, self.profile, self.cc)
 
+    def test_contradictory_display_capability_is_rejected(self):
+        self.profile.write_text(self.profile.read_text().replace('PM_DISPLAY_CAPABILITY "lcd"', 'PM_DISPLAY_CAPABILITY "eink"'))
+        with self.assertRaisesRegex(ValueError, 'contradicts'):
+            self.check('')
+
     def test_missing_display_implementation_is_not_accepted(self):
         self.profile.write_text(self.profile.read_text().replace('PM_LCD_CONTROLLER_ST7735S', 'PM_LCD_CONTROLLER_UNKNOWN'))
         with self.assertRaisesRegex(ValueError, 'driver unavailable'):

@@ -223,6 +223,21 @@ impl Runtime {
                 .checked_add(1)
                 .ok_or(AppError::Conflict("order revision exhausted"))?;
         }
+        // A server upgraded with the optional phrase tutorial retains each
+        // device's selection and enabled set while adding the new catalog ID.
+        #[cfg(feature = "word-tutorial")]
+        {
+            let before_word: BTreeSet<_> =
+                ["youtube", "caricature", "weather", "rain-radar", "clock"].into();
+            if catalog.iter().any(|id| id == "my-words")
+                && state.world.plugin_order.len() == before_word.len()
+                && state.world.plugin_order.iter().map(String::as_str).collect::<BTreeSet<_>>() == before_word
+            {
+                state.world.plugin_order.push("my-words".into());
+                state.order_revision = state.order_revision.checked_add(1)
+                    .ok_or(AppError::Conflict("order revision exhausted"))?;
+            }
+        }
         for record in state.settings.devices.values_mut() {
             record.online = false;
         }
@@ -3284,6 +3299,8 @@ mod clock_tests {
         let t = app.hello("old", ["lcd".into()].into(), 1).unwrap();
         app.set_enabled("old", t.incarnation, 1, "clock", false)
             .unwrap();
+        #[cfg(feature = "word-tutorial")]
+        app.runtime.world.devices.get_mut("old").unwrap().enabled.remove("my-words");
         let selection = app.runtime.world.devices["old"].selected.clone();
         let enabled = app.runtime.world.devices["old"].enabled.clone();
         let settings_rev = app.runtime.world.devices["old"].settings_revision;

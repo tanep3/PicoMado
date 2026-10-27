@@ -125,6 +125,11 @@ def validate_layout(macros):
     count = macros.get('PM_BUTTON_COUNT')
     if count not in (('4',) if lcd else ('0', '2')):
         raise ValueError('button count unsupported by display/input implementation')
+    if (macros.get('PM_DISPLAY_CAPABILITY'), macros.get('PM_PIXEL_FORMAT_NAME')) != (
+            ('"lcd"', '"rgb565be"') if lcd else ('"eink"', '"mono1"')):
+        raise ValueError('display capability or pixel name contradicts selected driver')
+    if lcd and macros.get('PM_PIXEL_BYTES') != '2':
+        raise ValueError('LCD pixel byte width must be 2')
     if lcd and macros.get('PM_LCD_CONTROLLER') != 'PM_LCD_CONTROLLER_ST7735S':
         raise ValueError('LCD controller driver unavailable')
     if eink and macros.get('PM_EINK_PANEL_VERSION') != '4':
