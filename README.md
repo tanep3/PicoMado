@@ -4,23 +4,35 @@
 
 Build a little device for your desk, then keep making it yours. PicoMado puts a tiny screen and physical buttons in your hands. Its plugins give it something new to show long after the hardware is assembled.
 
-PicoMado already has five built-in experiences. Pick one on the device or manage it in a browser:
+PicoMado already has five built-in experiences:
 
-| Plugin | What you can do |
-| --- | --- |
-| **YouTube** | Prepare a video on the server and play it on the small LCD. Browse and manage saved sources from the web interface. |
-| **Weather** | Read a Japanese weather forecast and move through its days with the device controls. |
-| **Rain radar** | Look at a compact Japanese precipitation map and step through available times. |
-| **Caricature** | Generate a drawing from a news topic or your own text, then browse saved drawings. This needs the separate generation tools configured on the server. |
-| **Clock** | Keep a date, analog clock, and 24-hour time in view. |
+### YouTube on a tiny LCD
 
-The images below are **software-rendered previews**, not photos of a finished device. The repository does not yet contain publishable device photos or a demo video.
+Choose a video in the web interface, prepare it on the server, then watch it play on the 160×80 LCD. Saved sources and frame-rate variants can be managed in the browser. This feature uses the LCD; the small screen is part of the fun, not a replacement for a full-size player.
 
-![Clock LCD render preview](service/assets/clock-lcd-preview.png) ![Rain radar LCD render preview](service/assets/radar-lcd-preview.png)
+### Weather to glance at
+
+Leave the Japanese forecast on your desk and use the device controls to browse its days. The server refreshes the forecast from JMA data; the screen gives you a quick view without opening another app.
+
+### Rain radar you can step through
+
+See a compact map of Japanese precipitation and move through the available times. The image below is an actual **software render preview** of the LCD output, not a device photo.
+
+![Rain radar LCD render preview](service/assets/radar-lcd-preview.png)
+
+### Caricatures to make and revisit
+
+Start a drawing from a news topic or your own words in the web interface. The finished image appears on the device, and you can browse saved work later. Generation requires separate server-side tools and settings.
+
+### A clock that belongs on the desk
+
+Show the date, an analog face and 24-hour time. The image below is an actual **software render preview** of the LCD output, not a device photo.
+
+![Clock LCD render preview](service/assets/clock-lcd-preview.png)
 
 ## Make it yours
 
-The display, buttons, firmware, server and web controls form one device you can use at your desk. Add another use by implementing a server plugin and registering it with the shared plugin API; [the minimal plugin example](docs/guides/plugin-author.md) shows the starting point. That example is not installed by default. This repository does not include an enclosure design, so choose or build a housing for your particular screen and wiring.
+The display, buttons, firmware, server and web controls form one device you can use at your desk. Add another use by implementing a server plugin through the [plugin guide](docs/guides/plugin-author.md). This repository does not include an enclosure design, so choose or build a housing for your particular screen and wiring.
 
 ## How it works
 
@@ -39,8 +51,8 @@ The supported profiles are Pico W with a 160×80 ST7735S LCD and four buttons, o
 
 ## Get started
 
-1. Choose parts and wiring from the [hardware guide](docs/guides/hardware-support.md).
-2. Follow the [first setup guide](docs/guides/first-setup.md) for the Linux server, device configuration, gated build and verification. The guide is currently in Japanese.
+1. Choose parts and wiring from the [hardware guide](docs/guides/hardware-support.en.md).
+2. Follow the [first setup guide](docs/guides/first-setup.en.md) for the Linux server, device configuration, build and verification.
 3. Use the [recovery guide](docs/guides/release-and-recovery.md) before updating an existing device.
 
 For deeper detail, see the [firmware](firmware/README.md), [server](service/README.md) and [documentation index](docs/README.md). Development rules and evidence are in [AGENTS.md](AGENTS.md).

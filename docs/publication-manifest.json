@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "status": "review_preview_only",
+  "buildable": false,
+  "includes": [
+    "README.md",
+    "README.ja.md",
+    "LICENSE",
+    "docs/guides/first-setup.md",
+    "docs/guides/first-setup.en.md",
+    "docs/guides/hardware-support.md",
+    "docs/guides/hardware-support.en.md",
+    "docs/guides/release-and-recovery.md",
+    "docs/guides/plugin-author.md",
+    "service/deploy/config.toml",
+    "service/assets/clock-lcd-preview.png",
+    "service/assets/radar-lcd-preview.png"
+  ],
+  "excluded_private_evidence": [
+    "docs/checkpoints/**/*.json",
+    "docs/changes/**/*.json",
+    "repository_git_history"
+  ],
+  "notes": "This is a documentation review export, not a source release. Original evidence remains in the private canonical repository. A later buildable public release needs a separately validated source export and a portable gate workflow."
+}
