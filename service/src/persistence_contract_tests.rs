@@ -410,6 +410,7 @@ async fn wait_persist_frame(
 async fn wait_current_persist_frame(
     recorded: &Arc<std::sync::Mutex<Vec<Message>>>,
     app: &SharedApp,
+    session: &SessionToken,
     from: usize,
     expected_bytes: usize,
 ) -> (crate::FrameToken, usize) {
@@ -423,7 +424,10 @@ async fn wait_current_persist_frame(
                     for message in Decoder::default().push(bytes).unwrap() {
                         match &message {
                             WireMessage::FrameStart { token, .. } => {
-                                collecting = app.read().unwrap().frame_is_current(token);
+                                collecting = token.device_id == session.device_id
+                                    && token.incarnation == session.incarnation
+                                    && token.session_epoch == session.session_epoch
+                                    && app.read().unwrap().selection_for(session).unwrap().1 == token.display_epoch;
                                 assembler.reset();
                             }
                             WireMessage::FrameChunk { .. } => {}
@@ -639,6 +643,7 @@ async fn sqlite_wait_allows_native_static_browse_ack_and_merges_fresh_latest_wit
                 let (frame, end) = wait_current_persist_frame(
                     &recorded,
                     &app,
+                    &token,
                     offset,
                     if screen == "eink" { 3813 } else { 25600 },
                 )
@@ -676,6 +681,7 @@ async fn sqlite_wait_allows_native_static_browse_ack_and_merges_fresh_latest_wit
                 let (frame, end) = wait_current_persist_frame(
                     &recorded,
                     &app,
+                    &token,
                     offset,
                     if screen == "eink" { 3813 } else { 25600 },
                 )
@@ -737,6 +743,7 @@ async fn sqlite_wait_allows_native_static_browse_ack_and_merges_fresh_latest_wit
                 let (frame, _) = wait_current_persist_frame(
                     &recorded,
                     &app,
+                    &token,
                     offset,
                     if screen == "eink" { 3813 } else { 25600 },
                 )
