@@ -229,7 +229,7 @@ class Tests(unittest.TestCase):
                 serial_by_id='/dev/serial/by-id/E661640843239D21',PID=os.getpid(),
                 server_sha=hashlib.sha256(Path(f'/proc/{os.getpid()}/exe').read_bytes()).hexdigest(),
                 observer=str(observer),observer_SHA256=digests,host_socket=str(root/'host.sock'),
-                interface='eth0',known_mac='02:00:00:00:00:01',local_ip='192.0.2.120',port=16153)
+                interface='eth0',known_mac='02:00:00:00:00:01',local_ip='198.51.100.101',port=16153)
             config=root/'config.json';config.write_text(json.dumps(cfg));out=root/'trial'
             with patch.object(sys,'argv',['heartbeat_capture_runner.py','--config',str(config),'--dir',str(out),'--execute']),\
                  patch.object(run.hc.txlib,'refresh_target',side_effect=ValueError('neighbor not REACHABLE')) as resolver,\

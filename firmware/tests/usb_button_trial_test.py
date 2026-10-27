@@ -5,12 +5,12 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 import usb_button_trial as m
 class Tests(unittest.TestCase):
  def test_pure_scope_rule_separates_cached_mapping_from_reachability(self):
-  # Trial-09's actual MAC/route/pre-ARM socket and after-ARM STALE row.
+  # Synthetic identities preserve Trial-09's route/pre-ARM and STALE cases.
   # An after-ARM socket fact below is a counterfactual isolated input because
   # the old resolver rejected NUD before it queried that socket.
-  args=types.SimpleNamespace(interface='eth0',known_mac='28:cd:c1:09:78:41',
-      local_ip='192.0.2.120',port=16153,host_pid=1928084,device='PicoMado-lcd1')
-  row=dict(dst='192.168.0.173',lladdr=args.known_mac,state=['STALE'])
+  args=types.SimpleNamespace(interface='eth0',known_mac='02:00:00:00:42:11',
+      local_ip='198.51.100.101',port=16153,host_pid=1928084,device='PicoMado-lcd1')
+  row=dict(dst='198.51.100.102',lladdr=args.known_mac,state=['STALE'])
   route=[dict(dst=row['dst'],dev='eth0',prefsrc=args.local_ip)]
   before=dict(interface='eth0',local_ip=args.local_ip,local_port=16153,peer_ip=row['dst'],
       peer_port=61823,inode=13769022,pid=args.host_pid,fd=17,process_start_ticks=60873347,
@@ -46,11 +46,11 @@ class Tests(unittest.TestCase):
   for i,change in enumerate(counterexamples):
    with self.subTest(counterexample=i):self.assertFalse(decide(**change)['scope_bound'])
  def test_known_neighbor_saved_identity_and_reachability_are_separate(self):
-  # The MAC/interface are from the retained trial-02 config; DELAY was the
+  # The synthetic MAC/interface model the retained trial-02 config; DELAY was the
   # later read-only observation, not a guard-instant state from that trial.
-  args=types.SimpleNamespace(interface='eth0',known_mac='28:cd:c1:09:78:41')
+  args=types.SimpleNamespace(interface='eth0',known_mac='02:00:00:00:42:11')
   # Actual scoped `ip -j neigh show dev eth0` rows omit `dev` on this host.
-  row=dict(dst='192.168.0.173',lladdr=args.known_mac,state=['DELAY'])
+  row=dict(dst='198.51.100.102',lladdr=args.known_mac,state=['DELAY'])
   with tempfile.TemporaryDirectory()as d:
    path=Path(d)/'neighbor.json'
    with patch.object(m.subprocess,'check_output',return_value=json.dumps([row])):
@@ -63,7 +63,7 @@ class Tests(unittest.TestCase):
    self.assertEqual(saved['refusal'],'known MAC is not REACHABLE')
    row['state']=['REACHABLE']
    with patch.object(m.subprocess,'check_output',return_value=json.dumps([row])):
-    self.assertEqual(m.known_neighbor(args,Path(d)/'reachable.json'),'192.168.0.173')
+    self.assertEqual(m.known_neighbor(args,Path(d)/'reachable.json'),'198.51.100.102')
    with patch.object(m.subprocess,'check_output',return_value=json.dumps([row,row])):
     with self.assertRaisesRegex(ValueError,'match count'):m.known_neighbor(args,Path(d)/'duplicate.json')
    with patch.object(m.subprocess,'check_output',return_value=json.dumps([row|{'dev':'wlan0'}])):
@@ -72,8 +72,8 @@ class Tests(unittest.TestCase):
     with self.assertRaisesRegex(OSError,'netlink blocked'):m.known_neighbor(args,Path(d)/'read-error.json')
    self.assertIn('neighbor read failed',json.loads((Path(d)/'read-error.json').read_text())['refusal'])
  def test_cached_candidate_adapter_preserves_stale_without_claiming_reachability(self):
-  args=types.SimpleNamespace(interface='eth0',known_mac='28:cd:c1:09:78:41')
-  row=dict(dst='192.168.0.173',lladdr=args.known_mac,state=['STALE'])
+  args=types.SimpleNamespace(interface='eth0',known_mac='02:00:00:00:42:11')
+  row=dict(dst='198.51.100.102',lladdr=args.known_mac,state=['STALE'])
   with tempfile.TemporaryDirectory()as d,patch.object(m.subprocess,'check_output',return_value=json.dumps([row])):
    peer,rows=m.scoped_neighbor_candidate(args,Path(d)/'neighbor.json')
    self.assertEqual(peer,row['dst']);self.assertEqual(rows,[row])
@@ -94,7 +94,7 @@ class Tests(unittest.TestCase):
    client.connect(('127.0.0.1',port))
    accepted,_=listener.accept()
    try:
-    args=types.SimpleNamespace(interface='lo',known_mac='28:cd:c1:09:78:41',
+    args=types.SimpleNamespace(interface='lo',known_mac='02:00:00:00:42:11',
         local_ip='127.0.0.1',port=port,host_pid=os.getpid(),device='lcd',socket=Path(path))
     state=dict(boot=f'test-{os.getpid():x}',run='0',phase='idle',connection=1,session=2,target='lcd')
     row=dict(dst='127.0.0.1',lladdr=args.known_mac,state=['STALE'])
@@ -131,9 +131,9 @@ class Tests(unittest.TestCase):
                        bound_cached_scope=True,prior=before)
    finally:accepted.close()
  def test_preflight_socket_cookie_and_binding_must_survive_arm(self):
-  target=dict(interface='eth0',local_ip='192.0.2.120',local_port=16153,
-              peer_ip='192.168.0.173',peer_port=55555,inode=123,pid=456,
-              process_start_ticks=789,cookie=[1,2],known_device_mac='28:cd:c1:09:78:41',
+  target=dict(interface='eth0',local_ip='198.51.100.101',local_port=16153,
+              peer_ip='198.51.100.102',peer_port=55555,inode=123,pid=456,
+              process_start_ticks=789,cookie=[1,2],known_device_mac='02:00:00:00:42:11',
               binding=dict(boot='boot',connection=12,session=2318,target='PicoMado-lcd1',
                            phase='idle',run='0'))
   after=json.loads(json.dumps(target));after['binding'].update(phase='armed',run='new-run')
@@ -174,7 +174,7 @@ class Tests(unittest.TestCase):
   self.assertEqual(m.tx_digest([row]),m.tx_digest([row|{'rc':255}]))
   self.assertNotEqual(m.tx_digest([row]),m.tx_digest([row|{'s':3}]))
  @staticmethod
- def args(out,execute=True):return types.SimpleNamespace(execute=execute,key=1,hold_ms=100,delay_ms=1000,device='unit',serial='/dev/fake',socket=Path('/tmp/unit.sock'),host_pid=1,interface='eth0',known_mac='00:00:00:00:00:01',local_ip='192.0.2.120',port=16153,observer_base=Path('/tmp'),out=out,release_saved=None)
+ def args(out,execute=True):return types.SimpleNamespace(execute=execute,key=1,hold_ms=100,delay_ms=1000,device='unit',serial='/dev/fake',socket=Path('/tmp/unit.sock'),host_pid=1,interface='eth0',known_mac='00:00:00:00:00:01',local_ip='198.51.100.101',port=16153,observer_base=Path('/tmp'),out=out,release_saved=None)
  def scenario(self,fail,require_inner=False):
   log=[];owner=self;hs=dict(boot='a-1',run='0',last_run='0',phase='idle',target='unit',connection=2,session=3);open_usb=False
   class USB:
