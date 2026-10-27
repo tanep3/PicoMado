@@ -1,0 +1,22 @@
+{
+  "id": "PUBLIC-DISTRIBUTION-20261027",
+  "title": "Public distribution and first-use corrections",
+  "owner": "parent",
+  "implementer": "public review correction",
+  "cause": "First-use builds depend on private evidence and newly created device selections dirty the worktree; tracked and historical evidence contains private context.",
+  "introduction_cause": "Internal development and publication workflows were combined.",
+  "escape_cause": "Prior checks did not exercise a history-free distribution and clean first-use environment end to end.",
+  "deliverables": ["First-use build and device safety checks", "History-free public distribution", "Bilingual setup and plugin instructions", "License and privacy review"],
+  "dependencies": ["Retain internal gate and private evidence", "Independent verification and physical application remain separate"],
+  "design_artifacts": ["docs/changes/PUBLIC-DISTRIBUTION-20261027.md"],
+  "domain_authority": "docs/changes/PUBLIC-DISTRIBUTION-20261027.md",
+  "standard": "development/standard/v1/standard.md",
+  "status": "in_progress",
+  "stages": {
+    "design": {"state": "in_progress", "evidence": []},
+    "implementation": {"state": "not_started", "evidence": []},
+    "independent_verification": {"state": "not_started", "evidence": []},
+    "operational_application": {"state": "not_started", "evidence": []},
+    "effectiveness_confirmation": {"state": "not_started", "evidence": []}
+  }
+}
