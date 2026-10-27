@@ -1,7 +1,7 @@
 // Copy to test_config.h locally. Do not commit the filled file.
 #define WIFI_SSID ""
 #define WIFI_PASSWORD ""
-// Final Pi5 IPv4 literal (100.64.0.9 for the TailSocks test).
+// Fill in your target IPv4 literal for a local trial.
 // DNS names are unsupported.
 // This is not the Pico tethering DHCP address.
 #define PI_TAILSCALE_IP ""
@@ -10,7 +10,7 @@
 // Default is 1 (SOCKS5); set 0 to test a direct Pico-to-Pi5 TCP connection.
 #define PROBE_USE_SOCKS5 1
 // Phone hotspot-side TailSocks address and TCP port; non-secret defaults below.
-#define SOCKS5_PROXY_IP "10.101.65.232"
+#define SOCKS5_PROXY_IP "198.51.100.232"
 #define SOCKS5_PROXY_PORT 48115
 // Fill these only in your local ignored test_config.h. Never commit or print them.
 #define SOCKS5_USERNAME ""

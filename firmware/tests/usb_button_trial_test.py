@@ -9,7 +9,7 @@ class Tests(unittest.TestCase):
   # An after-ARM socket fact below is a counterfactual isolated input because
   # the old resolver rejected NUD before it queried that socket.
   args=types.SimpleNamespace(interface='eth0',known_mac='28:cd:c1:09:78:41',
-      local_ip='192.168.0.120',port=16153,host_pid=1928084,device='PicoMado-lcd1')
+      local_ip='192.0.2.120',port=16153,host_pid=1928084,device='PicoMado-lcd1')
   row=dict(dst='192.168.0.173',lladdr=args.known_mac,state=['STALE'])
   route=[dict(dst=row['dst'],dev='eth0',prefsrc=args.local_ip)]
   before=dict(interface='eth0',local_ip=args.local_ip,local_port=16153,peer_ip=row['dst'],
@@ -131,7 +131,7 @@ class Tests(unittest.TestCase):
                        bound_cached_scope=True,prior=before)
    finally:accepted.close()
  def test_preflight_socket_cookie_and_binding_must_survive_arm(self):
-  target=dict(interface='eth0',local_ip='192.168.0.120',local_port=16153,
+  target=dict(interface='eth0',local_ip='192.0.2.120',local_port=16153,
               peer_ip='192.168.0.173',peer_port=55555,inode=123,pid=456,
               process_start_ticks=789,cookie=[1,2],known_device_mac='28:cd:c1:09:78:41',
               binding=dict(boot='boot',connection=12,session=2318,target='PicoMado-lcd1',
@@ -174,7 +174,7 @@ class Tests(unittest.TestCase):
   self.assertEqual(m.tx_digest([row]),m.tx_digest([row|{'rc':255}]))
   self.assertNotEqual(m.tx_digest([row]),m.tx_digest([row|{'s':3}]))
  @staticmethod
- def args(out,execute=True):return types.SimpleNamespace(execute=execute,key=1,hold_ms=100,delay_ms=1000,device='unit',serial='/dev/fake',socket=Path('/tmp/unit.sock'),host_pid=1,interface='eth0',known_mac='00:00:00:00:00:01',local_ip='192.168.0.120',port=16153,observer_base=Path('/tmp'),out=out,release_saved=None)
+ def args(out,execute=True):return types.SimpleNamespace(execute=execute,key=1,hold_ms=100,delay_ms=1000,device='unit',serial='/dev/fake',socket=Path('/tmp/unit.sock'),host_pid=1,interface='eth0',known_mac='00:00:00:00:00:01',local_ip='192.0.2.120',port=16153,observer_base=Path('/tmp'),out=out,release_saved=None)
  def scenario(self,fail,require_inner=False):
   log=[];owner=self;hs=dict(boot='a-1',run='0',last_run='0',phase='idle',target='unit',connection=2,session=3);open_usb=False
   class USB:
