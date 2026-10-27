@@ -18,8 +18,10 @@ The [first setup guide](../docs/guides/first-setup.en.md) covers dependencies, c
 
 The main paths are `src/application.rs` for persistent application state, `src/plugins.rs` and plugin modules for content, `src/transport.rs` and `src/protocol.rs` for device communication, and `src/web.rs` for browser controls. SQLite snapshots and effect outbox work are separated from physical frame state; receipt of a frame and completion of drawing are separate acknowledgements. Development checks run through `python3 tools/project_gate.py check` from the repository root, following [the development process](../docs/development-process.md).
 
-Physical LCD and zero-button E-ink runs are recorded, while long-duration and multi-device acceptance remain open. The two-button E-ink build has no completed physical acceptance. See [hardware support](../docs/guides/hardware-support.en.md) for exact profiles and status.
+LCD and both zero- and two-button E-ink configurations are supported as listed in [hardware support](../docs/guides/hardware-support.en.md). Long-duration and multi-device acceptance remain open.
 
 ## Historical record
 
 The former long README, including dated observations and old `cargo install` / `systemctl` examples, is preserved in the [historical development record](history/development-record-before-20261027.md). Those examples describe past operations and are not current installation instructions.
+
+The bundled weather and radar glyph assets are derived from Noto Sans CJK JP; see [Noto copyright and license](assets/NOTO-COPYRIGHT) and [asset sources](assets/README.md). PicoMado itself is distributed under the [MIT License](../LICENSE).

@@ -12,6 +12,7 @@ Prepare the server and LCD as described in [first setup](first-setup.en.md), and
 PM_RUN=$(mktemp -d /tmp/picomado-word.XXXXXX)
 python3 tools/project_gate.py check --out "$PM_RUN/check"
 python3 tools/project_gate.py build --kind server --features word-tutorial --report "$PM_RUN/check/check.json" --build-dir "$PM_RUN/build"
+python3 tools/project_gate.py record --kind server --report "$PM_RUN/check/check.json" --build-receipt "$PM_RUN/build/build-receipt.json" --artifact "$PM_RUN/build/release/picomado-server" --out "$PM_RUN/build/candidate.json"
 ```
 
 Follow [first setup](first-setup.en.md) for candidate recording, independent review, preflight, and installation using `"$PM_RUN/build/release/picomado-server"`. The first-install gate currently has an unresolved dependency on the author's local evidence. If it rejects the build or approval, inspect the error and missing evidence; do not treat installation as completed.

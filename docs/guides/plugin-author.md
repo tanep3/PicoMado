@@ -12,6 +12,7 @@ Web 画面に言葉を入力し、プレビューを見て保存すると、160�
 PM_RUN=$(mktemp -d /tmp/picomado-word.XXXXXX)
 python3 tools/project_gate.py check --out "$PM_RUN/check"
 python3 tools/project_gate.py build --kind server --features word-tutorial --report "$PM_RUN/check/check.json" --build-dir "$PM_RUN/build"
+python3 tools/project_gate.py record --kind server --report "$PM_RUN/check/check.json" --build-receipt "$PM_RUN/build/build-receipt.json" --artifact "$PM_RUN/build/release/picomado-server" --out "$PM_RUN/build/candidate.json"
 ```
 
 [初回設定](first-setup.md)の候補記録と別の確認者によるレビュー・preflight を行い、このビルドの `"$PM_RUN/build/release/picomado-server"` を導入します。現在、初回導入の gate には作者のローカル証拠に依存する未解決の問題があります。その場合は導入済みとせず、エラーと不足している証拠を確認してください。

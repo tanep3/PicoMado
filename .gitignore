@@ -44,6 +44,7 @@ Thumbs.db
 
 # Per-device firmware secrets, board binding, and outputs
 /firmware/devices/*/config.h
+/firmware/devices/*/profile.txt
 /firmware/devices/*/board-id.txt
 /firmware/build/
 

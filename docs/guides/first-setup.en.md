@@ -8,6 +8,8 @@ This guide assumes a Linux server and Raspberry Pi Pico W. Run its commands from
 
 Install [Rust and Cargo](https://rust-lang.org/tools/install/) for the server, and a C/C++ toolchain, CMake, Python 3 and the [Pico SDK](https://www.raspberrypi.com/documentation/microcontrollers/c_sdk.html) for firmware. Install [picotool](https://github.com/raspberrypi/picotool/blob/master/BUILDING.md) for UF2 conversion and board identification. Follow the official Raspberry Pi setup instructions for a matching SDK and C/C++ toolchain. Check `rustc --version`, `cargo --version`, `cmake --version`, `python3 --version` and `picotool version`. Point `PICO_SDK_PATH` at your installed SDK; for example, `export PICO_SDK_PATH="$HOME/pico-sdk"` if it is really there.
 
+From the repository root, run `cargo fetch --locked --manifest-path service/Cargo.toml` once to download the locked dependencies. This requires network access. Subsequent gate checks and builds use `--offline --locked`.
+
 ## 2. Configure the Linux server
 
 For a new installation, copy the example without replacing an existing file:
