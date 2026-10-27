@@ -378,6 +378,37 @@ fn owner_panic_does_not_silently_publish_or_lend_mutable_state() {
 
 async fn wait_persist_frame(
     recorded: &Arc<std::sync::Mutex<Vec<Message>>>,
+    from: usize,
+    expected_bytes: usize,
+) -> (crate::FrameToken, usize) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let rows = recorded.lock().unwrap().clone();
+            let mut assembler = FrameAssembler::default();
+            for row in &rows[from..] {
+                if let Message::Binary(bytes) = row {
+                    for message in Decoder::default().push(bytes).unwrap() {
+                        if matches!(
+                            message,
+                            WireMessage::FrameStart { .. } | WireMessage::FrameChunk { .. }
+                        ) {
+                            if let Some((token, pixels)) = assembler.accept(message).unwrap() {
+                                assert_eq!(pixels.len(), expected_bytes);
+                                return (token, rows.len());
+                            }
+                        }
+                    }
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("static frame must complete while SQLite is paused")
+}
+
+async fn wait_current_persist_frame(
+    recorded: &Arc<std::sync::Mutex<Vec<Message>>>,
     app: &SharedApp,
     from: usize,
     expected_bytes: usize,
@@ -605,7 +636,7 @@ async fn sqlite_wait_allows_native_static_browse_ack_and_merges_fresh_latest_wit
                 assert!(
                     matches!(sub,Some(WireMessage::PluginPosition{ref dataset_id,..})if dataset_id==&first.dataset_id)
                 );
-                let (frame, end) = wait_persist_frame(
+                let (frame, end) = wait_current_persist_frame(
                     &recorded,
                     &app,
                     offset,
@@ -642,7 +673,7 @@ async fn sqlite_wait_allows_native_static_browse_ack_and_merges_fresh_latest_wit
                     expected.target_date, before.target_date,
                     "fixture needs an available next browse time"
                 );
-                let (frame, end) = wait_persist_frame(
+                let (frame, end) = wait_current_persist_frame(
                     &recorded,
                     &app,
                     offset,
@@ -703,7 +734,7 @@ async fn sqlite_wait_allows_native_static_browse_ack_and_merges_fresh_latest_wit
                         fresh.dataset_id.clone()
                     }
                 );
-                let (frame, _) = wait_persist_frame(
+                let (frame, _) = wait_current_persist_frame(
                     &recorded,
                     &app,
                     offset,
