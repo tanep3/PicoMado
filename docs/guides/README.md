@@ -10,6 +10,8 @@
 - [First setup (English)](first-setup.en.md)
 - [Supported hardware (English)](hardware-support.en.md)
 - [Customize PicoMado (English)](customization.en.md)
+- [小さなプラグインから始める](plugin-author.md)
+- [Start with a small plugin (English)](plugin-author.en.md)
 - [更新前の退避と復旧](release-and-recovery.md)
 - [風刺画のプロンプトを編集する](caricature-prompts.md)
 - [自宅・外出先接続 技術検証ガイド](home-away-connectivity-technical-guide.md)

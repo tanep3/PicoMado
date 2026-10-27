@@ -52,7 +52,7 @@ See the date and time in analog and digital form. It stays useful on your desk b
 
 ## Keep making it yours
 
-Start with the five included plugins. You can turn another idea into a plugin and give the device a new role. Choosing what to show and how to control it becomes your next build. The [plugin guide](docs/guides/plugin-author.md) shows where to start.
+Start with the five included plugins. You can turn another idea into a plugin and give the device a new role. Choosing what to show and how to control it becomes your next build. The [plugin guide](docs/guides/plugin-author.en.md) shows where to start.
 
 ## Build your own version
 

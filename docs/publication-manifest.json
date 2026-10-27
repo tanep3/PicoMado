@@ -26,6 +26,7 @@
     "docs/guides/customization.en.md",
     "docs/guides/release-and-recovery.md",
     "docs/guides/plugin-author.md",
+    "docs/guides/plugin-author.en.md",
     "service/README.md",
     "firmware/README.md",
     "service/deploy/config.toml"
