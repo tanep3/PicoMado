@@ -13,3 +13,7 @@ The plugin owns the phrase and accepted image as one durable state and converts 
 ## Verification
 
 Test invalid text, malformed and oversized images, dimension rejection, stale revisions, persistence and reload, default composition, selected device refresh and exact frame bytes. Exercise the UI on isolated localhost and deliver the edited frame to a simulated LCD through the existing WebSocket protocol. Test fixtures use temporary state and no production service or device. Physical display, independent parent acceptance and deployment remain separate.
+
+## Review correction: draft and revision
+
+A preview alone creates no draft. The first edit binds the draft to the displayed revision; polling may refresh the server view but cannot rebase an edited draft. Save uses the bound revision and preserves input on rejection. A successful save clears only the submitted draft. Browser control-character validation matches Rust Unicode control characters.
