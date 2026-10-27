@@ -14,8 +14,8 @@
   "standard": "development/standard/v1/standard.md",
   "status": "in_progress",
   "stages": {
-    "design": {"state": "verified", "evidence": [{"kind": "commit", "commit": "d886306"}]},
-    "implementation": {"state": "verified", "evidence": [{"kind": "check", "path": "/tmp/picomado-public-docs-20261027-photos-check/check.json", "SHA256": "dd3dae85862594d1ce6bff607144419a5369421726fe5b2f7a686ffa77afe804"}]},
+    "design": {"state": "verified", "evidence": [{"kind": "commit", "commit": "d886306"}, {"kind": "commit", "commit": "538b1f4"}]},
+    "implementation": {"state": "in_progress", "evidence": []},
     "independent_verification": {"state": "not_started", "evidence": []},
     "operational_application": {"state": "not_started", "evidence": []},
     "effectiveness_confirmation": {"state": "not_started", "evidence": []}
