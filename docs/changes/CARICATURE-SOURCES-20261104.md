@@ -1,6 +1,6 @@
 # CARICATURE-SOURCES-20261104
 
-Status: design recorded; implementation and verification pending.
+Status: implementation verified locally; operational application and effectiveness confirmation pending.
 
 ## Cause and comparison
 
@@ -16,5 +16,8 @@ The news result contract used one `source_url` string while the artwork already 
 ## Verification and application
 
 - Unit tests: single/multiple decoding, malformed and unsafe URLs, duplicate/used sources, and saved-job compatibility.
-- Integration test: generated artwork retains every source. Run targeted Cargo tests and report their result.
+- Integration test: fake CLI returns two sources; generated artwork retains both, while a saved legacy single-source job resumes.
+- `CARGO_TARGET_DIR=/tmp/picomado-source-target cargo test --offline --manifest-path service/Cargo.toml --lib caricature::`: 56 passed.
+- Full `--lib --quiet` suite: 282 passed with local loopback test sockets allowed. An initial sandboxed run had 267 passed and 15 `Operation not permitted` failures at `127.0.0.1` binds; the rerun passed all 282 without code changes.
+- `git diff --check`: passed. The repository-wide `cargo fmt --check` reports extensive pre-existing formatting drift outside the changed files and is not used as a change-specific gate.
 - Operational application and live generation remain pending unless separately performed and verified; a code commit alone is not proof of production behavior.

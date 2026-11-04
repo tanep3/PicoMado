@@ -314,7 +314,7 @@ fn generate_blocking(
                 Ok((eink_png, lcd_rgb565be)) => {
                     let source_urls = news
                         .as_ref()
-                        .map(|n| vec![n.source_url.clone()])
+                        .map(|n| n.source_urls.clone())
                         .unwrap_or_default();
                     let artwork = Artwork {
                         id: format!("{}-{}", job.request.job_id, job.image_attempts),
@@ -336,7 +336,11 @@ fn generate_blocking(
                         last = WorkError("normalized artwork invalid");
                     } else if news
                         .as_ref()
-                        .is_some_and(|n| ensure_unused_source(&n.source_url, recent).is_err())
+                        .is_some_and(|n| {
+                            n.source_urls
+                                .iter()
+                                .any(|source| ensure_unused_source(source, recent).is_err())
+                        })
                     {
                         return failure(
                             job,
@@ -625,9 +629,20 @@ fn validate_news(news: &News, recent: &BTreeSet<String>) -> Result<(), WorkError
     if news.summary.trim().is_empty() || news.summary.chars().count() > 4000 {
         return Err(WorkError("news summary invalid"));
     }
-    public_source_url(&news.source_url)?;
-    ensure_unused_source(&news.source_url, recent)
-        .map_err(|_| WorkError("source published in last 24 hours"))
+    if news.source_urls.is_empty() || news.source_urls.len() > 10 {
+        return Err(WorkError("source URL count invalid"));
+    }
+    let mut keys = BTreeSet::new();
+    for source in &news.source_urls {
+        public_source_url(source)?;
+        let key = super::source_url_key(source).map_err(|_| WorkError("source URL invalid"))?;
+        if !keys.insert(key) {
+            return Err(WorkError("source URL duplicated"));
+        }
+        ensure_unused_source(source, recent)
+            .map_err(|_| WorkError("source published in last 24 hours"))?;
+    }
+    Ok(())
 }
 
 fn public_source_url(value: &str) -> Result<(), WorkError> {
@@ -1194,10 +1209,79 @@ mod tests {
     }
 
     #[test]
+    fn news_sources_decode_single_multiple_and_saved_shape() {
+        let single: News = serde_json::from_str(
+            r#"{"source_url":"https://1.1.1.1/a","summary":"one"}"#,
+        )
+        .unwrap();
+        assert_eq!(single.source_urls, ["https://1.1.1.1/a"]);
+        let separated: News = serde_json::from_str(
+            "{\"source_url\":\"https://1.1.1.1/a ; https://8.8.8.8/b\\nhttps://9.9.9.9/c\",\"summary\":\"three\"}",
+        )
+        .unwrap();
+        assert_eq!(
+            separated.source_urls,
+            ["https://1.1.1.1/a", "https://8.8.8.8/b", "https://9.9.9.9/c"]
+        );
+        let array: News = serde_json::from_str(
+            r#"{"source_urls":["https://1.1.1.1/a","https://8.8.8.8/b"],"summary":"two"}"#,
+        )
+        .unwrap();
+        assert_eq!(array.source_urls.len(), 2);
+        assert!(serde_json::from_str::<News>(
+            r#"{"source_url":"https://1.1.1.1/a","source_urls":["https://8.8.8.8/b"],"summary":"ambiguous"}"#
+        )
+        .is_err());
+        assert!(serde_json::from_str::<News>(
+            r#"{"source_url":"https://1.1.1.1/a ; ","summary":"empty"}"#
+        )
+        .is_err());
+        assert!(serde_json::from_str::<News>(
+            r#"{"source_url":"https://1.1.1.1/a","summary":"one","extra":1}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn every_news_source_is_checked() {
+        let news = |sources: Vec<&str>| News {
+            source_urls: sources.into_iter().map(str::to_owned).collect(),
+            summary: "verified".into(),
+        };
+        let valid = news(vec!["https://1.1.1.1/a", "https://8.8.8.8/b"]);
+        assert!(validate_news(&valid, &BTreeSet::new()).is_ok());
+        for bad in [
+            "http://127.0.0.1/private",
+            "https://user@8.8.8.8/private",
+            "https://8.8.8.8:444/private",
+            "https://8.8.8.8/bad path",
+        ] {
+            assert!(validate_news(
+                &news(vec!["https://1.1.1.1/a", bad]),
+                &BTreeSet::new()
+            )
+            .is_err(), "{bad}");
+        }
+        let mut recent = BTreeSet::new();
+        recent.insert(super::super::source_url_key("https://8.8.8.8/b").unwrap());
+        assert_eq!(
+            validate_news(&valid, &recent).unwrap_err().0,
+            "source published in last 24 hours"
+        );
+        assert_eq!(
+            validate_news(&news(vec!["https://1.1.1.1/a", "https://1.1.1.1/a#copy"]), &BTreeSet::new())
+                .unwrap_err()
+                .0,
+            "source URL duplicated"
+        );
+        assert!(validate_news(&news(vec![]), &BTreeSet::new()).is_err());
+    }
+
+    #[test]
     fn heading_instruction_only_appears_in_enabled_job_snapshot() {
         let phrase = "一言なんの画像か見出しをそえてください。";
         let news = News {
-            source_url: "https://example.com/news".into(),
+            source_urls: vec!["https://example.com/news".into()],
             summary: "確認したニュース".into(),
         };
         for (job_id, slot, input) in [
@@ -1504,7 +1588,7 @@ for arg in "$@"; do
   previous="$arg"
 done
 if [ "$news" = 1 ]; then
-  printf '%s' '{{"source_url":"https://1.1.1.1/article","summary":"Verified summary"}}' > "$out"
+  printf '%s' '{{"source_url":"https://1.1.1.1/article ; https://8.8.8.8/context","summary":"Verified summary"}}' > "$out"
   exit 0
 fi
 case "$PWD" in */image/1) cp '{}' '{}'; exit 9 ;; esac
@@ -1566,7 +1650,7 @@ printf '%s\n' "$PWD/generated.png" > "$out"
         assert_eq!(artwork.lcd_rgb565be.len(), 160 * 80 * 2);
         assert_eq!(
             artwork.metadata.source_urls,
-            vec!["https://1.1.1.1/article"]
+            vec!["https://1.1.1.1/article", "https://8.8.8.8/context"]
         );
         assert!(options.evidence_root.join("fake_job/news-1.json").exists());
         assert!(options.evidence_root.join("fake_job/image-2.json").exists());
@@ -1602,10 +1686,12 @@ printf '%s\n' "$PWD/generated.png" > "$out"
             settings: GenerationSettings::default(),
         };
         let mut checkpoint = GenerationJob::accept(resume_request.clone()).unwrap();
-        checkpoint.news = Some(News {
-            source_url: "https://1.1.1.1/article".into(),
-            summary: "Saved news".into(),
-        });
+        checkpoint.news = Some(
+            serde_json::from_str(
+                r#"{"source_url":"https://1.1.1.1/article","summary":"Saved news"}"#,
+            )
+            .unwrap(),
+        );
         checkpoint.news_attempts = 1;
         checkpoint.image_attempts = 1;
         checkpoint.state = GenerationState::Drawing;

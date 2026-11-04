@@ -198,10 +198,46 @@ impl GenerationRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "NewsWire")]
 pub struct News {
-    pub source_url: String,
+    pub source_urls: Vec<String>,
     pub summary: String,
+}
+
+// Old checkpoints and the configured CLI schema use `source_url`. Normalize
+// them here so every downstream stage handles a list of individual sources.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NewsWire {
+    source_url: Option<String>,
+    source_urls: Option<Vec<String>>,
+    summary: String,
+}
+
+impl TryFrom<NewsWire> for News {
+    type Error = &'static str;
+
+    fn try_from(wire: NewsWire) -> Result<Self, Self::Error> {
+        let source_urls = match (wire.source_url, wire.source_urls) {
+            (Some(source), None) => source
+                .split([';', '\n'])
+                .map(str::trim)
+                .map(str::to_owned)
+                .collect(),
+            (None, Some(sources)) => sources,
+            _ => return Err("news must have exactly one source field"),
+        };
+        if source_urls.is_empty()
+            || source_urls.len() > 10
+            || source_urls.iter().any(|source| source.is_empty())
+        {
+            return Err("news source count invalid");
+        }
+        Ok(Self {
+            source_urls,
+            summary: wire.summary,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
