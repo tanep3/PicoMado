@@ -104,7 +104,51 @@ pub fn executors() -> crate::workers::Executors {
             std::sync::Arc::new(crate::local_video::LocalVideoExecutor)
                 as std::sync::Arc<dyn crate::plugin_jobs::PluginJobExecutor>,
         ),
+        (
+            "local-image".into(),
+            std::sync::Arc::new(crate::local_image::LocalImageExecutor)
+                as std::sync::Arc<dyn crate::plugin_jobs::PluginJobExecutor>,
+        ),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugin_jobs::{
+        JobExecutionContext, JobOutcome, JobProgressSink, JobToken, PluginPaths,
+    };
+
+    #[tokio::test]
+    async fn registered_local_image_executor_scans_uploads() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        std::fs::create_dir_all(data.join("imports")).unwrap();
+        std::fs::write(data.join("imports/photo.png"), b"uploaded image").unwrap();
+        let (_, cancel) = tokio::sync::watch::channel(false);
+        let executor = executors()
+            .remove("local-image")
+            .expect("local image executor registered");
+        let outcome = executor
+            .execute(
+                serde_json::json!({"kind":"scan"}),
+                JobExecutionContext {
+                    token: JobToken {
+                        plugin: "local-image".into(),
+                        slot: "scan".into(),
+                        generation: 1,
+                    },
+                    paths: PluginPaths {
+                        data,
+                        cache: dir.path().join("cache"),
+                    },
+                    cancel,
+                    progress: JobProgressSink::default(),
+                },
+            )
+            .await;
+        assert_eq!(outcome, JobOutcome::Succeeded(serde_json::json!(["photo.png"])));
+    }
 }
 
 fn caricature_content() -> crate::caricature::CaricatureContent {
