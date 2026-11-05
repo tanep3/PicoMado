@@ -4,7 +4,7 @@
 
 ## 1. ツールを用意する
 
-サーバー用の [Rust と Cargo](https://rust-lang.org/tools/install/)、ファーム用の C/C++ ツール、CMake、Python 3.8 以上、[Pico SDK](https://www.raspberrypi.com/documentation/microcontrollers/c_sdk.html)、UF2 変換用の [picotool](https://github.com/raspberrypi/picotool/blob/master/BUILDING.md) を用意します。SDK は Raspberry Pi の公式手順で導入し、実際の場所を `PICO_SDK_PATH` に設定します。Cargo は初回ビルド時に不足する依存を取得します。後でオフラインでビルドしたい場合は `cargo fetch --locked --manifest-path service/Cargo.toml` で先に取得できます。
+サーバー用の [Rust と Cargo](https://rust-lang.org/tools/install/)、ファーム用の C/C++ ツール、CMake、Python 3.8 以上、[Pico SDK](https://www.raspberrypi.com/documentation/microcontrollers/c_sdk.html)、UF2 変換用の [picotool](https://github.com/raspberrypi/picotool/blob/master/BUILDING.md) を用意します。SDK は Raspberry Pi の公式手順で導入し、実際の場所を `PICO_SDK_PATH` に設定します。Cargo は初回ビルド時に不足する依存を取得します。後でオフラインでビルドしたい場合は `cargo fetch --locked --manifest-path service/Cargo.toml` で先に取得できます。ローカル画像の導入では、同じ Cargo が公開 [pic2gray4px](https://github.com/tanep3/pic2gray4px) の最新 `main` を HTTPS で取得・ビルドします。インストール時はネット接続が必要です。
 
 YouTube 再生には `yt-dlp`、FFmpeg、FFprobe が必要です。yt-dlp の環境によっては JavaScript runtime も必要です。全体テストを任意で行う場合は FFmpeg、FFprobe、`nice` が必要です。
 
@@ -60,20 +60,20 @@ firmware/tools/build.sh --device "$PM_DEVICE"
 
 ```sh
 mkdir -p "$HOME/.cargo/bin" "$HOME/.config/systemd/user"
-install -m 755 service/target/release/picomado-server "$HOME/.cargo/bin/picomado-server"
+service/deploy/install-server.sh
 cp -n service/deploy/picomado.service "$HOME/.config/systemd/user/picomado.service"
 systemctl --user daemon-reload
 systemctl --user enable --now picomado.service
 systemctl --user is-active picomado.service
 ```
 
-ユニットは `~/.cargo/bin/picomado-server` を参照します。`active` でなければ `systemctl --user status picomado.service` と TOML を確認します。信頼できる LAN から設定した IPv4 とポート `16153` を開きます。
+インストールスクリプトはサーバーと最新の `pic2gray4px` を `~/.cargo/bin` に置き、取得した Git コミットを同じ場所の `pic2gray4px-source.toml` に記録します。上流の取得・ビルドに失敗した場合はインストールを中止し、既存の実行ファイルを保持します。オフラインの新規導入には使えません。ユニットは `~/.cargo/bin/picomado-server` を参照します。`active` でなければ `systemctl --user status picomado.service` と TOML を確認します。信頼できる LAN から設定した IPv4 とポート `16153` を開きます。
 
 Pico W を BOOTSEL モードにし、`firmware/build/$PM_DEVICE/$PM_DEVICE.uf2` を `RPI-RP2` ドライブへコピーします。コピー後に自動で再起動します。HOME Wi-Fi、サーバー接続、画面表示、ボタンを個別に確認します。Flash ID ファイルや承認記録は不要です。
 
 ## 7. 既存端末を更新する場合
 
-新規導入の `cp -n` や新しい DB 作成に進まず、[更新前の退避](release-and-recovery.md#更新前の退避)から始めます。現在の実行ファイル、設定、SQLite DB、プラグインの `data/`、旧 UF2 を同じ時点の組合せで保存します。サーバと端末を一つずつ更新し、Web、HOME 接続、表示、入力を再確認します。失敗時は保存した組合せで復旧します。DB 本体だけを稼働中にコピーしないでください。
+新規導入の `cp -n` や新しい DB 作成に進まず、[更新前の退避](release-and-recovery.md#更新前の退避)から始めます。現在の実行ファイル、設定、SQLite DB、プラグインの `data/`、旧 UF2 を同じ時点の組合せで保存します。サーバーを再ビルドした後、同じ `service/deploy/install-server.sh` で上流 `pic2gray4px` も更新します。サーバと端末を一つずつ更新し、Web、HOME 接続、表示、入力を再確認します。失敗時は保存した組合せで復旧します。DB 本体だけを稼働中にコピーしないでください。
 
 ## 8. AWAY を使う場合
 

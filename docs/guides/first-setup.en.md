@@ -6,7 +6,7 @@ This guide assumes a Linux server and Raspberry Pi Pico W. Run its commands from
 
 ## 1. Prepare the tools
 
-Install [Rust and Cargo](https://rust-lang.org/tools/install/) for the server, and a C/C++ toolchain, CMake, Python 3.8 or newer, the [Pico SDK](https://www.raspberrypi.com/documentation/microcontrollers/c_sdk.html), and [picotool](https://github.com/raspberrypi/picotool/blob/master/BUILDING.md) for firmware. Follow Raspberry Pi's SDK instructions and set `PICO_SDK_PATH` to its actual location. Cargo downloads missing dependencies when you first build; `cargo fetch --locked --manifest-path service/Cargo.toml` can be used in advance if you want an offline build later.
+Install [Rust and Cargo](https://rust-lang.org/tools/install/) for the server, and a C/C++ toolchain, CMake, Python 3.8 or newer, the [Pico SDK](https://www.raspberrypi.com/documentation/microcontrollers/c_sdk.html), and [picotool](https://github.com/raspberrypi/picotool/blob/master/BUILDING.md) for firmware. Follow Raspberry Pi's SDK instructions and set `PICO_SDK_PATH` to its actual location. Cargo downloads missing dependencies when you first build; `cargo fetch --locked --manifest-path service/Cargo.toml` can be used in advance if you want an offline build later. The local image installer uses the same Cargo to fetch and build the public [pic2gray4px](https://github.com/tanep3/pic2gray4px) `main` branch over HTTPS. Installation needs network access.
 
 YouTube playback needs `yt-dlp`, FFmpeg and FFprobe; yt-dlp may also require a JavaScript runtime. The optional full test suite uses FFmpeg, FFprobe and `nice`.
 
@@ -60,20 +60,20 @@ For a new server installation:
 
 ```sh
 mkdir -p "$HOME/.cargo/bin" "$HOME/.config/systemd/user"
-install -m 755 service/target/release/picomado-server "$HOME/.cargo/bin/picomado-server"
+service/deploy/install-server.sh
 cp -n service/deploy/picomado.service "$HOME/.config/systemd/user/picomado.service"
 systemctl --user daemon-reload
 systemctl --user enable --now picomado.service
 systemctl --user is-active picomado.service
 ```
 
-The unit points to `~/.cargo/bin/picomado-server`. Expect `active`; otherwise inspect `systemctl --user status picomado.service` and your TOML configuration. Open the configured IPv4 and port `16153` on your trusted LAN.
+The installer puts the server and current `pic2gray4px` in `~/.cargo/bin` and records the fetched Git commit in `pic2gray4px-source.toml` beside them. If fetching or building upstream fails, installation stops and existing executables stay in place. A new installation cannot complete offline. The unit points to `~/.cargo/bin/picomado-server`. Expect `active`; otherwise inspect `systemctl --user status picomado.service` and your TOML configuration. Open the configured IPv4 and port `16153` on your trusted LAN.
 
 Put the Pico W in BOOTSEL mode, then copy `firmware/build/$PM_DEVICE/$PM_DEVICE.uf2` to the `RPI-RP2` drive. It restarts after the copy. Check HOME Wi-Fi, server connection, the display and, where present, buttons separately. No Flash ID file or approval record is required.
 
 ## 7. Updating an existing device
 
-Begin with [backup and recovery](release-and-recovery.en.md), not with the new-install copy commands. Keep a consistent copy of the old executable, config, SQLite database, plugin `data/`, and the old UF2. Never copy just a live SQLite DB file. Update the server and device in separate steps and repeat web, HOME connection, drawing and input checks. Restore the saved combination if the update fails.
+Begin with [backup and recovery](release-and-recovery.en.md), not with the new-install copy commands. Keep a consistent copy of the old executable, config, SQLite database, plugin `data/`, and the old UF2. Rebuild the server, then use the same `service/deploy/install-server.sh` to update upstream `pic2gray4px` too. Never copy just a live SQLite DB file. Update the server and device in separate steps and repeat web, HOME connection, drawing and input checks. Restore the saved combination if the update fails.
 
 ## 8. Optional AWAY connection
 
