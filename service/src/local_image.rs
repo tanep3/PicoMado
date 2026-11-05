@@ -12,7 +12,7 @@ use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::Cursor,
     path::{Path, PathBuf},
@@ -53,6 +53,10 @@ struct Prepared {
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct LocalImageContent {
     selected: Option<Prepared>,
+    #[serde(default)]
+    prepared: BTreeMap<String, Prepared>,
+    #[serde(default)]
+    selected_by_device: BTreeMap<String, String>,
     #[serde(skip)]
     imports: Vec<String>,
     #[serde(skip)]
@@ -64,7 +68,7 @@ pub struct LocalImageContent {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Work {
     Scan,
-    Prepare { name: String },
+    Prepare { name: String, #[serde(default)] device: Option<crate::DeviceToken> },
     Delete { name: String },
 }
 fn job(slot: &str, work: Work) -> JobRequest {
@@ -72,6 +76,13 @@ fn job(slot: &str, work: Work) -> JobRequest {
         slot: slot.into(),
         payload: serde_json::to_value(work).unwrap(),
         timeout_seconds: 90,
+    }
+}
+impl LocalImageContent {
+    fn for_device(&self, device_id: &str) -> Option<&Prepared> {
+        self.selected_by_device.get(device_id)
+            .and_then(|name| self.prepared.get(name))
+            .or(self.selected.as_ref())
     }
 }
 impl ContentPlugin for LocalImageContent {
@@ -97,15 +108,19 @@ impl ContentPlugin for LocalImageContent {
         Err(ContentError::Unsupported)
     }
     fn session_reset(&mut self, _: &str, _: u64) {}
-    fn delete_device(&mut self, _: &str) {}
-    fn current_frame(&self, _: &PluginContext) -> Option<Vec<u8>> {
-        Some(self.selected.as_ref().map_or_else(
+    fn delete_device(&mut self, device_id: &str) {
+        self.selected_by_device.remove(device_id);
+    }
+    fn current_frame(&self, ctx: &PluginContext) -> Option<Vec<u8>> {
+        Some(self.for_device(&ctx.token.device_id).map_or_else(
             || crate::lcd_text::status_frame("LOCAL IMAGE", "NO IMAGE"),
             |p| p.lcd.clone(),
         ))
     }
-    fn eink_frame_for(&self, _: &PluginContext, _: &[u8]) -> Option<Vec<u8>> {
-        self.selected.as_ref().map(|p| p.eink.clone())
+    fn eink_frame_for(&self, ctx: &PluginContext, lcd: &[u8]) -> Option<Vec<u8>> {
+        self.for_device(&ctx.token.device_id)
+            .filter(|p| p.lcd == lcd)
+            .map(|p| p.eink.clone())
     }
     fn save_state(&self) -> Value {
         serde_json::to_value(self).unwrap()
@@ -118,7 +133,7 @@ impl ContentPlugin for LocalImageContent {
         Ok(())
     }
     fn web_state(&self) -> Value {
-        json!({"imports":self.imports,"selected":self.selected.as_ref().map(|p|&p.name),"error":self.error})
+        json!({"imports":self.imports,"selected":self.selected.as_ref().map(|p|&p.name),"selected_by_device":self.selected_by_device,"error":self.error})
     }
     fn plan_schedule(
         &mut self,
@@ -135,7 +150,7 @@ impl ContentPlugin for LocalImageContent {
     }
     fn plan_command(
         &mut self,
-        _: &CommandContext,
+        ctx: &CommandContext,
         c: &Value,
     ) -> Result<PluginWorkPlan, ContentError> {
         let mut p = PluginWorkPlan::default();
@@ -147,8 +162,14 @@ impl ContentPlugin for LocalImageContent {
                 if !good_name(n) || !self.imports.iter().any(|s| s == n) {
                     return Err(ContentError::InvalidSource);
                 }
+                let device = c["device_id"].as_str().map(|id| {
+                    ctx.devices.iter().find(|d| d.context.token.device_id == id
+                        && (d.capabilities.contains("lcd") || d.capabilities.contains("eink")))
+                        .map(|d| crate::DeviceToken { device_id: id.into(), incarnation: d.context.token.incarnation })
+                        .ok_or(ContentError::InvalidSource)
+                }).transpose()?;
                 p.jobs
-                    .push(job("prepare", Work::Prepare { name: n.into() }));
+                    .push(job("prepare", Work::Prepare { name: n.into(), device }));
             }
             "delete" => {
                 let n = c["name"].as_str().ok_or(ContentError::InvalidSource)?;
@@ -166,7 +187,7 @@ impl ContentPlugin for LocalImageContent {
     }
     fn work_completed(
         &mut self,
-        _: &CommandContext,
+        ctx: &CommandContext,
         j: &PluginJob,
         o: &JobOutcome,
     ) -> Result<PluginWorkPlan, ContentError> {
@@ -178,7 +199,7 @@ impl ContentPlugin for LocalImageContent {
                 self.imports =
                     serde_json::from_value(v.clone()).map_err(|_| ContentError::InvalidSource)?
             }
-            (Work::Prepare { .. }, JobOutcome::Succeeded(v)) => {
+            (Work::Prepare { device, .. }, JobOutcome::Succeeded(v)) => {
                 let prepared: Prepared =
                     serde_json::from_value(v.clone()).map_err(|_| ContentError::InvalidSource)?;
                 if prepared.lcd.len() != crate::protocol::LCD_FRAME_BYTES
@@ -186,15 +207,32 @@ impl ContentPlugin for LocalImageContent {
                 {
                     return Err(ContentError::InvalidSource);
                 }
-                self.selected = Some(prepared);
+                if let Some(device) = device {
+                    if !ctx.devices.iter().any(|d| d.context.token.device_id == device.device_id
+                        && d.context.token.incarnation == device.incarnation) {
+                        return Ok(p);
+                    }
+                    self.selected_by_device.insert(device.device_id.clone(), prepared.name.clone());
+                    self.prepared.insert(prepared.name.clone(), prepared);
+                    p.refresh = RefreshTargets::Devices(vec![device]);
+                } else {
+                    self.selected = Some(prepared);
+                    p.refresh = RefreshTargets::Selected;
+                }
                 self.error = None;
-                p.refresh = RefreshTargets::Selected;
             }
             (Work::Delete { name }, JobOutcome::Succeeded(_)) => {
                 self.imports.retain(|n| n != &name);
+                self.prepared.remove(&name);
+                let affected: Vec<_> = ctx.devices.iter().filter(|d| self.selected_by_device
+                    .get(&d.context.token.device_id).is_some_and(|n| n == &name))
+                    .map(|d| crate::DeviceToken { device_id: d.context.token.device_id.clone(), incarnation: d.context.token.incarnation }).collect();
+                self.selected_by_device.retain(|_, n| n != &name);
                 if self.selected.as_ref().is_some_and(|s| s.name == name) {
                     self.selected = None;
                     p.refresh = RefreshTargets::Selected
+                } else if !affected.is_empty() {
+                    p.refresh = RefreshTargets::Devices(affected);
                 }
             }
             (_, JobOutcome::Failed(f)) => self.error = Some(f.message.clone()),
@@ -365,7 +403,7 @@ fn run(work: Work, paths: PluginPaths) -> Result<Value, String> {
             names.sort();
             Ok(json!(names))
         }
-        Work::Prepare { name } => Ok(json!(convert(&source(&dir, &name)?)?)),
+        Work::Prepare { name, .. } => Ok(json!(convert(&source(&dir, &name)?)?)),
         Work::Delete { name } => {
             let p = source(&dir, &name)?;
             fs::remove_file(p).map_err(|e| e.to_string())?;
@@ -376,6 +414,86 @@ fn run(work: Work, paths: PluginPaths) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugin_jobs::PluginDevice;
+    fn device(id: &str, capability: &str) -> PluginDevice {
+        PluginDevice {
+            context: PluginContext {
+                token: crate::SessionToken { device_id: id.into(), incarnation: 1, session_epoch: 1 },
+                settings_revision: 1,
+                mode: crate::Mode::Normal,
+            },
+            selected: Some("local-image".into()),
+            online: true,
+            capabilities: BTreeSet::from([capability.into()]),
+        }
+    }
+    fn command_context() -> CommandContext {
+        CommandContext {
+            now_unix: 0, now_mono_ms: 0, today_jst: "2026-11-05".into(),
+            settings: crate::settings::PluginSettings::default(),
+            devices: vec![device("lcd-a", "lcd"), device("eink-b", "eink")],
+        }
+    }
+    fn completed_prepare(content: &mut LocalImageContent, ctx: &CommandContext, name: &str, id: &str, color: u8) {
+        let plan = content.plan_command(ctx, &json!({"kind":"prepare","name":name,"device_id":id})).unwrap();
+        let job = PluginJob {
+            token: crate::plugin_jobs::JobToken { plugin: "local-image".into(), slot: "prepare".into(), generation: 1 },
+            payload: plan.jobs[0].payload.clone(), timeout_seconds: 90, created_unix: 0,
+        };
+        let prepared = Prepared { name: name.into(), lcd: vec![color; crate::protocol::LCD_FRAME_BYTES], eink: vec![color; crate::eink::FRAME_BYTES] };
+        content.work_completed(ctx, &job, &JobOutcome::Succeeded(json!(prepared))).unwrap();
+    }
+    #[test]
+    fn separate_devices_restore_and_remove_only_their_own_image() {
+        let ctx = command_context();
+        let mut content = LocalImageContent { imports: vec!["one.png".into(), "two.png".into()], ..Default::default() };
+        completed_prepare(&mut content, &ctx, "one.png", "lcd-a", 1);
+        completed_prepare(&mut content, &ctx, "two.png", "eink-b", 2);
+        assert_eq!(content.current_frame(&ctx.devices[0].context).unwrap()[0], 1);
+        assert_eq!(content.current_frame(&ctx.devices[1].context).unwrap()[0], 2);
+        assert_eq!(content.eink_frame_for(&ctx.devices[1].context, &content.current_frame(&ctx.devices[1].context).unwrap()).unwrap()[0], 2);
+        let mut restored = LocalImageContent::default();
+        restored.load_state(content.save_state()).unwrap();
+        assert_eq!(restored.current_frame(&ctx.devices[0].context).unwrap()[0], 1);
+        assert_eq!(restored.current_frame(&ctx.devices[1].context).unwrap()[0], 2);
+        assert!(!restored.selected_by_device.contains_key("new-device"));
+        restored.imports = vec!["one.png".into(), "two.png".into()]; // startup scan
+        let mut with_new = command_context();
+        with_new.devices.push(device("lcd-c", "lcd"));
+        completed_prepare(&mut restored, &with_new, "one.png", "lcd-c", 3);
+        assert_eq!(restored.current_frame(&with_new.devices[2].context).unwrap()[0], 3);
+        assert_eq!(restored.current_frame(&ctx.devices[1].context).unwrap()[0], 2);
+        restored.delete_device("lcd-a");
+        assert!(!restored.selected_by_device.contains_key("lcd-a"));
+        assert_eq!(restored.current_frame(&ctx.devices[1].context).unwrap()[0], 2);
+    }
+    #[test]
+    fn deleted_image_and_replaced_device_do_not_keep_assignments() {
+        let ctx = command_context();
+        let mut content = LocalImageContent { imports: vec!["one.png".into(), "two.png".into()], ..Default::default() };
+        completed_prepare(&mut content, &ctx, "one.png", "lcd-a", 1);
+        completed_prepare(&mut content, &ctx, "two.png", "eink-b", 2);
+        let job = PluginJob {
+            token: crate::plugin_jobs::JobToken { plugin: "local-image".into(), slot: "delete".into(), generation: 2 },
+            payload: json!({"kind":"delete","name":"one.png"}), timeout_seconds: 90, created_unix: 0,
+        };
+        content.work_completed(&ctx, &job, &JobOutcome::Succeeded(Value::Null)).unwrap();
+        assert!(!content.selected_by_device.contains_key("lcd-a"));
+        assert!(!content.prepared.contains_key("one.png"));
+        assert_eq!(content.current_frame(&ctx.devices[1].context).unwrap()[0], 2);
+        let mut replaced = command_context();
+        replaced.devices[1].context.token.incarnation = 2;
+        let plan = content.plan_command(&ctx, &json!({"kind":"prepare","name":"two.png","device_id":"eink-b"})).unwrap();
+        let pending = PluginJob {
+            token: crate::plugin_jobs::JobToken { plugin: "local-image".into(), slot: "prepare".into(), generation: 3 },
+            payload: plan.jobs[0].payload.clone(), timeout_seconds: 90, created_unix: 0,
+        };
+        content.delete_device("eink-b");
+        let prepared = Prepared { name: "two.png".into(), lcd: vec![3; crate::protocol::LCD_FRAME_BYTES], eink: vec![3; crate::eink::FRAME_BYTES] };
+        content.work_completed(&replaced, &pending, &JobOutcome::Succeeded(json!(prepared))).unwrap();
+        assert!(!content.selected_by_device.contains_key("eink-b"));
+        assert!(content.plan_command(&replaced, &json!({"kind":"prepare","name":"two.png","device_id":"missing"})).is_err());
+    }
     #[test]
     fn crop_and_names() {
         assert!(!good_name("../evil.png"));

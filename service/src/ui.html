@@ -438,7 +438,22 @@
     function renderLocalImage(data){
       const panel=section('ローカル画像','中心で画面比率に切り抜きます。端の文字や被写体は欠ける場合があります。','plugin-card');
       jobsPanel('local-image',panel);if(data.error){panel.append(el('p',data.error,'error'));if(data.error.includes('pic2gray4px')){const guide=el('a','pic2gray4px の公開リポジトリと導入方法');guide.href='https://github.com/tanep3/pic2gray4px';guide.target='_blank';guide.rel='noopener noreferrer';panel.append(guide)}}
-      panel.append(el('p',data.selected?`表示中: ${data.selected}`:'画像は未選択'));
+      const targets=current.devices.filter(d=>d.capabilities.includes('lcd')||d.capabilities.includes('eink'));
+      const assignments=section('端末ごとの画像','各端末で違う画像を選べます。','subsection');
+      for(const device of targets){
+        const row=el('div',undefined,'location-row'),label=el('label',undefined,'field'),select=el('select');
+        label.append(el('span',`${device.id} · ${device.online?'オンライン':'オフライン'}`));
+        for(const name of data.imports||[]){const option=el('option',name);option.value=name;select.append(option)}
+        const chosen=data.selected_by_device?.[device.id]||data.selected;
+        if(chosen&&(data.imports||[]).includes(chosen))select.value=chosen;
+        const show=button('変換して表示','primary');show.disabled=!data.imports?.length;
+        show.onclick=()=>managedCommand('local-image',{kind:'prepare',name:select.value,device_id:device.id});
+        label.append(select);row.append(label,show);
+        row.append(el('small',chosen?`現在: ${chosen}`:'画像は未選択'));
+        assignments.append(row);
+      }
+      if(!targets.length)assignments.append(el('p','対応する端末はありません。','empty'));
+      panel.append(assignments);
       const uploadForm=el('form',undefined,'subsection'),file=el('input');file.type='file';file.accept='image/png,image/jpeg,image/webp';file.required=true;
       const upload=button('アップロード','primary');upload.type='submit';uploadForm.append(el('p','画像をアップロード（20 MiB 以下）'),file,upload);
       uploadForm.onsubmit=async event=>{event.preventDefault();if(!uploadForm.reportValidity())return;const selected=file.files?.[0];if(!selected)return;
@@ -447,8 +462,7 @@
       panel.append(uploadForm);
       const scan=button('ファイル一覧を更新');scan.onclick=()=>managedCommand('local-image',{kind:'scan'});panel.append(scan);
       for(const name of data.imports||[]){const row=el('article',undefined,'device-card');row.append(el('h3',name));const actions=el('div',undefined,'actions');
-        const show=button('変換して表示','primary');show.onclick=()=>managedCommand('local-image',{kind:'prepare',name});
-        const remove=button('原本と履歴を削除','danger');remove.onclick=()=>{if(confirm(`「${name}」を削除しますか？`))managedCommand('local-image',{kind:'delete',name,confirmation:name})};actions.append(show,remove);row.append(actions);panel.append(row)}
+        const remove=button('原本と履歴を削除','danger');remove.onclick=()=>{if(confirm(`「${name}」を削除しますか？`))managedCommand('local-image',{kind:'delete',name,confirmation:name})};actions.append(remove);row.append(actions);panel.append(row)}
       if(!data.imports?.length)panel.append(el('p','アップロード済み画像はありません。','empty'));
     }
     function renderManaged(id){
