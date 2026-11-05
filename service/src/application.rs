@@ -1652,6 +1652,37 @@ impl App {
             .unwrap_or(false)
     }
 
+    pub(super) fn queue_eink_video(&mut self, session: &SessionToken, plugin: &str,
+        settings: crate::eink_video::Settings, partial: bool, source_fps: u32,
+        sequence: u64, generation: u64, mono: &[u8]) -> Result<(),AppError> {
+        if mono.len()!=crate::eink::FRAME_BYTES || !settings.valid() || source_fps==0 || source_fps>30 {
+            return Err(AppError::Invalid("invalid E-ink video frame"));
+        }
+        let d=self.runtime.world.devices.get(&session.device_id).ok_or(AppError::NotFound)?;
+        if !session_current(d,session) || !d.capabilities.contains("eink") || d.capabilities.contains("lcd")
+            || d.selected.as_deref()!=Some(plugin) || !matches!(d.mode,Mode::Normal|Mode::Sub) {
+            return Err(AppError::Conflict("E-ink video no longer selected"));
+        }
+        self.subscribe_lcd_video(session).ok_or(AppError::Conflict("E-ink latest unavailable"))?;
+        let d=&self.runtime.world.devices[&session.device_id];
+        let frame_id={let mut counter=self.frame_counter.lock().map_err(|_|AppError::Conflict("frame allocator unavailable"))?;
+            let id=*counter;*counter=counter.checked_add(1).ok_or(AppError::Conflict("frame counter exhausted"))?;id};
+        let token=FrameToken{device_id:session.device_id.clone(),incarnation:d.incarnation,session_epoch:d.session_epoch,
+            display_epoch:d.display_epoch,screen_owner_epoch:d.screen_owner_epoch,frame_id};
+        let mut pixels=mono.to_vec();
+        if d.mode==Mode::Sub {crate::eink::draw_sub(&mut pixels);}
+        let interval=source_fps.saturating_mul(u32::from(settings.full_refresh_seconds));
+        let eink_refresh=if partial && d.capabilities.contains(crate::protocol::EINK_VIDEO_CAPABILITY) {
+            Some(crate::protocol::EinkRefresh{full_refresh_minutes:0,minute:0,
+                video:Some(crate::protocol::EinkVideoRefresh{full_refresh_frames:interval as u16,frame:sequence})})
+        }else{None};
+        let slot=self.video_slots.get(&session.device_id).ok_or(AppError::Conflict("E-ink video slot unavailable"))?;
+        let mut slot=slot.lock().map_err(|_|AppError::Conflict("E-ink video slot unavailable"))?;
+        if slot.session!=*session{return Err(AppError::Conflict("stale E-ink video slot"));}
+        slot.publish(crate::lcd_stream::VideoFrame{token,delivery:crate::lcd_stream::DeliveryKind::Ordinary,
+            fps:0,sequence,generation,mode:if d.mode==Mode::Sub{"sub"}else{"normal"},eink_refresh,pixels:Arc::new(pixels)});
+        Ok(())
+    }
     pub(super) fn queue_lcd_video(&mut self,session:&SessionToken,fps:u32,sequence:u64,generation:u64,pixels:Vec<u8>)->Result<(),AppError>{
         self.subscribe_lcd_video(session).ok_or(AppError::Invalid("unsupported LCD stream"))?;
         {let mut counter=self.frame_counter.lock().map_err(|_|AppError::Conflict("frame allocator unavailable"))?;*counter=(*counter).max(self.runtime.world.next_frame_id);}
@@ -2474,7 +2505,7 @@ mod tests {
                     started_mono_ms: 0,
                     source: serde_json::Value::Null,
                 },
-                targets: vec![PlaybackTarget { token: target }],
+                targets: vec![PlaybackTarget { token: target, eink: None, eink_partial: false }],
             };
             assert_eq!(
                 app.accept_playback_pixels(&offer, vec![0; 25600]).unwrap(),
@@ -3525,6 +3556,31 @@ mod clock_tests {
             app.button(&t, ButtonAction::Next).unwrap();
             assert!(app.frame_eink_refresh(&delivery(&app, id).0).is_none());
         }
+    }
+
+    #[test]
+    fn video_refresh_limit_persists_independently_for_both_plugins() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("db");
+        let mut app = App::open(&path).unwrap();
+        let token = app.hello("paper", ["eink".into()].into(), 1).unwrap();
+        assert_eq!(app.plugin_device_config("paper", "local-video").unwrap()["full_refresh_seconds"],30);
+        assert_eq!(app.plugin_device_config("paper", "youtube").unwrap()["full_refresh_seconds"],5);
+        for (plugin, seconds) in [("youtube", 20), ("local-video", 5)] {
+            let config = serde_json::json!({"fps": 2, "full_refresh_seconds": seconds,
+                "auto_preprocess": plugin == "local-video"});
+            assert_eq!(app.set_plugin_device_config("paper", token.incarnation, plugin, 1, config).unwrap(), 2);
+            assert!(app.set_plugin_device_config("paper", token.incarnation, plugin, 2,
+                serde_json::json!({"fps": 2, "full_refresh_seconds": 31})).is_err());
+            assert_eq!(app.plugin_device_config("paper", plugin).unwrap()["full_refresh_seconds"], seconds);
+            assert_eq!(app.plugin_device_config("paper", plugin).unwrap()["auto_preprocess"], plugin == "local-video");
+        }
+        drop(app);
+        let app = App::open(&path).unwrap();
+        assert_eq!(app.plugin_device_config("paper", "youtube").unwrap()["full_refresh_seconds"], 20);
+        assert_eq!(app.plugin_device_config("paper", "local-video").unwrap()["full_refresh_seconds"], 5);
+        assert_eq!(app.plugin_device_config("paper", "youtube").unwrap()["auto_preprocess"], false);
+        assert_eq!(app.plugin_device_config("paper", "local-video").unwrap()["auto_preprocess"], true);
     }
 
     #[test]

@@ -7,6 +7,7 @@
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
 static bool panel_result,radio_fixture_panel_busy;
 bool pm_display_clock_frame(uint8_t *p,size_t n,unsigned m,uint64_t minute,bool reset){(void)m;(void)minute;(void)reset;return pm_display_frame(p,n);}
+bool pm_display_video_frame(uint8_t *p,size_t n,unsigned frames,uint64_t frame,bool reset){(void)frames;(void)frame;(void)reset;return pm_display_frame(p,n);}
 void pm_display_poll(void){}
 bool pm_display_busy(void){return radio_fixture_panel_busy;}
 bool pm_display_take_result(bool *ok){if(!panel_result)return false;panel_result=false;*ok=true;return true;}

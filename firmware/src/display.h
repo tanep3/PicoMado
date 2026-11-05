@@ -30,4 +30,6 @@ bool pm_display_take_result(bool *succeeded);
 // Clock-only opt-in; all ordinary plugin/local frames remain full refreshes.
 bool pm_display_clock_frame(uint8_t *pixels, size_t length, unsigned minutes,
                             uint64_t minute, bool reset_base);
+bool pm_display_video_frame(uint8_t *pixels, size_t length, unsigned full_refresh_frames,
+                           uint64_t frame, bool reset_base);
 #endif

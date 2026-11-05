@@ -222,10 +222,20 @@ impl Application {
         };
         guard.refresh_timed_frames()
     }
+    #[cfg(test)]
     pub(crate) fn accept_playback_pixels_at(
         &self,
         offer: &crate::application::PlaybackOffer,
         pixels: Vec<u8>,
+        sequence: u64,
+    ) -> Result<usize, AppError> {
+        self.accept_playback_pixels_with_eink_at(offer,pixels,None,sequence)
+    }
+    pub(crate) fn accept_playback_pixels_with_eink_at(
+        &self,
+        offer: &crate::application::PlaybackOffer,
+        pixels: Vec<u8>,
+        eink_pixels: Option<&[u8]>,
         sequence: u64,
     ) -> Result<usize, AppError> {
         if pixels.len() != crate::protocol::LCD_FRAME_BYTES {
@@ -246,7 +256,7 @@ impl Application {
                 let Some(ctx) = view.playback_target_context(offer, target) else {
                     continue;
                 };
-                if view.supports_lcd_push(&ctx.token)
+                if target.eink.is_none() && view.supports_lcd_push(&ctx.token)
                     && offer.spec.fps <= crate::lcd_stream::MAX_FPS
                 {
                     view.queue_published_lcd_video(
@@ -277,7 +287,7 @@ impl Application {
                 app: Some(app),
                 modified: false,
             };
-            delivered += guard.accept_playback_pixels_at(&legacy, pixels, sequence)?;
+            delivered += guard.accept_playback_pixels_with_eink_at(&legacy, pixels, eink_pixels, sequence)?;
         }
         Ok(delivered)
     }

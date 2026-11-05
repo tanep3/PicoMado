@@ -26,6 +26,8 @@ pub struct PluginWebView {
 #[derive(Clone, Debug)]
 pub struct PlaybackTarget {
     pub token: crate::DisplayToken,
+    pub eink: Option<crate::eink_video::Settings>,
+    pub eink_partial: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -409,6 +411,9 @@ impl App {
             }
             let target = PlaybackTarget {
                 token: crate::display_token(id, device),
+                eink: (device.capabilities.contains("eink") && !device.capabilities.contains("lcd"))
+                    .then(|| self.contents.get(plugin).and_then(|p|p.eink_video_settings(&ctx))).flatten(),
+                eink_partial: device.capabilities.contains(crate::protocol::EINK_VIDEO_CAPABILITY),
             };
             if let Some(offer) = offers
                 .iter_mut()
@@ -504,6 +509,15 @@ impl App {
         pixels: Vec<u8>,
         sequence: u64,
     ) -> Result<usize, AppError> {
+        self.accept_playback_pixels_with_eink_at(offer, pixels, None, sequence)
+    }
+    pub fn accept_playback_pixels_with_eink_at(
+        &mut self,
+        offer: &PlaybackOffer,
+        pixels: Vec<u8>,
+        eink_pixels: Option<&[u8]>,
+        sequence: u64,
+    ) -> Result<usize, AppError> {
         if pixels.len() != crate::protocol::LCD_FRAME_BYTES {
             return Err(AppError::Invalid("invalid playback frame"));
         }
@@ -531,7 +545,11 @@ impl App {
             {
                 continue;
             }
-            if self.supports_lcd_push(&ctx.token) && offer.spec.fps <= crate::lcd_stream::MAX_FPS {
+            if let Some(settings) = target.eink {
+                let Some(mono) = eink_pixels else { continue; };
+                self.queue_eink_video(&ctx.token, &offer.plugin, settings, target.eink_partial,
+                    offer.spec.fps, sequence, offer.spec.generation, mono)?;
+            } else if self.supports_lcd_push(&ctx.token) && offer.spec.fps <= crate::lcd_stream::MAX_FPS {
                 self.queue_lcd_video(
                     &ctx.token,
                     offer.spec.fps,
@@ -559,6 +577,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct FakeContent {
         value: u64,
+        eink_video: bool,
     }
     impl ContentPlugin for FakeContent {
         fn clone_box(&self) -> Box<dyn ContentPlugin> {
@@ -566,6 +585,9 @@ mod tests {
         }
         fn id(&self) -> &'static str {
             "youtube"
+        }
+        fn eink_video_settings(&self, _: &PluginContext) -> Option<crate::eink_video::Settings> {
+            self.eink_video.then_some(crate::eink_video::Settings::default())
         }
         fn publish(
             &mut self,
@@ -711,6 +733,43 @@ mod tests {
     }
 
     #[test]
+    fn eink_video_offer_uses_mono_latest_and_negotiates_partial_refresh() {
+        for partial in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let mut app = App::open(&temp.path().join("state.db")).unwrap();
+            app.contents.insert("youtube".into(), Box::new(FakeContent {
+                eink_video: true,
+                ..Default::default()
+            }));
+            let mut caps = std::collections::BTreeSet::from([
+                "eink".into(), crate::protocol::FRAME_BYTES_CAPABILITY.into(),
+            ]);
+            if partial { caps.insert(crate::protocol::EINK_VIDEO_CAPABILITY.into()); }
+            let session = app.hello("paper", caps, 1).unwrap();
+            let offer = app.playback_offers().remove(0);
+            assert_eq!(offer.targets[0].eink, Some(crate::eink_video::Settings::default()));
+            assert_eq!(offer.targets[0].eink_partial, partial);
+            let mono = vec![0xa5; crate::eink::FRAME_BYTES];
+            assert_eq!(app.accept_playback_pixels_with_eink_at(
+                &offer, vec![0xff; crate::protocol::LCD_FRAME_BYTES], Some(&mono), 30,
+            ).unwrap(), 1);
+            let mut rx = app.subscribe_lcd_video(&session).unwrap();
+            let frame = rx.borrow_and_update().clone().unwrap();
+            assert_eq!(frame.delivery, crate::lcd_stream::DeliveryKind::Ordinary);
+            assert_eq!(frame.pixels.as_slice(), &mono);
+            assert_eq!(frame.sequence, 30);
+            assert_eq!(frame.eink_refresh.as_ref().and_then(|p| p.video.as_ref())
+                .map(|p| (p.full_refresh_frames, p.frame)),
+                partial.then_some((30, 30)));
+            app.terminal_event(Event::Next { token: session }).unwrap();
+            assert!(!app.lcd_video_is_current(&frame));
+            assert_eq!(app.accept_playback_pixels_with_eink_at(
+                &offer, vec![0xff; crate::protocol::LCD_FRAME_BYTES], Some(&mono), 31,
+            ).unwrap(), 0);
+        }
+    }
+
+    #[test]
     fn durable_generation_rejects_replaced_results_and_preserves_revision() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("state.db");
@@ -828,7 +887,7 @@ mod tests {
             .unwrap());
         let old_read = app.playback_offers().remove(0);
         app.contents
-            .insert("youtube".into(), Box::new(FakeContent { value: 1 }));
+            .insert("youtube".into(), Box::new(FakeContent { value: 1, ..Default::default() }));
         assert_eq!(
             app.accept_playback_pixels(&old_read, vec![3; crate::protocol::LCD_FRAME_BYTES])
                 .unwrap(),

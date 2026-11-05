@@ -227,6 +227,7 @@ impl ContentPlugin for ClockContent {
                 ["full_refresh_minutes"]
                 .as_u64()? as u16,
             minute: u64::try_from(self.time(ctx)?.div_euclid(60)).ok()?,
+            video: None,
         })
     }
     fn time_key(&self, _: &PluginContext, now: i64) -> Option<i64> {

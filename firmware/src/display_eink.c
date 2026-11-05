@@ -40,6 +40,10 @@ static void byte(bool data,uint8_t value){
 }
 static void cmd(uint8_t value){byte(false,value);}
 static void data(uint8_t value){byte(true,value);}
+static void ram_data(const uint8_t *values,size_t length){
+    gpio_put(PM_EINK_PIN_DC,1);gpio_put(PM_EINK_PIN_CS,0);
+    spi_write_blocking(spi1,values,length);gpio_put(PM_EINK_PIN_CS,1);
+}
 static void cancel_feedback_preparation(void){
     // RAM writes and reset have no visible effect until command 0x20. A real
     // frame will start with its own full reset, so it can supersede these jobs.
@@ -105,11 +109,17 @@ bool pm_display_frame(uint8_t *pixels,size_t length){
     memcpy(queued,pixels,length);queued_job=REMOTE;status_valid=false;queued_clock=false;
     queued_frame_context=pm_trace_current_frame();return true;
 }
-bool pm_display_clock_frame(uint8_t *pixels,size_t length,unsigned minutes,uint64_t minute,bool reset_base){
-    if(minutes<1 || minutes>60 || !pm_display_frame(pixels,length))return false;
-    queued_clock=true;queued_minutes=minutes;queued_minute=minute;
+static bool periodic_frame(uint8_t *pixels,size_t length,unsigned period,uint64_t tick,bool reset_base){
+    if(!pm_display_frame(pixels,length))return false;
+    queued_clock=true;queued_minutes=period;queued_minute=tick;
     if(reset_base)clock_base_valid=false;
     return true;
+}
+bool pm_display_clock_frame(uint8_t *pixels,size_t length,unsigned minutes,uint64_t minute,bool reset_base){
+    return minutes>=1 && minutes<=60 && periodic_frame(pixels,length,minutes,minute,reset_base);
+}
+bool pm_display_video_frame(uint8_t *pixels,size_t length,unsigned frames,uint64_t frame,bool reset_base){
+    return frames>=1 && frames<=1800 && periodic_frame(pixels,length,frames,frame,reset_base);
 }
 bool pm_display_busy(void){return stage!=IDLE || queued_job!=NONE || (!stopped && feedback_requested && !feedback_visible);}
 bool pm_display_take_result(bool *ok){
@@ -171,7 +181,12 @@ void pm_display_poll(void){
             pm_trace_event(PM_TRACE_SPI_BEGIN,active_frame_context,0,0);
         }break;
     case WRITE_RAM:case WRITE_BASE:
-        for(unsigned n=0;n<128 && ram_offset<sizeof ram;n++)data(ram[ram_offset++]);
+        {
+            size_t remaining=sizeof ram-ram_offset;
+            size_t count=remaining<512?remaining:512;
+            ram_data(ram+ram_offset,count);
+            ram_offset+=(unsigned)count;
+        }
         if(ram_offset==sizeof ram){
             if(stage==WRITE_RAM && active_clock && !partial_update){
                 // Display_Base writes the same image to old/new RAM before f7.

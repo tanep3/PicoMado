@@ -29,7 +29,7 @@ impl Plugin for LocalVideoPlugin {
         "local-video"
     }
     fn supports(&self, caps: &BTreeSet<Capability>) -> bool {
-        caps.contains("lcd")
+        caps.contains("lcd") || caps.contains("eink")
     }
     fn candidates<'a>(
         &'a self,
@@ -55,6 +55,8 @@ pub struct LocalVideoContent {
     next_generation: u64,
     pending: Option<u64>,
     error: Option<String>,
+    #[serde(default)]
+    eink_video: crate::eink_video::ConfigStore,
     #[serde(skip)]
     validated: bool,
     #[serde(skip)]
@@ -70,6 +72,7 @@ impl Default for LocalVideoContent {
             next_generation: 1,
             pending: None,
             error: None,
+            eink_video: Default::default(),
             validated: false,
             imports: Vec::new(),
             bootstrap_scheduled: false,
@@ -155,7 +158,21 @@ impl ContentPlugin for LocalVideoContent {
         Err(ContentError::Unsupported)
     }
     fn session_reset(&mut self, _: &str, _: u64) {}
-    fn delete_device(&mut self, _: &str) {}
+    fn delete_device(&mut self, id: &str) { self.eink_video.remove(id); }
+    fn eink_video_settings(&self, ctx: &PluginContext) -> Option<crate::eink_video::Settings> {
+        Some(self.eink_video.get_with_default(&ctx.token.device_id, ctx.token.incarnation,
+            crate::eink_video::Settings::local_video_default()).1)
+    }
+    fn device_config(&self, id: &str, incarnation: u64) -> Value {
+        let (revision, settings)=self.eink_video.get_with_default(id,incarnation,
+            crate::eink_video::Settings::local_video_default());
+        json!({"revision":revision,"fps":settings.fps,"full_refresh_seconds":settings.full_refresh_seconds,"auto_preprocess":settings.auto_preprocess})
+    }
+    fn set_device_config(&mut self, ctx: &PluginContext, expected: u64, config: Value) -> Result<u64, ContentError> {
+        let settings: crate::eink_video::Settings=serde_json::from_value(config).map_err(|_|ContentError::InvalidSource)?;
+        self.eink_video.set_with_default(&ctx.token.device_id,ctx.token.incarnation,expected,settings,
+            crate::eink_video::Settings::local_video_default())
+    }
     fn current_frame(&self, _: &PluginContext) -> Option<Vec<u8>> {
         if self.validated && self.active.is_some() {
             return None;
@@ -179,6 +196,7 @@ impl ContentPlugin for LocalVideoContent {
             return Ok(());
         }
         *self = serde_json::from_value(value).map_err(|_| ContentError::InvalidSource)?;
+        if !self.eink_video.valid() { return Err(ContentError::InvalidSource); }
         self.validated = false;
         self.bootstrap_scheduled = false;
         Ok(())

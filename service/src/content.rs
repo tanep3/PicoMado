@@ -204,6 +204,9 @@ pub trait ContentPlugin: Send + Sync {
     fn device_config(&self, _device_id: &str, _incarnation: u64) -> Value {
         Value::Null
     }
+    fn eink_video_settings(&self, _ctx: &PluginContext) -> Option<crate::eink_video::Settings> {
+        None
+    }
     fn set_device_config(
         &mut self,
         _ctx: &PluginContext,

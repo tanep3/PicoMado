@@ -13,7 +13,7 @@ static bool busy,cs=true,dc;
 static uint8_t command,output[4000],old_output[4000],update_mode;
 static size_t old_written;
 static unsigned full_refreshes,partial_refreshes,soft_resets;
-static size_t written,writes;
+static size_t written,writes,ram_bursts;
 static unsigned sleeping,refreshes,gpio_inits[30];
 #if PM_TRACE_ENABLE
 static uint64_t test_frame_context,spi_frames[8];
@@ -39,14 +39,15 @@ bool gpio_get(uint p){assert(p==13);return busy;}
 unsigned spi_init(spi_inst_t *s,unsigned baud){assert(s==spi1&&baud==4000000);return baud;}
 void spi_set_format(spi_inst_t *s,int bits,int cp,int ph,int order){assert(s==spi1&&bits==8&&!cp&&!ph&&!order);}
 int spi_write_blocking(spi_inst_t *s,const uint8_t *p,size_t n){
-    assert(s==spi1&&!cs&&n==1);writes++;
-    if(!dc){command=*p;if(command==0x24)written=0;if(command==0x26)old_written=0;
+    assert(s==spi1&&!cs&&n>=1&&n<=512);writes++;
+    if(n>1){assert(dc&&(command==0x24||command==0x26));ram_bursts++;}
+    if(!dc){assert(n==1);command=*p;if(command==0x24)written=0;if(command==0x26)old_written=0;
         if(command==0x12)soft_resets++;
         if(command==0x20){refreshes++;if(update_mode==0xf7)full_refreshes++;else {assert(update_mode==0xff);partial_refreshes++;}}}
-    else if(command==0x24){assert(written<sizeof output);output[written++]=*p;}
-    else if(command==0x26){assert(old_written<sizeof old_output);old_output[old_written++]=*p;}
-    else if(command==0x22){update_mode=*p;}
-    else if(command==0x10){assert(*p==1);sleeping++;}
+    else if(command==0x24){assert(written+n<=sizeof output);memcpy(output+written,p,n);written+=n;}
+    else if(command==0x26){assert(old_written+n<=sizeof old_output);memcpy(old_output+old_written,p,n);old_written+=n;}
+    else if(command==0x22){assert(n==1);update_mode=*p;}
+    else if(command==0x10){assert(n==1&&*p==1);sleeping++;}
     return (int)n;
 }
 static void poll_for(unsigned ms){
@@ -74,7 +75,7 @@ int main(void){
     assert(!pm_display_take_result(&ok));
     poll_for(1000);assert(!pm_display_busy());assert(pm_display_take_result(&ok));
     if(PM_EINK_PANEL_CONNECTED){
-        assert(ok&&written==4000&&refreshes==1&&sleeping==1);
+        assert(ok&&written==4000&&refreshes==1&&sleeping==1&&ram_bursts==8);
         assert(!memcmp(expected,output,4000));
         pm_display_standby();size_t before=writes;
         pm_display_status("WIFI","CONNECTING");poll_for(1000);
@@ -132,6 +133,16 @@ int main(void){
         poll_for(PM_EINK_BUSY_TIMEOUT_MS+100);assert(pm_display_take_result(&ok)&&!ok);busy=false;
         assert(pm_display_clock_frame(pixels,sizeof pixels,15,104,false));poll_for(1000);
         assert(pm_display_take_result(&ok)&&ok&&full_refreshes==full_before+9);
+        // Video uses frame sequence units; an initial base, partial frames,
+        // and a full refresh at the configured sequence interval.
+        unsigned video_full=full_refreshes,video_partial=partial_refreshes;
+        assert(!pm_display_video_frame(pixels,sizeof pixels,0,0,true));
+        assert(pm_display_video_frame(pixels,sizeof pixels,10,0,true));poll_for(1000);
+        assert(pm_display_take_result(&ok)&&ok&&full_refreshes==video_full+1);
+        assert(pm_display_video_frame(pixels,sizeof pixels,10,1,false));poll_for(1000);
+        assert(pm_display_take_result(&ok)&&ok&&partial_refreshes==video_partial+1);
+        assert(pm_display_video_frame(pixels,sizeof pixels,10,10,false));poll_for(1000);
+        assert(pm_display_take_result(&ok)&&ok&&full_refreshes==video_full+2);
 #if PM_TRACE_ENABLE
         // A queued remote image cannot relabel the active local SPI transfer.
         capture_spi=true;spi_frame_count=0;test_frame_context=0;
@@ -148,5 +159,5 @@ int main(void){
 #endif
         puts("clock: V4 base/partial/full interval, old/new RAM, no SWRESET/deep sleep during partial, other-plugin isolation, reset/wake/timeout recovery PASS");
     }else assert(!ok&&writes==0);
-    puts("eink: mono mapping/padding, byte-CS full refresh, bounded poll/BUSY timeout, retained standby, absent-panel PASS");
+    puts("eink: mono mapping/padding, bounded RAM SPI bursts, poll/BUSY timeout, retained standby, absent-panel PASS");
 }

@@ -46,6 +46,7 @@
     .danger-zone{margin-top:34px;padding:18px;border:1px solid #5a3d45;border-radius:11px;background:#241d27}.danger-zone summary{cursor:pointer;color:#ffd3d7;font-size:.85rem;font-weight:750}.danger-zone p{margin:12px 0;color:#c5adb2;font-size:.83rem}
     .empty{padding:24px;border:1px dashed #435567;border-radius:10px;color:#9cabb9;text-align:center}
     .plugin-card{max-width:820px}.plugin-breadcrumb{margin-bottom:15px;color:#8da6b8;font-size:.85rem}.plugin-breadcrumb a{color:#86dfd5}.plugin-breadcrumb a:hover{text-decoration:underline}
+    .video-settings>summary{cursor:pointer;font-size:1.05rem;font-weight:750}.video-settings>p{color:#a9b8c8}.video-settings .location-row{margin-top:12px}
     .plugin-note{margin:0 0 22px;color:#a9b8c8;font-size:.9rem}.location-list{display:grid;gap:12px;margin-top:15px}.location-row{display:grid;grid-template-columns:minmax(130px,1fr) minmax(220px,2.2fr) auto;align-items:end;gap:12px;padding:15px;border:1px solid #354657;border-radius:11px;background:#1d2a37}.location-name{padding-bottom:9px;font-weight:700}.location-name small{display:block;color:#95a9b9;font-weight:500}
     dialog{width:min(100% - 32px,480px);padding:0;border:1px solid #70535a;border-radius:16px;background:#1a222d;color:#edf2f6;box-shadow:0 28px 100px #000b} dialog::backdrop{background:#03070bc9;backdrop-filter:blur(4px)}.dialog-body{padding:26px}.dialog-body h2{color:#ffe2e4}.dialog-body p{color:#b9c8d3;font-size:.9rem}.dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}.dialog-actions .secondary{margin-right:auto}
     @media(max-width:700px){.topbar{display:block;padding:16px 0 9px}.brand{margin-bottom:13px}nav{margin:0 -7px}nav a{padding:9px 10px}.hero{padding:33px 0 23px}.panel{border-radius:15px}.device-card{padding:18px}.location-row{grid-template-columns:1fr}.location-name{padding:0}.location-row .button{width:100%}}
@@ -381,6 +382,31 @@
         else{input.disabled=false;preview()}
       };
     }
+    function renderEinkVideoControls(plugin){
+      const devices=current.devices.filter(d=>d.capabilities.includes('eink')&&!d.capabilities.includes('lcd'));
+      const settings=el('details',undefined,'panel plugin-card video-settings');
+      drafts.einkVideoOpen??={};settings.open=!!drafts.einkVideoOpen[plugin];
+      settings.ontoggle=()=>{if(settings.isConnected)drafts.einkVideoOpen[plugin]=settings.open};
+      settings.append(el('summary','E-ink 動画の更新'),el('p','端末ごとに部分更新の速さ、全画面更新間隔、pic2gray4px の自動補正を設定できます。'));
+      for(const d of devices){
+        const config=d.plugin_configs[plugin];if(!config)continue;
+        const row=el('div',undefined,'location-row');row.append(el('strong',d.id));
+        const rate=el('select');for(const n of [1,2,3,4,5]){const option=el('option',`${n} fps`);option.value=n;rate.append(option)}rate.value=config.fps;
+        const seconds=el('input');seconds.type='number';seconds.min=1;seconds.max=30;seconds.step=1;seconds.required=true;seconds.value=config.full_refresh_seconds;
+        const rateLabel=el('label',undefined,'field');rateLabel.append(el('span','部分更新の FPS'),rate);
+        const secondsLabel=el('label',undefined,'field');secondsLabel.append(el('span','全画面更新間隔（1～30秒）'),seconds);
+        const auto=el('input');auto.type='checkbox';auto.checked=config.auto_preprocess!==false;
+        const autoLabel=el('label',undefined,'field');autoLabel.append(auto,el('span','pic2gray4px 自動補正（コントラスト・シャープ化）'));
+        const save=button('設定を保存');save.onclick=()=>{if(!seconds.reportValidity())return;run(()=>api(`/api/devices/${encodeURIComponent(d.id)}/plugin-config/${plugin}`,'PUT',{
+          incarnation:d.incarnation,expected_revision:config.revision,
+          config:{fps:Number(rate.value),full_refresh_seconds:Number(seconds.value),auto_preprocess:auto.checked}}),'E-ink 動画設定を保存しました')};
+        row.append(rateLabel,secondsLabel,autoLabel,save);
+        if(!d.capabilities.includes('eink-video-partial-v1'))row.append(el('small','旧ファームでは部分更新せず、全画面更新間隔で表示します。'));
+        settings.append(row);
+      }
+      if(!devices.length)settings.append(el('p','E-ink 端末は登録されていません。','empty'));
+      main.append(settings);
+    }
     function renderLocalVideo(data){
       const panel=section('ローカル動画と共有再生','手元の動画をアップロードして変換・再生します。','plugin-card');
       const active=data.active;
@@ -425,6 +451,7 @@
         actions.append(remove);row.append(actions);originals.append(row);
       }
       if(!data.imports?.length)originals.append(el('p','アップロード済みの原本はありません。','empty'));
+      renderEinkVideoControls('local-video');
       const history=section('変換済み動画','再生する動画を選べます。','plugin-card');
       for(const video of data.videos||[]){
         const row=el('article',undefined,'device-card');row.append(el('h3',video.name),el('p',`${video.fps} fps · ${(video.frames/video.fps).toFixed(1)} 秒 · 160×80 · ${bytesText(video.bytes)}`));
@@ -487,6 +514,7 @@
         const prepare=button('取得・変換して再生','primary');prepare.type='submit';form.append(fields,prepare);
         form.onsubmit=event=>{event.preventDefault();if(form.reportValidity()){rememberVideoFps(fps.value);managedCommand(id,{kind:'prepare',url:url.value,fps:Number(fps.value),start:whole.checked?null:start.value,end:whole.checked?null:end.value})}};panel.append(form);
         const controls=el('div',undefined,'actions');for(const [label,kind]of[['処理を取消す','cancel'],['再生を停止','stop'],['容量を再計測','scan_usage']]){const control=button(label);control.onclick=()=>managedCommand(id,{kind});controls.append(control)}panel.append(controls);
+        renderEinkVideoControls('youtube');
         const history=section('動画履歴','取得・変換中や失敗時も、現在の動画の再生を維持します。','plugin-card');
         if(!data.videos?.length)history.append(el('p','動画履歴はまだありません。','empty'));
         const liveVideoIds=new Set((data.videos||[]).map(video=>video.metadata.id));for(const id of new Set([...thumbnailImages.keys(),...thumbnailVersions.keys()]))if(!liveVideoIds.has(id)){thumbnailImages.delete(id);thumbnailImageErrors.delete(id);thumbnailVersions.delete(id)}

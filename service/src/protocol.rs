@@ -41,15 +41,23 @@ pub struct InputContext {
     pub mode: String,
 }
 
-/// Capability-negotiated clock-only partial refresh policy. Pixel bytes and
+/// Capability-negotiated partial refresh policy. Pixel bytes and
 /// render acknowledgements retain the ordinary mono1 contract.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EinkVideoRefresh {
+    pub full_refresh_frames: u16,
+    pub frame: u64,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EinkRefresh {
     pub full_refresh_minutes: u16,
     pub minute: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video: Option<EinkVideoRefresh>,
 }
 pub const EINK_CLOCK_CAPABILITY: &str = "eink-clock-v1";
+pub const EINK_VIDEO_CAPABILITY: &str = "eink-video-partial-v1";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
@@ -515,7 +523,11 @@ fn validate_image_message(message: &WireMessage) -> Result<(), ProtocolError> {
         } if *width != 250
             || *height != 122
             || format != "mono1"
-            || !(1..=60).contains(&policy.full_refresh_minutes) =>
+            || match &policy.video {
+                Some(video) => policy.full_refresh_minutes != 0 || policy.minute != 0
+                    || !(1..=1800).contains(&video.full_refresh_frames),
+                None => !(1..=60).contains(&policy.full_refresh_minutes),
+            } =>
         {
             Err(ProtocolError::InvalidFrame)
         }
@@ -540,6 +552,37 @@ fn validate_image_message(message: &WireMessage) -> Result<(), ProtocolError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn eink_video_refresh_is_separate_from_clock_policy() {
+        let token = FrameToken { device_id: "paper".into(), incarnation: 1,
+            session_epoch: 1, display_epoch: 1, screen_owner_epoch: 1, frame_id: 7 };
+        let mut start = WireMessage::FrameStart {
+            eink_refresh: Some(EinkRefresh { full_refresh_minutes: 0, minute: 0,
+                video: Some(EinkVideoRefresh { full_refresh_frames: 30, frame: 60 }) }),
+            token, mode: None, stream: None, width: 250, height: 122,
+            format: "mono1".into(), byte_len: crate::eink::FRAME_BYTES as u32, crc32: 0,
+        };
+        assert_eq!(validate_image_message(&start), Ok(()));
+        let encoded = encode(&start).unwrap();
+        assert_eq!(Decoder::default().push(&encoded).unwrap(), vec![start.clone()]);
+        if let WireMessage::FrameStart { eink_refresh: Some(policy), .. } = &mut start {
+            policy.full_refresh_minutes = 5;
+        }
+        assert_eq!(validate_image_message(&start), Err(ProtocolError::InvalidFrame));
+        if let WireMessage::FrameStart { eink_refresh: Some(policy), .. } = &mut start {
+            policy.full_refresh_minutes = 0;
+            policy.video.as_mut().unwrap().full_refresh_frames = 0;
+        }
+        assert_eq!(validate_image_message(&start), Err(ProtocolError::InvalidFrame));
+        if let WireMessage::FrameStart { eink_refresh: Some(policy), .. } = &mut start {
+            policy.video.as_mut().unwrap().full_refresh_frames = 900;
+        }
+        assert_eq!(validate_image_message(&start), Ok(()));
+        if let WireMessage::FrameStart { eink_refresh: Some(policy), .. } = &mut start {
+            policy.video.as_mut().unwrap().full_refresh_frames = 1801;
+        }
+        assert_eq!(validate_image_message(&start), Err(ProtocolError::InvalidFrame));
+    }
     #[test]
     fn binary_image_chunks_preserve_tokens_pixels_crc_and_reduce_wire_size() {
         for (width, height, format, length) in [

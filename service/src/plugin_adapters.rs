@@ -19,6 +19,7 @@ pub struct YoutubeManaged {
     bootstrap_scheduled: bool,
     validated: bool,
     thumbnail_pending: BTreeSet<String>,
+    eink_video: crate::eink_video::ConfigStore,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -29,6 +30,8 @@ struct YoutubeSnapshot {
     usage: Option<yt::Usage>,
     #[serde(default)]
     thumbnail_pending: BTreeSet<String>,
+    #[serde(default)]
+    eink_video: crate::eink_video::ConfigStore,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -132,6 +135,18 @@ impl ContentPlugin for YoutubeManaged {
     }
     fn delete_device(&mut self, id: &str) {
         self.inner.forget_viewer(id);
+        self.eink_video.remove(id);
+    }
+    fn eink_video_settings(&self, ctx: &PluginContext) -> Option<crate::eink_video::Settings> {
+        Some(self.eink_video.get(&ctx.token.device_id, ctx.token.incarnation).1)
+    }
+    fn device_config(&self, id: &str, incarnation: u64) -> Value {
+        let (revision, settings)=self.eink_video.get(id,incarnation);
+        json!({"revision":revision,"fps":settings.fps,"full_refresh_seconds":settings.full_refresh_seconds,"auto_preprocess":settings.auto_preprocess})
+    }
+    fn set_device_config(&mut self, ctx: &PluginContext, expected: u64, config: Value) -> Result<u64, ContentError> {
+        let settings: crate::eink_video::Settings=serde_json::from_value(config).map_err(|_|ContentError::InvalidSource)?;
+        self.eink_video.set(&ctx.token.device_id,ctx.token.incarnation,expected,settings)
     }
     fn save_state(&self) -> Value {
         serde_json::to_value(YoutubeSnapshot {
@@ -140,6 +155,7 @@ impl ContentPlugin for YoutubeManaged {
             deleting: self.inner.deleting.clone(),
             usage: self.usage,
             thumbnail_pending: self.thumbnail_pending.clone(),
+            eink_video: self.eink_video.clone(),
         })
         .expect("serializable YouTube state")
     }
@@ -154,6 +170,8 @@ impl ContentPlugin for YoutubeManaged {
         self.inner.deleting = state.deleting;
         self.usage = state.usage;
         self.thumbnail_pending = state.thumbnail_pending;
+        self.eink_video = state.eink_video;
+        if !self.eink_video.valid() { return Err(ContentError::InvalidSource); }
         self.bootstrap_scheduled = false;
         self.validated = false;
         Ok(())

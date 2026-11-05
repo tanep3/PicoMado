@@ -36,6 +36,7 @@ void pm_display_init(void){}
 void pm_display_status(const char *a,const char *b){assert(a&&b);}
 bool pm_display_frame(uint8_t *p,size_t n){assert(p&&n==3813&&!physical_busy);memcpy(drawn_pixels,p,n);draw_calls++;physical_busy=true;return true;}
 bool pm_display_clock_frame(uint8_t *p,size_t n,unsigned m,uint64_t minute,bool reset){clock_calls++;clock_interval=m;clock_minute=minute;clock_reset=reset;return pm_display_frame(p,n);}
+bool pm_display_video_frame(uint8_t *p,size_t n,unsigned frames,uint64_t frame,bool reset){clock_calls++;clock_interval=frames;clock_minute=frame;clock_reset=reset;return pm_display_frame(p,n);}
 void pm_display_standby(void){panel_stops++;}
 void pm_display_wake(void){}
 void pm_display_reference_pattern(void){assert(!"normal diagnostic");}

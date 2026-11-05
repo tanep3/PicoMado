@@ -7,6 +7,7 @@ typedef struct {
     pm_token token;
     uint64_t refresh_minute;
     unsigned refresh_minutes;
+    bool video_refresh;
 } pm_eink_frame;
 typedef enum { PM_EINK_EMPTY, PM_EINK_RECEIVING, PM_EINK_READY } pm_eink_pending_phase;
 typedef struct { pm_eink_frame frame; pm_eink_pending_phase phase; } pm_eink_pending;
@@ -14,8 +15,11 @@ typedef struct { pm_eink_frame frame; pm_eink_pending_phase phase; } pm_eink_pen
 static inline void pm_eink_pending_reset(pm_eink_pending *p){p->phase=PM_EINK_EMPTY;}
 // Call only after side-effect-free header validation and assembly acceptance.
 static inline void pm_eink_pending_start(pm_eink_pending *p,pm_token token,unsigned minutes,uint64_t minute){
-    p->frame=(pm_eink_frame){.token=token,.refresh_minutes=minutes,.refresh_minute=minute};
+    p->frame=(pm_eink_frame){.token=token,.refresh_minutes=minutes,.refresh_minute=minute,.video_refresh=false};
     p->phase=PM_EINK_RECEIVING;
+}
+static inline void pm_eink_pending_start_video(pm_eink_pending *p,pm_token token,unsigned frames,uint64_t frame){
+    pm_eink_pending_start(p,token,frames,frame);p->frame.video_refresh=true;
 }
 static inline bool pm_eink_pending_complete(pm_eink_pending *p,pm_token token){
     if(p->phase!=PM_EINK_RECEIVING || !pm_token_equal(p->frame.token,token))return false;

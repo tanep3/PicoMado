@@ -10,6 +10,7 @@ pub mod clock;
 pub mod content;
 mod display_badge;
 pub mod eink;
+pub mod eink_video;
 pub mod fetch;
 pub mod host;
 pub mod socket_progress;

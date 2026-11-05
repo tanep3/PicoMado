@@ -688,7 +688,7 @@ static bool send_hello(void){
         "{\"type\":\"hello\",\"data\":{\"device_id\":\"%s\","
         "\"capabilities\":[\"%s\",\"buttons%u\",\"frame-bytes-v1\"%s],\"screen_owner_epoch\":%llu}}",
         PM_DEVICE_ID,pm_display_capability(),PM_BUTTON_COUNT,
-        PM_DISPLAY_TYPE==PM_DISPLAY_LCD?",\"lcd-push-v1\"":",\"eink-clock-v1\"",(unsigned long long)owner_epoch);
+        PM_DISPLAY_TYPE==PM_DISPLAY_LCD?",\"lcd-push-v1\"":",\"eink-clock-v1\",\"eink-video-partial-v1\"",(unsigned long long)owner_epoch);
     return n>0 && (size_t)n<sizeof outbound_json && pm_net_send(1,outbound_json);
 }
 static void heartbeat(void){
@@ -764,8 +764,10 @@ static pm_api_result dispatch_pending_eink(void){
     pm_trace_frame_context(t.frame_id);
     pm_ack_probe_note(PM_AP_DRAW_BEGIN,0,t.session_epoch,t.frame_id,0,0,0,0);
     uint64_t op=pm_observe(PM_OB_DISPLAY,1,PM_OB_DISPATCHED,0,0,t.session_epoch,t.frame_id,0,0);
-    bool accepted=next.refresh_minutes ? pm_display_clock_frame(assembly.pixels,PM_IMAGE_BYTES,
-        next.refresh_minutes,next.refresh_minute,!same_display) : pm_display_frame(assembly.pixels,PM_IMAGE_BYTES);
+    bool accepted=next.video_refresh ? pm_display_video_frame(assembly.pixels,PM_IMAGE_BYTES,
+        next.refresh_minutes,next.refresh_minute,!same_display) : next.refresh_minutes ?
+        pm_display_clock_frame(assembly.pixels,PM_IMAGE_BYTES,next.refresh_minutes,next.refresh_minute,!same_display) :
+        pm_display_frame(assembly.pixels,PM_IMAGE_BYTES);
     pm_trace_frame_context(0);
     pm_ack_probe_note(PM_AP_DRAW_END,0,t.session_epoch,t.frame_id,accepted,0,0,0);
     pm_observe(PM_OB_DISPLAY,1,accepted?PM_OB_PENDING:PM_OB_ERROR,op,0,t.session_epoch,t.frame_id,0,0);
@@ -961,11 +963,15 @@ static pm_api_result api_frame(uint8_t kind,const char *j){
     if(await_selection && (kind!=12 || t.display_epoch<=display_epoch || pending_standby))return PM_API_REJECTED;
     if(kind==12){
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
-        unsigned refresh_minutes=0;uint64_t refresh_minute=0;
+        unsigned refresh_minutes=0;uint64_t refresh_minute=0;bool refresh_video=false;
         if(strstr(j,"\"eink_refresh\"")){
             uint64_t interval;
-            if(!number(j,"full_refresh_minutes",&interval) || interval<1 || interval>60 ||
-               !number(j,"minute",&refresh_minute))return PM_API_REJECTED;
+            if(strstr(j,"\"full_refresh_frames\"")){
+                if(!number(j,"full_refresh_frames",&interval) || interval<1 || interval>1800 ||
+                   !number(j,"frame",&refresh_minute))return PM_API_REJECTED;
+                refresh_video=true;
+            }else if(!number(j,"full_refresh_minutes",&interval) || interval<1 || interval>60 ||
+                     !number(j,"minute",&refresh_minute))return PM_API_REJECTED;
             refresh_minutes=(unsigned)interval;
         }
 #endif
@@ -1000,7 +1006,8 @@ static pm_api_result api_frame(uint8_t kind,const char *j){
             }else pm_video_reset(&video);
 #endif
 #if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
-            pm_eink_pending_start(&pending_frame,t,refresh_minutes,refresh_minute);
+            if(refresh_video)pm_eink_pending_start_video(&pending_frame,t,refresh_minutes,refresh_minute);
+            else pm_eink_pending_start(&pending_frame,t,refresh_minutes,refresh_minute);
 #endif
             display_epoch=t.display_epoch;await_selection=false;
             // Web changes can leave SUB without a physical button response.
