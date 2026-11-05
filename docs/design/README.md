@@ -16,6 +16,7 @@
 - [heartbeat証拠品質：追加P2の修正契約](heartbeat-evidence-review-fix-contract.md)
 - [ARM_HBの単一owner統合契約](heartbeat-owner-integration-contract.md)
 - [古い接続の遅延 Hello によるセッション置換の防止](hello-accept-order.md)
+- [ローカル動画のアップロードと既存有限動画変換の再利用](../local-video-design.md)
 - [main の状態・期限・画面保持の監査（TR5/TR6修正前に整理）](main-loop-recovery.md)
 - [境界事実と入力→描画の因果（第2-B単位）](observation-causality-contract.md)
 - [第2-B 独立レビュー後の是正契約](observation-causality-review-corrections.md)
