@@ -7,9 +7,9 @@ use crate::content::ContentPlugin;
 use crate::{Engine, Registry};
 
 #[cfg(not(feature = "word-tutorial"))]
-pub const DEFAULT_ORDER: [&str; 6] = ["youtube", "caricature", "weather", "rain-radar", "clock", "local-video"];
+pub const DEFAULT_ORDER: [&str; 7] = ["youtube", "caricature", "weather", "rain-radar", "clock", "local-video", "local-image"];
 #[cfg(feature = "word-tutorial")]
-pub const DEFAULT_ORDER: [&str; 7] = ["youtube", "caricature", "weather", "rain-radar", "clock", "local-video", "my-words"];
+pub const DEFAULT_ORDER: [&str; 8] = ["youtube", "caricature", "weather", "rain-radar", "clock", "local-video", "local-image", "my-words"];
 
 /// One registration owns matching rules and content. The application does not
 /// add an ID branch when another plugin is registered.
@@ -51,6 +51,7 @@ pub fn builtins() -> PluginSet {
     set.register(Box::new(crate::radar::RadarPlugin), Box::new(crate::radar::RadarContent::default())).expect("unique plugin");
     set.register(Box::new(crate::clock::ClockPlugin), Box::new(crate::clock::ClockContent::default())).expect("unique plugin");
     set.register(Box::new(crate::local_video::LocalVideoPlugin), Box::new(crate::local_video::LocalVideoContent::default())).expect("unique plugin");
+    set.register(Box::new(crate::local_image::LocalImagePlugin), Box::new(crate::local_image::LocalImageContent::default())).expect("unique plugin");
     #[cfg(feature = "word-tutorial")]
     set.register(Box::new(crate::word::WordRules), Box::new(crate::word::WordContent::default())).expect("unique plugin");
     debug_assert_eq!(set.order, DEFAULT_ORDER);

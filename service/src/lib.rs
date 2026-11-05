@@ -35,6 +35,7 @@ pub mod web;
 pub mod workers;
 pub mod youtube;
 pub mod local_video;
+pub mod local_image;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};

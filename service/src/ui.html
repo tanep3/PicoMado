@@ -74,7 +74,7 @@
   <div class="shell">
     <header class="topbar">
       <a class="brand" href="/" aria-label="PicoMado ホーム"><span class="brand-mark" aria-hidden="true">▦</span>PicoMado</a>
-      <nav aria-label="メインナビゲーション"><a href="/">ホーム</a><a href="/plugins/youtube">YouTube</a><a href="/plugins/local-video">ローカル動画</a><a href="/plugins/caricature">風刺画</a><a href="/plugins/weather">天気</a><a href="/plugins/rain-radar">雨雲</a><a href="/plugins/clock">時計</a></nav>
+      <nav aria-label="メインナビゲーション"><a href="/">ホーム</a><a href="/plugins/youtube">YouTube</a><a href="/plugins/local-video">ローカル動画</a><a href="/plugins/local-image">ローカル画像</a><a href="/plugins/caricature">風刺画</a><a href="/plugins/weather">天気</a><a href="/plugins/rain-radar">雨雲</a><a href="/plugins/clock">時計</a></nav>
     </header>
     <div class="hero"><p class="eyebrow">Device &amp; content control</p><h1 id="page-title">PicoMado</h1><p class="lead" id="page-lead">端末とプラグインの状態を確認し、設定を管理します。</p></div>
     <p id="notice" role="status" aria-live="polite"></p>
@@ -89,7 +89,7 @@
     </div>
   </dialog>
   <script>
-    const labels={youtube:'YouTube','local-video':'ローカル動画',caricature:'風刺画',weather:'天気','rain-radar':'雨雲',clock:'時計','my-words':'好きな言葉'};
+    const labels={youtube:'YouTube','local-video':'ローカル動画','local-image':'ローカル画像',caricature:'風刺画',weather:'天気','rain-radar':'雨雲',clock:'時計','my-words':'好きな言葉'};
     const deviceFields=[
       ['wifi_timeout_seconds','Wi-Fi 試行 (秒)'],['app_timeout_seconds','Pi セッション試行 (秒)'],
       ['retry_initial_seconds','再試行開始 (秒)'],['retry_max_seconds','再試行上限 (秒)'],
@@ -221,7 +221,7 @@
       document.getElementById('page-lead').textContent='このプラグインの共通設定を管理します。';
       if(id==='clock'){renderClock();return}
       if(id==='my-words'){renderWords();return}
-      if(['youtube','local-video','caricature'].includes(id)){renderManaged(id);return}
+      if(['youtube','local-video','local-image','caricature'].includes(id)){renderManaged(id);return}
       const s=section('プラグイン設定','設定の変更は次のジョブから反映します。','plugin-card');
       const breadcrumb=el('div',undefined,'plugin-breadcrumb'),home=el('a','← ホームへ戻る');home.href='/';breadcrumb.append(home);s.prepend(breadcrumb);
       const form=el('form'),fields=el('div',undefined,'field-grid');let inputs=[];
@@ -288,7 +288,7 @@
     }
     async function loadManaged(){
       const id=location.pathname.split('/')[2];
-      if(['youtube','local-video','caricature','my-words'].includes(id))managedViews[id]=await api(`/api/plugins/${id}`);
+      if(['youtube','local-video','local-image','caricature','my-words'].includes(id))managedViews[id]=await api(`/api/plugins/${id}`);
       if(id==='caricature')protectionView=await api('/api/plugins/caricature/protections');
     }
     async function saveCaricatureProtections(protect){
@@ -435,9 +435,26 @@
       }
       if(!data.videos?.length)history.append(el('p','変換済み動画はまだありません。','empty'));
     }
+    function renderLocalImage(data){
+      const panel=section('ローカル画像','中心で画面比率に切り抜きます。端の文字や被写体は欠ける場合があります。','plugin-card');
+      jobsPanel('local-image',panel);if(data.error)panel.append(el('p',data.error,'error'));
+      panel.append(el('p',data.selected?`表示中: ${data.selected}`:'画像は未選択'));
+      const uploadForm=el('form',undefined,'subsection'),file=el('input');file.type='file';file.accept='image/png,image/jpeg,image/webp';file.required=true;
+      const upload=button('アップロード','primary');upload.type='submit';uploadForm.append(el('p','画像をアップロード（20 MiB 以下）'),file,upload);
+      uploadForm.onsubmit=async event=>{event.preventDefault();if(!uploadForm.reportValidity())return;const selected=file.files?.[0];if(!selected)return;
+        if(selected.size>20*1024*1024){say('画像は 20 MiB 以下にしてください',true);return}
+        upload.disabled=true;try{const response=await fetch(`/api/plugins/local-image/uploads/${encodeURIComponent(selected.name)}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:selected});if(!response.ok){const error=await response.json().catch(()=>({}));throw new Error(error.error||'アップロードに失敗しました')};say('アップロードしました');await managedCommand('local-image',{kind:'scan'})}catch(error){say(error.message,true);upload.disabled=false}};
+      panel.append(uploadForm);
+      const scan=button('ファイル一覧を更新');scan.onclick=()=>managedCommand('local-image',{kind:'scan'});panel.append(scan);
+      for(const name of data.imports||[]){const row=el('article',undefined,'device-card');row.append(el('h3',name));const actions=el('div',undefined,'actions');
+        const show=button('変換して表示','primary');show.onclick=()=>managedCommand('local-image',{kind:'prepare',name});
+        const remove=button('原本と履歴を削除','danger');remove.onclick=()=>{if(confirm(`「${name}」を削除しますか？`))managedCommand('local-image',{kind:'delete',name,confirmation:name})};actions.append(show,remove);row.append(actions);panel.append(row)}
+      if(!data.imports?.length)panel.append(el('p','アップロード済み画像はありません。','empty'));
+    }
     function renderManaged(id){
       const view=managedViews[id];if(!view)return;const data=view.data||{};
       if(id==='local-video'){renderLocalVideo(data);return}
+      if(id==='local-image'){renderLocalImage(data);return}
       if(id==='caricature'){if(location.pathname==='/plugins/caricature/prompts')renderCaricaturePrompts(data);else renderCaricature(data);return}
       const panel=section(id==='youtube'?'共有動画と再生':'作画と共有設定','この内容はプラグインを表示中の端末で共有します。端末別設定はホームで管理します。','plugin-card');
       jobsPanel(id,panel);

@@ -263,6 +263,18 @@ impl Runtime {
                     .ok_or(AppError::Conflict("order revision exhausted"))?;
             }
         }
+        // Append local images to a complete prior catalog without changing
+        // saved order, selections or enablement. Older migrations above run first.
+        let before_image: BTreeSet<_> = catalog.iter().map(String::as_str)
+            .filter(|id| *id != "local-image").collect();
+        if catalog.iter().any(|id| id == "local-image")
+            && state.world.plugin_order.len() == before_image.len()
+            && state.world.plugin_order.iter().map(String::as_str).collect::<BTreeSet<_>>() == before_image
+        {
+            state.world.plugin_order.push("local-image".into());
+            state.order_revision = state.order_revision.checked_add(1)
+                .ok_or(AppError::Conflict("order revision exhausted"))?;
+        }
         for record in state.settings.devices.values_mut() {
             record.online = false;
         }
@@ -2384,12 +2396,12 @@ mod tests {
         let body:String=conn.query_row("SELECT body FROM app_state WHERE id=1",[],|row|row.get(0)).unwrap();
         let mut value:serde_json::Value=serde_json::from_str(&body).unwrap();
         let order=value["world"]["plugin_order"].as_array_mut().unwrap();
-        order.retain(|id|id.as_str()!=Some("local-video"));
+        order.retain(|id|id.as_str()!=Some("local-video")&&id.as_str()!=Some("local-image"));
         conn.execute("UPDATE app_state SET body=?1 WHERE id=1",[value.to_string()]).unwrap();
         drop(conn);
         let reopened=App::open(&path).unwrap();
-        assert_eq!(reopened.view().order.last().map(String::as_str),Some("local-video"));
-        assert_eq!(reopened.view().order_revision,prior+1);
+        assert_eq!(reopened.view().order.last().map(String::as_str),Some("local-image"));
+        assert_eq!(reopened.view().order_revision,prior+2);
     }
 
     fn current_delivery(app: &App, id: &str) -> (FrameToken, Arc<Vec<u8>>) {
@@ -2500,7 +2512,7 @@ mod tests {
                 "2026-10-12",
             )
             .unwrap();
-            for id in ["youtube", "caricature", "rain-radar", "clock", "local-video"] {
+            for id in ["youtube", "caricature", "rain-radar", "clock", "local-video", "local-image"] {
                 web_enabled(&mut app, "desk", id, false);
             }
             #[cfg(feature = "word-tutorial")]
@@ -2686,7 +2698,7 @@ mod tests {
         .unwrap();
         app.set_order(
             1,
-            ["weather", "rain-radar", "youtube", "caricature", "clock", "local-video"]
+            ["weather", "rain-radar", "youtube", "caricature", "clock", "local-video", "local-image"]
                 .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
                 .map(str::to_owned).collect(),
         )
@@ -2833,7 +2845,7 @@ mod tests {
             );
             app.set_order(
                 1,
-                ["weather", "youtube", "caricature", "rain-radar", "clock", "local-video"]
+                ["weather", "youtube", "caricature", "rain-radar", "clock", "local-video", "local-image"]
                     .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
                     .map(str::to_owned).collect(),
             )
@@ -3361,6 +3373,7 @@ mod clock_tests {
         let mut app = App::open(&path).unwrap();
         let expected = ["rain-radar", "weather", "youtube", "caricature", "clock", "local-video"]
             .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
+            .chain(["local-image"])
             .collect::<Vec<_>>();
         assert_eq!(app.view().order, expected);
         assert_eq!(app.runtime.world.devices["old"].selected, selection);
