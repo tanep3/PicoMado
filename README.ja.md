@@ -75,6 +75,8 @@ Web 操作 ──> Linux サーバ：プラグイン、表示内容、設定、�
 2. [初回設定ガイド](docs/guides/first-setup.md)に沿って Linux サーバと端末を準備する。
 3. 既存端末を更新する場合は先に[退避と復旧](docs/guides/release-and-recovery.md)を読む。
 
+補足：初回設定の `service/deploy/install-server.sh` は、必要に応じて別の公開リポジトリ [pic2gray4px](https://github.com/tanep3/pic2gray4px) を自動取得・ビルドし、Rust 環境の bin（既定は `~/.cargo/bin`）に配置します。
+
 詳しくは [ファームウェア](firmware/README.md)、[サーバ](service/README.md)、[文書案内](docs/README.md)を参照してください。
 
 コードは [MIT License](LICENSE)、著作権者は Tane Channel Technology です。フォントなど第三者の素材には[個別の権利表示](service/assets/NOTO-COPYRIGHT)が適用されます。
