@@ -736,6 +736,8 @@ async fn individual_deletion_preserves_original_other_fps_and_same_fps_ranges() 
         sources: BTreeMap::new(),
         conversions: BTreeMap::new(),
     };
+    record.metadata.thumbnail = Some(format!("thumbnail-{id}"));
+    record.metadata.thumbnail_bytes = 5;
     for (start, full) in [(0, true), (100, false)] {
         let key = source_key(id, start, 2000, full);
         record.sources.insert(
@@ -842,6 +844,18 @@ async fn individual_deletion_preserves_original_other_fps_and_same_fps_ranges() 
         );
     }
     assert_eq!(std::fs::read(base.join("thumbnail.jpg")).unwrap(), b"thumb");
+    let remaining: Vec<_> = content.videos[id].conversions.keys().cloned().collect();
+    for (index,key) in remaining.iter().enumerate() {
+        let last=index+1==remaining.len();
+        let delete=content.request_delete_target(id,id,DeleteTarget::Conversion{key:key.clone()}).unwrap();
+        let effect=run_delete_with_thumbnail(root.clone(),delete.clone(),last).await;
+        content.complete_delete(delete,effect).unwrap();
+        assert_eq!(base.join("thumbnail.jpg").exists(),!last);
+    }
+    assert!(content.videos[id].conversions.is_empty());
+    assert!(content.videos[id].metadata.thumbnail.is_none());
+    assert_eq!(content.videos[id].metadata.thumbnail_bytes,0);
+    assert_eq!(content.videos[id].sources.len(),1);
     assert_eq!(std::fs::read_dir(root.join("work")).unwrap().count(), 0);
 }
 

@@ -2,14 +2,18 @@
 //! bind addresses; this library never starts a listener.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::extract::{DefaultBodyLimit, Path, State};
+use axum::extract::Request;
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
+use futures_util::StreamExt;
+use tokio::io::AsyncWriteExt;
 
 use crate::application::{App, AppError, AppView};
 #[cfg(test)]
@@ -26,6 +30,8 @@ pub fn router(app: SharedApp) -> Router {
         .route("/plugins/caricature/prompts", get(home))
         .route("/api/plugins/{plugin}/options", get(plugin_options))
         .route("/api/plugins/{plugin}", get(plugin_state))
+        .route("/api/plugins/local-video/uploads/{name}",
+            axum::routing::post(upload_local_video).layer(DefaultBodyLimit::disable()))
         .route(
             "/api/plugins/caricature/protections",
             get(caricature_protections).put(update_caricature_protections),
@@ -203,6 +209,64 @@ async fn plugin_command(
         app.plugin_command(&plugin, body.expected_revision, body.command)
             .map(Json)
     })
+}
+
+static NEXT_UPLOAD: AtomicU64 = AtomicU64::new(1);
+struct PartialUpload(std::path::PathBuf);
+impl Drop for PartialUpload {
+    fn drop(&mut self) { let _=std::fs::remove_file(&self.0); }
+}
+
+async fn upload_local_video(
+    State(app): State<SharedApp>,
+    Path(name): Path<String>,
+    request: Request,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !crate::local_video::good_name(&name) {
+        return Err(ApiError(AppError::Invalid("invalid video filename")));
+    }
+    if request.headers().get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|v|v.to_str().ok())
+        .and_then(|v|v.parse::<u64>().ok())
+        .is_some_and(|n|n>crate::local_video::MAX_SOURCE)
+    {
+        return Err(ApiError(AppError::Invalid("video exceeds 512 MiB")));
+    }
+    let paths=with_read_app(&app,|app|app.plugin_paths("local-video").ok_or(AppError::NotFound))?;
+    let folder=paths.data.join("imports");
+    tokio::fs::create_dir_all(&folder).await.map_err(|_|ApiError(AppError::Conflict("upload directory unavailable")))?;
+    if tokio::fs::symlink_metadata(&folder).await.map_err(|_|ApiError(AppError::Conflict("upload directory unavailable")))?
+        .file_type().is_symlink() {
+        return Err(ApiError(AppError::Invalid("invalid upload directory")));
+    }
+    let target=folder.join(&name);
+    let id=NEXT_UPLOAD.fetch_add(1,Ordering::Relaxed);
+    let temp=folder.join(format!(".upload-{}-{id}.partial",std::process::id()));
+    let guard=PartialUpload(temp.clone());
+    let mut output=tokio::fs::OpenOptions::new().write(true).create_new(true).open(&temp).await
+        .map_err(|_|ApiError(AppError::Conflict("upload unavailable")))?;
+    let mut stream=request.into_body().into_data_stream();
+    let mut bytes=0u64;
+    while let Some(chunk)=stream.next().await {
+        let chunk=chunk.map_err(|_|ApiError(AppError::Invalid("upload interrupted")))?;
+        bytes=bytes.checked_add(chunk.len() as u64)
+            .filter(|n|*n<=crate::local_video::MAX_SOURCE)
+            .ok_or(ApiError(AppError::Invalid("video exceeds 512 MiB")))?;
+        output.write_all(&chunk).await.map_err(|_|ApiError(AppError::Conflict("upload write failed")))?;
+    }
+    if bytes==0 { return Err(ApiError(AppError::Invalid("empty video"))); }
+    output.flush().await.map_err(|_|ApiError(AppError::Conflict("upload write failed")))?;
+    output.sync_all().await.map_err(|_|ApiError(AppError::Conflict("upload write failed")))?;
+    drop(output);
+    // hard_link creates the final name only if absent, then the temporary
+    // name is removed. Existing user uploads are never overwritten.
+    tokio::fs::hard_link(&temp,&target).await.map_err(|e|{
+        if e.kind()==std::io::ErrorKind::AlreadyExists {
+            ApiError(AppError::Conflict("video filename already exists"))
+        }else{ApiError(AppError::Conflict("upload publish failed"))}
+    })?;
+    drop(guard);
+    Ok(Json(json!({"name":name,"bytes":bytes})))
 }
 
 async fn plugin_asset(
@@ -471,6 +535,33 @@ mod tests {
     use axum::http::{Method, Request};
     use http_body_util::BodyExt;
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn local_upload_is_bounded_and_does_not_overwrite_or_leave_partial_files() {
+        let temp=tempfile::tempdir().unwrap();
+        let app=App::open_with_plugin_root(&temp.path().join("state.db"),&temp.path().join("plugins")).unwrap();
+        let router=super::router(Arc::new(crate::shared::Application::new(app)));
+        let route="/api/plugins/local-video/uploads/clip.mp4";
+        let post=|path:&str,body:&'static [u8]|Request::builder().method(Method::POST).uri(path)
+            .body(Body::from(body)).unwrap();
+        let response=router.clone().oneshot(post(route,b"video bytes")).await.unwrap();
+        assert_eq!(response.status(),StatusCode::OK);
+        let imports=temp.path().join("plugins/local-video/data/imports");
+        assert_eq!(std::fs::read(imports.join("clip.mp4")).unwrap(),b"video bytes");
+        assert_eq!(router.clone().oneshot(post(route,b"other")).await.unwrap().status(),StatusCode::CONFLICT);
+        assert_eq!(std::fs::read(imports.join("clip.mp4")).unwrap(),b"video bytes");
+        let invalid=router.clone().oneshot(post("/api/plugins/local-video/uploads/.hidden",b"x")).await.unwrap();
+        assert_eq!(invalid.status(),StatusCode::BAD_REQUEST);
+        let too_large=Request::builder().method(Method::POST).uri("/api/plugins/local-video/uploads/big.mp4")
+            .header("content-length",(crate::local_video::MAX_SOURCE+1).to_string())
+            .body(Body::from("x")).unwrap();
+        assert_eq!(router.clone().oneshot(too_large).await.unwrap().status(),StatusCode::BAD_REQUEST);
+        let medium=Request::builder().method(Method::POST).uri("/api/plugins/local-video/uploads/medium.mp4")
+            .body(Body::from(vec![1u8;32*1024])).unwrap();
+        assert_eq!(router.clone().oneshot(medium).await.unwrap().status(),StatusCode::OK);
+        assert_eq!(std::fs::metadata(imports.join("medium.mp4")).unwrap().len(),32*1024);
+        assert_eq!(std::fs::read_dir(imports).unwrap().count(),2);
+    }
 
     async fn call(
         router: &Router,
@@ -987,11 +1078,11 @@ mod tests {
         let (status, view) = call(&router, Method::PUT, "/api/plugin-settings", json!({"expected_revision":1,"settings":{"weather_fetch":{"timeout_seconds":30,"retries":2},"radar_fetch":{"timeout_seconds":20,"retries":2},"youtube_default_fps":12}})).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(view["plugins"]["youtube_default_fps"], 12);
-        let order = ["weather", "youtube", "caricature", "rain-radar", "clock"]
+        let order = ["weather", "youtube", "caricature", "rain-radar", "clock", "local-video"]
             .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
             .collect::<Vec<_>>();
         assert_eq!(call(&router, Method::PUT, "/api/order", json!({"expected_revision":1,"order":order})).await.0, StatusCode::OK);
-        let stale_order = ["youtube", "caricature", "weather", "rain-radar", "clock"]
+        let stale_order = ["youtube", "caricature", "weather", "rain-radar", "clock", "local-video"]
             .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
             .collect::<Vec<_>>();
         assert_eq!(call(&router, Method::PUT, "/api/order", json!({"expected_revision":1,"order":stale_order})).await.0, StatusCode::CONFLICT);

@@ -7,7 +7,7 @@
 mod media;
 mod thumbnail;
 pub use media::{
-    read_frame, rgb565_from_jpeg, run_cached_prepare, run_delete, run_prepare, scan_usage,
+    read_frame, rgb565_from_jpeg, run_cached_prepare, run_delete, run_delete_with_thumbnail, run_local_conversion, run_prepare, scan_usage,
     scan_usage_or_last, validate_conversion, validate_conversion_cancellable, ColorTransform,
     MediaTools, Usage,
 };
@@ -63,6 +63,11 @@ impl Default for Fps {
     }
 }
 impl Fps {
+    /// Local files may retain a 2 fps source. YouTube's form and request
+    /// contract continue to use the five FPS_CHOICES through Fps::new.
+    pub(crate) fn new_local(value: u8) -> Result<Self, YoutubeError> {
+        if (1..=30).contains(&value) { Ok(Self(value)) } else { Err(YoutubeError::InvalidFps) }
+    }
     pub fn new(value: u8) -> Result<Self, YoutubeError> {
         if FPS_CHOICES.contains(&value) {
             Ok(Self(value))
@@ -927,6 +932,10 @@ impl YoutubeContent {
             DeleteTarget::Conversion { key } => {
                 if let Some(record) = self.videos.get_mut(&job.video_id) {
                     record.conversions.remove(&key);
+                    if record.conversions.is_empty() {
+                        record.metadata.thumbnail = None;
+                        record.metadata.thumbnail_bytes = 0;
+                    }
                 }
             }
         }

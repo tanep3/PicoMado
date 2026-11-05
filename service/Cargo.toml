@@ -27,7 +27,7 @@ rusqlite = { version = "0.37.0", features = ["bundled"] }
 reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "rustls-tls"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-tokio = { version = "1.53.1", features = ["time", "macros", "rt-multi-thread", "sync", "net", "signal"] }
+tokio = { version = "1.53.1", features = ["time", "macros", "rt-multi-thread", "sync", "net", "signal", "fs", "io-util"] }
 time = "0.3.55"
 toml = "0.9.12"
 

@@ -981,6 +981,89 @@ fn convert(
     Ok(conversion)
 }
 
+/// Adapt a local source to the existing finite-video converter. The temporary
+/// YouTube-shaped source and conversion directory are private to this call;
+/// only the validated JPEG sequence is published to the local plugin cache.
+pub fn run_local_conversion(
+    root: &Path,
+    copied_source: &Path,
+    final_key: &str,
+    fps: u8,
+    cancel: &Cancellation,
+) -> Result<(u64, u64), YoutubeError> {
+    if final_key.len() != 64 || !final_key.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(YoutubeError::InvalidFrame);
+    }
+    let fps = Fps::new_local(fps)?;
+    let root = safe_root(root)?;
+    let id = &final_key[..11];
+    let temporary_video = video_dir(&root, id)?;
+    if temporary_video.exists() {
+        fs::remove_dir_all(&temporary_video).map_err(storage)?;
+    }
+    fs::create_dir_all(&temporary_video).map_err(storage)?;
+    let result = (|| {
+        let job = PrepareJob {
+            generation: 1,
+            url: VideoUrl {
+                id: id.into(),
+                canonical: String::new(),
+            },
+            fps,
+            start_ms: None,
+            end_ms: None,
+            previous: None,
+            cancel: cancel.clone(),
+        };
+        let tools = MediaTools::new(root.clone());
+        let work = temporary_video.join("work");
+        fs::create_dir(&work).map_err(storage)?;
+        let measured = probe(&tools, &job, &work, copied_source)?;
+        if measured.width == 0
+            || measured.height == 0
+            || measured.duration_ms == 0
+            || measured.duration_ms > 7_200_000
+        {
+            return Err(YoutubeError::InvalidMetadata);
+        }
+        let clip = Clip::resolve(None, None, measured.duration_ms)?;
+        let source = SourceCache {
+            key: source_key(id, 0, measured.duration_ms, true),
+            video_id: id.into(),
+            coverage: clip,
+            full: true,
+            extension: "mp4".into(),
+            bytes: fs::metadata(copied_source).map_err(storage)?.len(),
+            origin_ms: 0,
+            duration_ms: measured.duration_ms,
+        };
+        let source_path = source_path(&root, &source)?;
+        fs::create_dir_all(source_path.parent().ok_or(YoutubeError::InvalidFrame)?)
+            .map_err(storage)?;
+        fs::rename(copied_source, &source_path).map_err(storage)?;
+        let (progress, _) = tokio::sync::mpsc::unbounded_channel();
+        let conversion = convert(&tools, &job, &work, clip, &source, &progress, 0)?;
+        let final_dir = root.join("videos").join(final_key);
+        if final_dir
+            .symlink_metadata()
+            .is_ok_and(|m| m.file_type().is_symlink())
+        {
+            return Err(YoutubeError::InvalidFrame);
+        }
+        let converted = converted_path(&root, &conversion)?;
+        let expected = (conversion.frames, conversion.bytes);
+        if inspect_manifest(&final_dir, cancel)? != Some(expected) {
+            if final_dir.exists() {
+                fs::remove_dir_all(&final_dir).map_err(storage)?;
+            }
+            fs::rename(converted, &final_dir).map_err(storage)?;
+        }
+        Ok(expected)
+    })();
+    let _ = fs::remove_dir_all(temporary_video);
+    result
+}
+
 fn run_prepare_blocking(
     tools: MediaTools,
     job: PrepareJob,
@@ -1119,6 +1202,14 @@ pub async fn run_cached_prepare(
 }
 
 pub async fn run_delete(root: PathBuf, job: DeleteJob) -> Result<(), YoutubeError> {
+    run_delete_with_thumbnail(root, job, false).await
+}
+
+pub async fn run_delete_with_thumbnail(
+    root: PathBuf,
+    job: DeleteJob,
+    remove_thumbnail: bool,
+) -> Result<(), YoutubeError> {
     tokio::task::spawn_blocking(move || {
         let root = safe_root(&root)?;
         let folder = match &job.target {
@@ -1128,27 +1219,38 @@ pub async fn run_delete(root: PathBuf, job: DeleteJob) -> Result<(), YoutubeErro
             }
             DeleteTarget::Conversion { key } => converted_leaf_path(&root, &job.video_id, key)?,
         };
-        if !folder.exists() {
-            return Ok(());
+        if folder.exists() {
+            let trash_parent = root.join("work");
+            fs::create_dir_all(&trash_parent).map_err(storage)?;
+            let trash =
+                trash_parent.join(format!("delete-{}-{}", job.video_id, std::process::id()));
+            fs::rename(&folder, &trash).map_err(storage)?;
+            // rename never follows a source/variant symlink; remove only this leaf.
+            let result = if trash
+                .symlink_metadata()
+                .map_err(storage)?
+                .file_type()
+                .is_dir()
+            {
+                fs::remove_dir_all(&trash)
+            } else {
+                fs::remove_file(&trash)
+            };
+            if let Err(error) = result {
+                let _ = fs::rename(&trash, &folder);
+                return Err(storage(error));
+            }
         }
-        let trash_parent = root.join("work");
-        fs::create_dir_all(&trash_parent).map_err(storage)?;
-        let trash = trash_parent.join(format!("delete-{}-{}", job.video_id, std::process::id()));
-        fs::rename(&folder, &trash).map_err(storage)?;
-        // rename never follows a source/variant symlink; remove only this leaf.
-        let result = if trash
-            .symlink_metadata()
-            .map_err(storage)?
-            .file_type()
-            .is_dir()
-        {
-            fs::remove_dir_all(&trash)
-        } else {
-            fs::remove_file(&trash)
-        };
-        if let Err(error) = result {
-            let _ = fs::rename(&trash, &folder);
-            return Err(storage(error));
+        if remove_thumbnail {
+            let thumbnail = video_dir(&root, &job.video_id)?.join("thumbnail.jpg");
+            match thumbnail.symlink_metadata() {
+                Ok(meta) if meta.file_type().is_file() => {
+                    fs::remove_file(thumbnail).map_err(storage)?
+                }
+                Ok(_) => return Err(YoutubeError::InvalidFrame),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(storage(e)),
+            }
         }
         Ok(())
     })

@@ -100,7 +100,9 @@ mod tests {
         let mut app = App::open_with_plugin_set(&temp.path().join("state.db"), temp.path(),
             Arc::new(SystemClock), crate::plugins::builtins()).unwrap();
         let token = app.hello("desk", BTreeSet::from(["lcd".into(), "buttons4".into()]), 1).unwrap();
-        for _ in 0..5 { app.button(&token, ButtonAction::Next).unwrap(); }
+        for _ in 0..crate::plugins::DEFAULT_ORDER.iter().position(|id|*id=="my-words").unwrap() {
+            app.button(&token, ButtonAction::Next).unwrap();
+        }
         assert_eq!(app.view().devices[0].selected.as_deref(), Some("my-words"));
         let frames: Vec<_> = app.pending_effects().into_iter().filter_map(|(_, effect)| match effect {
             Effect::SendFrame { asset_handle, .. } => app.frame_asset(&asset_handle),
@@ -122,7 +124,9 @@ mod tests {
         let path = temp.path().join("state.db");
         let mut app = App::open_with_plugin_set(&path, temp.path(), Arc::new(SystemClock), crate::plugins::builtins()).unwrap();
         let token = app.hello("desk", BTreeSet::from(["lcd".into(), "buttons4".into()]), 1).unwrap();
-        for _ in 0..5 { app.button(&token, ButtonAction::Next).unwrap(); }
+        for _ in 0..crate::plugins::DEFAULT_ORDER.iter().position(|id|*id=="my-words").unwrap() {
+            app.button(&token, ButtonAction::Next).unwrap();
+        }
         let revision = app.plugin_web_view("my-words").unwrap().revision;
         let png = test_png();
         let command = json!({"kind":"save", "words":"新しい言葉", "png":png});

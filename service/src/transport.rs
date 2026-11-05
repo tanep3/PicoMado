@@ -1588,7 +1588,7 @@ mod tests {
                 )
                 .unwrap();
             let client = reqwest::Client::new();
-            for plugin in ["caricature", "rain-radar", "clock"].into_iter()
+            for plugin in ["caricature", "rain-radar", "clock", "local-video"].into_iter()
                 .chain(crate::plugins::DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
                 .chain(["youtube", "weather"]) {
                 let d = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).unwrap().view().devices.remove(0);
@@ -1597,7 +1597,7 @@ mod tests {
                 assert!(response.status().is_success());
                 let view: serde_json::Value =
                     serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
-                if plugin == "caricature" || plugin == "rain-radar" || plugin == "clock" || plugin == "my-words" {
+                if plugin == "caricature" || plugin == "rain-radar" || plugin == "clock" || plugin == "local-video" || plugin == "my-words" {
                     assert_eq!(view["devices"][0]["selected"], "youtube");
                     continue;
                 }
@@ -2482,7 +2482,7 @@ mod tests {
             .unwrap()
             .set_order(
                 1,
-                ["weather", "rain-radar", "youtube", "caricature", "clock"]
+                ["weather", "rain-radar", "youtube", "caricature", "clock", "local-video"]
                     .into_iter().chain(crate::plugins::DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
                     .map(str::to_owned).collect(),
             )

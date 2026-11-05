@@ -223,12 +223,37 @@ impl Runtime {
                 .checked_add(1)
                 .ok_or(AppError::Conflict("order revision exhausted"))?;
         }
+        // Existing five-plugin installations append local video without
+        // changing the user's order, selected plugin, or enabled devices.
+        let before_local: BTreeSet<_> =
+            ["youtube", "caricature", "weather", "rain-radar", "clock"].into();
+        if catalog.iter().any(|id| id == "local-video")
+            && state.world.plugin_order.len() == before_local.len()
+            && state.world.plugin_order.iter().map(String::as_str).collect::<BTreeSet<_>>() == before_local
+        {
+            state.world.plugin_order.push("local-video".into());
+            state.order_revision = state.order_revision.checked_add(1)
+                .ok_or(AppError::Conflict("order revision exhausted"))?;
+        }
+        #[cfg(feature = "word-tutorial")]
+        {
+            let before_local_word: BTreeSet<_> =
+                ["youtube", "caricature", "weather", "rain-radar", "clock", "my-words"].into();
+            if catalog.iter().any(|id| id == "local-video")
+                && state.world.plugin_order.len() == before_local_word.len()
+                && state.world.plugin_order.iter().map(String::as_str).collect::<BTreeSet<_>>() == before_local_word
+            {
+                state.world.plugin_order.push("local-video".into());
+                state.order_revision = state.order_revision.checked_add(1)
+                    .ok_or(AppError::Conflict("order revision exhausted"))?;
+            }
+        }
         // A server upgraded with the optional phrase tutorial retains each
         // device's selection and enabled set while adding the new catalog ID.
         #[cfg(feature = "word-tutorial")]
         {
             let before_word: BTreeSet<_> =
-                ["youtube", "caricature", "weather", "rain-radar", "clock"].into();
+                ["youtube", "caricature", "weather", "rain-radar", "clock", "local-video"].into();
             if catalog.iter().any(|id| id == "my-words")
                 && state.world.plugin_order.len() == before_word.len()
                 && state.world.plugin_order.iter().map(String::as_str).collect::<BTreeSet<_>>() == before_word
@@ -2348,6 +2373,25 @@ pub struct AppView {
 mod tests {
     use super::*;
 
+    #[test]
+    fn existing_five_plugin_order_appends_local_video_without_reset() {
+        let temp=tempfile::tempdir().unwrap();
+        let path=temp.path().join("state.db");
+        let app=App::open(&path).unwrap();
+        let prior=app.view().order_revision;
+        drop(app);
+        let conn=rusqlite::Connection::open(&path).unwrap();
+        let body:String=conn.query_row("SELECT body FROM app_state WHERE id=1",[],|row|row.get(0)).unwrap();
+        let mut value:serde_json::Value=serde_json::from_str(&body).unwrap();
+        let order=value["world"]["plugin_order"].as_array_mut().unwrap();
+        order.retain(|id|id.as_str()!=Some("local-video"));
+        conn.execute("UPDATE app_state SET body=?1 WHERE id=1",[value.to_string()]).unwrap();
+        drop(conn);
+        let reopened=App::open(&path).unwrap();
+        assert_eq!(reopened.view().order.last().map(String::as_str),Some("local-video"));
+        assert_eq!(reopened.view().order_revision,prior+1);
+    }
+
     fn current_delivery(app: &App, id: &str) -> (FrameToken, Arc<Vec<u8>>) {
         app.pending_effects()
             .into_iter()
@@ -2456,7 +2500,7 @@ mod tests {
                 "2026-10-12",
             )
             .unwrap();
-            for id in ["youtube", "caricature", "rain-radar", "clock"] {
+            for id in ["youtube", "caricature", "rain-radar", "clock", "local-video"] {
                 web_enabled(&mut app, "desk", id, false);
             }
             #[cfg(feature = "word-tutorial")]
@@ -2642,7 +2686,7 @@ mod tests {
         .unwrap();
         app.set_order(
             1,
-            ["weather", "rain-radar", "youtube", "caricature", "clock"]
+            ["weather", "rain-radar", "youtube", "caricature", "clock", "local-video"]
                 .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
                 .map(str::to_owned).collect(),
         )
@@ -2789,7 +2833,7 @@ mod tests {
             );
             app.set_order(
                 1,
-                ["weather", "youtube", "caricature", "rain-radar", "clock"]
+                ["weather", "youtube", "caricature", "rain-radar", "clock", "local-video"]
                     .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
                     .map(str::to_owned).collect(),
             )
@@ -3315,7 +3359,7 @@ mod clock_tests {
         App::persist(&mut app.connection.lock().unwrap(), &app.runtime).unwrap();
         drop(app);
         let mut app = App::open(&path).unwrap();
-        let expected = ["rain-radar", "weather", "youtube", "caricature", "clock"]
+        let expected = ["rain-radar", "weather", "youtube", "caricature", "clock", "local-video"]
             .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
             .collect::<Vec<_>>();
         assert_eq!(app.view().order, expected);

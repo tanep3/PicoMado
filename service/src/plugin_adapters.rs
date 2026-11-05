@@ -48,6 +48,8 @@ enum YoutubeWork {
         video_id: String,
         #[serde(default)]
         target: yt::DeleteTarget,
+        #[serde(default)]
+        remove_thumbnail: bool,
     },
     ValidateSelected {
         conversion: Option<yt::ConversionCache>,
@@ -352,6 +354,8 @@ impl ContentPlugin for YoutubeManaged {
                     },
                     _ => return Err(ContentError::InvalidSource),
                 };
+                let remove_thumbnail = matches!(&target, yt::DeleteTarget::Conversion { .. })
+                    && self.inner.videos.get(id).is_some_and(|video| video.conversions.len() == 1);
                 let job = self
                     .inner
                     .request_delete_target(id, confirmation, target)
@@ -361,6 +365,7 @@ impl ContentPlugin for YoutubeManaged {
                     YoutubeWork::Delete {
                         video_id: job.video_id,
                         target: job.target,
+                        remove_thumbnail,
                     },
                 )?);
             }
@@ -450,7 +455,7 @@ impl ContentPlugin for YoutubeManaged {
                     plan.refresh = RefreshTargets::Selected;
                 }
             }
-            YoutubeWork::Delete { video_id, target } => {
+            YoutubeWork::Delete { video_id, target, .. } => {
                 let result = match outcome {
                     JobOutcome::Succeeded(_) => Ok(()),
                     JobOutcome::Cancelled => Err(yt::YoutubeError::Cancelled),
@@ -629,8 +634,8 @@ impl PluginJobExecutor for YoutubeExecutor {
                         Err(error) => fail(error),
                     }
                 }
-                YoutubeWork::Delete { video_id, target } => {
-                    match yt::run_delete(context.paths.cache, yt::DeleteJob { video_id, target })
+                YoutubeWork::Delete { video_id, target, remove_thumbnail } => {
+                    match yt::run_delete_with_thumbnail(context.paths.cache, yt::DeleteJob { video_id, target }, remove_thumbnail)
                         .await
                     {
                         Ok(()) => JobOutcome::Succeeded(Value::Null),
@@ -866,6 +871,7 @@ mod tests {
         let command = json!({"kind":"delete","video_id":c.video_id,"confirmation":c.video_id,"target":"conversion","key":c.key});
         let request = content.plan_command(&ctx, &command).unwrap().jobs.remove(0);
         assert_eq!(request.payload["target"]["key"], c.key);
+        assert_eq!(request.payload["remove_thumbnail"], true);
         let job = PluginJob {
             token: JobToken {
                 plugin: "youtube".into(),

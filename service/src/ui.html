@@ -74,7 +74,7 @@
   <div class="shell">
     <header class="topbar">
       <a class="brand" href="/" aria-label="PicoMado ホーム"><span class="brand-mark" aria-hidden="true">▦</span>PicoMado</a>
-      <nav aria-label="メインナビゲーション"><a href="/">ホーム</a><a href="/plugins/youtube">YouTube</a><a href="/plugins/caricature">風刺画</a><a href="/plugins/weather">天気</a><a href="/plugins/rain-radar">雨雲</a><a href="/plugins/clock">時計</a></nav>
+      <nav aria-label="メインナビゲーション"><a href="/">ホーム</a><a href="/plugins/youtube">YouTube</a><a href="/plugins/local-video">ローカル動画</a><a href="/plugins/caricature">風刺画</a><a href="/plugins/weather">天気</a><a href="/plugins/rain-radar">雨雲</a><a href="/plugins/clock">時計</a></nav>
     </header>
     <div class="hero"><p class="eyebrow">Device &amp; content control</p><h1 id="page-title">PicoMado</h1><p class="lead" id="page-lead">端末とプラグインの状態を確認し、設定を管理します。</p></div>
     <p id="notice" role="status" aria-live="polite"></p>
@@ -89,7 +89,7 @@
     </div>
   </dialog>
   <script>
-    const labels={youtube:'YouTube',caricature:'風刺画',weather:'天気','rain-radar':'雨雲',clock:'時計','my-words':'好きな言葉'};
+    const labels={youtube:'YouTube','local-video':'ローカル動画',caricature:'風刺画',weather:'天気','rain-radar':'雨雲',clock:'時計','my-words':'好きな言葉'};
     const deviceFields=[
       ['wifi_timeout_seconds','Wi-Fi 試行 (秒)'],['app_timeout_seconds','Pi セッション試行 (秒)'],
       ['retry_initial_seconds','再試行開始 (秒)'],['retry_max_seconds','再試行上限 (秒)'],
@@ -221,7 +221,7 @@
       document.getElementById('page-lead').textContent='このプラグインの共通設定を管理します。';
       if(id==='clock'){renderClock();return}
       if(id==='my-words'){renderWords();return}
-      if(['youtube','caricature'].includes(id)){renderManaged(id);return}
+      if(['youtube','local-video','caricature'].includes(id)){renderManaged(id);return}
       const s=section('プラグイン設定','設定の変更は次のジョブから反映します。','plugin-card');
       const breadcrumb=el('div',undefined,'plugin-breadcrumb'),home=el('a','← ホームへ戻る');home.href='/';breadcrumb.append(home);s.prepend(breadcrumb);
       const form=el('form'),fields=el('div',undefined,'field-grid');let inputs=[];
@@ -255,7 +255,7 @@
     }
     function initialVideoFps(){try{const value=localStorage.getItem('picomado.youtube.fps');if(['6','12','18','24','30'].includes(value))return value}catch{}return '12'}
     function rememberVideoFps(value){drafts.youtube.fps=value;try{localStorage.setItem('picomado.youtube.fps',value)}catch{}}
-    const managedViews={},drafts={youtube:{whole:true,fps:initialVideoFps()},caricature:{}};let protectionView={revision:0,protected_ids:[]};
+    const managedViews={},drafts={youtube:{whole:true,fps:initialVideoFps()},'local-video':{fps:'2'},caricature:{}};let protectionView={revision:0,protected_ids:[]};
     function bytesText(n){return `${((Number(n)||0)/1048576).toFixed(1)} MiB`}
     const thumbnailImages=new Map(),thumbnailImageErrors=new Set(),thumbnailRequests=new Set(),thumbnailVersions=new Map();
     function renderYoutubeThumbnail(video,parent){
@@ -288,7 +288,7 @@
     }
     async function loadManaged(){
       const id=location.pathname.split('/')[2];
-      if(['youtube','caricature','my-words'].includes(id))managedViews[id]=await api(`/api/plugins/${id}`);
+      if(['youtube','local-video','caricature','my-words'].includes(id))managedViews[id]=await api(`/api/plugins/${id}`);
       if(id==='caricature')protectionView=await api('/api/plugins/caricature/protections');
     }
     async function saveCaricatureProtections(protect){
@@ -381,8 +381,63 @@
         else{input.disabled=false;preview()}
       };
     }
+    function renderLocalVideo(data){
+      const panel=section('ローカル動画と共有再生','手元の動画をアップロードして変換・再生します。','plugin-card');
+      const active=data.active;
+      panel.append(el('p',active?`再生中 · ${active.fps} fps · ${((data.position_ms||0)/1000).toFixed(1)} 秒`:'再生動画は未選択'));
+      if(data.error)panel.append(el('p',data.error,'error'));
+      jobsPanel('local-video',panel);
+      const controls=el('div',undefined,'actions');
+      const scan=button('ファイル一覧を更新');scan.onclick=()=>managedCommand('local-video',{kind:'scan'});controls.append(scan);
+      const stop=button('再生を停止');stop.onclick=()=>managedCommand('local-video',{kind:'stop'});controls.append(stop);
+      const cancel=button('処理を取消す');cancel.onclick=()=>managedCommand('local-video',{kind:'cancel'});controls.append(cancel);
+      panel.append(controls);
+      const uploadForm=el('form',undefined,'subsection'),uploadWrap=el('label',undefined,'field');
+      uploadWrap.append(el('span','動画をアップロード'));const file=el('input');file.type='file';file.accept='video/*,.mp4,.mov,.mkv,.webm';file.required=true;uploadWrap.append(file);
+      const upload=button('アップロード','primary');upload.type='submit';uploadForm.append(uploadWrap,upload);
+      uploadForm.onsubmit=async event=>{
+        event.preventDefault();if(!uploadForm.reportValidity())return;
+        const selected=file.files?.[0];if(!selected)return;
+        if(selected.size>512*1024*1024){say('動画は 512 MiB 以下にしてください',true);return}
+        upload.disabled=true;
+        try{
+          const response=await fetch(`/api/plugins/local-video/uploads/${encodeURIComponent(selected.name)}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:selected});
+          if(!response.ok){const error=await response.json().catch(()=>({}));throw new Error(error.error||'アップロードに失敗しました')}
+          say('アップロードしました');await managedCommand('local-video',{kind:'scan'});
+        }catch(error){say(error.message||'アップロードに失敗しました',true);upload.disabled=false}
+      };
+      panel.append(uploadForm);
+      const form=el('form',undefined,'subsection'),fields=el('div',undefined,'field-grid');
+      const nameWrap=el('label',undefined,'field');nameWrap.append(el('span','取り込む動画ファイル'));
+      const select=el('select');select.required=true;
+      for(const name of data.imports||[]){const option=el('option',name);option.value=name;select.append(option)}
+      if(!data.imports?.length){const option=el('option','ファイルがありません');option.value='';select.append(option);select.disabled=true}
+      nameWrap.append(select);fields.append(nameWrap);
+      const fpsWrap=el('label',undefined,'field');fpsWrap.append(el('span','変換 FPS'));
+      const fps=el('input');fps.type='number';fps.min='1';fps.max='30';fps.step='1';fps.required=true;fps.value=drafts['local-video'].fps;fps.oninput=()=>drafts['local-video'].fps=fps.value;fpsWrap.append(fps);fields.append(fpsWrap);
+      const prepare=button('変換して再生','primary');prepare.type='submit';prepare.disabled=!data.imports?.length;
+      form.append(fields,prepare);form.onsubmit=event=>{event.preventDefault();if(form.reportValidity())managedCommand('local-video',{kind:'prepare',name:select.value,fps:Number(fps.value)})};panel.append(form);
+      const originals=section('アップロード済みの原本','原本だけを削除しても、変換済み動画の再生は続けられます。','plugin-card');
+      for(const name of data.imports||[]){
+        const row=el('article',undefined,'device-card'),actions=el('div',undefined,'actions');
+        row.append(el('h3',name));const remove=button('原本を削除','danger');
+        remove.onclick=()=>{if(confirm(`「${name}」の原本を削除しますか？`))managedCommand('local-video',{kind:'delete_import',name,confirmation:name})};
+        actions.append(remove);row.append(actions);originals.append(row);
+      }
+      if(!data.imports?.length)originals.append(el('p','アップロード済みの原本はありません。','empty'));
+      const history=section('変換済み動画','再生する動画を選べます。','plugin-card');
+      for(const video of data.videos||[]){
+        const row=el('article',undefined,'device-card');row.append(el('h3',video.name),el('p',`${video.fps} fps · ${(video.frames/video.fps).toFixed(1)} 秒 · 160×80 · ${bytesText(video.bytes)}`));
+        const actions=el('div',undefined,'actions');
+        const play=button('再生');play.onclick=()=>managedCommand('local-video',{kind:'play',key:video.key});actions.append(play);
+        const remove=button('削除','danger');remove.onclick=()=>{if(confirm(`「${video.name}」の変換済み動画を削除しますか？`))managedCommand('local-video',{kind:'delete',key:video.key,confirmation:video.key})};actions.append(remove);
+        row.append(actions);history.append(row)
+      }
+      if(!data.videos?.length)history.append(el('p','変換済み動画はまだありません。','empty'));
+    }
     function renderManaged(id){
       const view=managedViews[id];if(!view)return;const data=view.data||{};
+      if(id==='local-video'){renderLocalVideo(data);return}
       if(id==='caricature'){if(location.pathname==='/plugins/caricature/prompts')renderCaricaturePrompts(data);else renderCaricature(data);return}
       const panel=section(id==='youtube'?'共有動画と再生':'作画と共有設定','この内容はプラグインを表示中の端末で共有します。端末別設定はホームで管理します。','plugin-card');
       jobsPanel(id,panel);
