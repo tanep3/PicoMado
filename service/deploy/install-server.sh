@@ -25,6 +25,17 @@ rollback() {
   rm -rf "$stage"
 }
 trap rollback EXIT
+if [[ -e "$bin_dir/pic2gray4px" && ! -e "$bin_dir/pic2gray4px-source.toml" ]]; then
+  # An existing CLI without our source receipt may be a newer local build.
+  # Keep it; only executables previously installed by this script auto-update.
+  install -m 755 "$server" "$stage/new-server"
+  [[ ! -e "$bin_dir/picomado-server" ]] || { cp -p "$bin_dir/picomado-server" "$stage/old-server"; old_server=1; }
+  install_started=1
+  mv -f "$stage/new-server" "$bin_dir/picomado-server"
+  committed=1
+  printf 'Installed server; preserved existing unmanaged pic2gray4px in %s\n' "$bin_dir"
+  exit 0
+fi
 cargo install --git https://github.com/tanep3/pic2gray4px.git --branch main --locked --force --root "$stage/cargo"
 [[ -x "$stage/cargo/bin/pic2gray4px" && -f "$stage/cargo/.crates.toml" ]] || { echo 'pic2gray4px build incomplete' >&2; exit 2; }
 install -m 755 "$server" "$stage/new-server"
