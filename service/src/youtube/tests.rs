@@ -574,6 +574,7 @@ async fn deletion_effect_is_scoped_to_confirmed_video() {
     std::fs::create_dir_all(&target).unwrap();
     std::fs::create_dir_all(&sibling).unwrap();
     std::fs::write(target.join("dummy"), b"target").unwrap();
+    std::fs::write(target.join("thumbnail.jpg"), b"thumbnail").unwrap();
     std::fs::write(sibling.join("dummy"), b"keep").unwrap();
     let mut content = YoutubeContent::default();
     let job = content.request_prepare(request("abcdefghijk"), 1).unwrap();
@@ -590,6 +591,7 @@ async fn deletion_effect_is_scoped_to_confirmed_video() {
     let effect = run_delete(root, delete.clone()).await;
     content.complete_delete(delete, effect).unwrap();
     assert!(!target.exists());
+    assert!(content.history().is_empty());
     assert_eq!(std::fs::read(sibling.join("dummy")).unwrap(), b"keep");
 }
 

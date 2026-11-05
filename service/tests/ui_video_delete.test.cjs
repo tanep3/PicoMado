@@ -7,6 +7,9 @@ const source=fs.readFileSync(process.env.PICOMADO_UI_SOURCE||path.join(__dirname
 const managed=source.slice(source.indexOf('    async function managedCommand('),source.indexOf('    function textField('));
 const deletion=source.slice(source.indexOf('    async function deleteVideo('),source.indexOf('    function renderManaged('));
 const plain=v=>JSON.parse(JSON.stringify(v));
+test('each history row exposes full-video deletion through the confirmed delete path',()=>{
+  assert.match(source,/const removeAll=button\('動画の履歴と全キャッシュを削除','danger'\);removeAll\.onclick=\(\)=>deleteVideo\(video\);row\.append\(removeAll\)/);
+});
 function fixture(options={}){
   const all=[],calls=[],commands=[],notices=[];
   const view={revision:1,jobs:[],data:{job:options.job||null,active:options.active?{conversion:{video_id:options.active,key:options.activeKey}}:null}};

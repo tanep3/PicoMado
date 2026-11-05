@@ -469,6 +469,7 @@
           for(const conversion of Object.values(video.conversions||{})){const item=el('div',undefined,'actions conversion-row');
             for(const value of [`${conversion.fps} fps`,`${(conversion.clip.start_ms/1000).toFixed(1)}–${(conversion.clip.end_ms/1000).toFixed(1)} 秒`,'160×80',bytesText(conversion.bytes),conversion.key.slice(0,8)])item.append(el('span',value));
             const play=button('再生');play.onclick=()=>managedCommand(id,{kind:'play',key:conversion.key});const remove=button('削除','danger');remove.onclick=()=>deleteVideo(video,{kind:'conversion',...conversion});const actions=el('span',undefined,'conversion-actions');actions.append(play,remove);item.append(actions);row.append(item)}
+          const removeAll=button('動画の履歴と全キャッシュを削除','danger');removeAll.onclick=()=>deleteVideo(video);row.append(removeAll);
           history.append(row);
         }
 
