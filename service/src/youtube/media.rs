@@ -13,7 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedSender;
 
-const FIT: &str = "scale=160:80:flags=bicubic:force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1,pad=160:80:(ow-iw)/2:(oh-ih)/2:color=black";
+const FIT: &str = "scale=iw*sar:ih,setsar=1,scale=160:80:flags=bicubic:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=160:80:(ow-iw)/2:(oh-ih)/2:color=black";
 
 #[derive(Clone, Debug)]
 pub struct MediaTools {
