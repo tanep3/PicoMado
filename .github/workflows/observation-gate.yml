@@ -15,5 +15,9 @@ jobs:
         run: bash firmware/tests/run_host_tests.sh
       - name: Firmware USB tests
         run: bash firmware/tests/run_usb_tx_tests.sh
+      - name: Install server test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebp-dev
       - name: Server tests
         run: cargo test --locked --all-features --manifest-path service/Cargo.toml
