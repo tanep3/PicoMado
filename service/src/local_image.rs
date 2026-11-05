@@ -218,6 +218,10 @@ impl PluginJobExecutor for LocalImageExecutor {
             };
             match tokio::task::spawn_blocking(move || run(work, context.paths)).await {
                 Ok(Ok(v)) => JobOutcome::Succeeded(v),
+                Ok(Err(e)) if e == "missing cli" => failure(
+                    "pic2gray_missing",
+                    "pic2gray4px が見つかりません。PicoMado のサーバー導入手順を再実行してください",
+                ),
                 _ => failure("image_failed", "画像の読取り・変換・削除に失敗しました"),
             }
         })

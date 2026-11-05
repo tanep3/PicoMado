@@ -437,7 +437,7 @@
     }
     function renderLocalImage(data){
       const panel=section('ローカル画像','中心で画面比率に切り抜きます。端の文字や被写体は欠ける場合があります。','plugin-card');
-      jobsPanel('local-image',panel);if(data.error)panel.append(el('p',data.error,'error'));
+      jobsPanel('local-image',panel);if(data.error){panel.append(el('p',data.error,'error'));if(data.error.includes('pic2gray4px')){const guide=el('a','pic2gray4px の公開リポジトリと導入方法');guide.href='https://github.com/tanep3/pic2gray4px';guide.target='_blank';guide.rel='noopener noreferrer';panel.append(guide)}}
       panel.append(el('p',data.selected?`表示中: ${data.selected}`:'画像は未選択'));
       const uploadForm=el('form',undefined,'subsection'),file=el('input');file.type='file';file.accept='image/png,image/jpeg,image/webp';file.required=true;
       const upload=button('アップロード','primary');upload.type='submit';uploadForm.append(el('p','画像をアップロード（20 MiB 以下）'),file,upload);
