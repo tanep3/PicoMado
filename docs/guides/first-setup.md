@@ -67,7 +67,7 @@ systemctl --user enable --now picomado.service
 systemctl --user is-active picomado.service
 ```
 
-インストールスクリプトはサーバーと最新の `pic2gray4px` を `~/.cargo/bin` に置き、取得した Git コミットを同じ場所の `pic2gray4px-source.toml` に記録します。上流の取得・ビルドに失敗した場合はインストールを中止し、既存の実行ファイルを保持します。オフラインの新規導入には使えません。ユニットは `~/.cargo/bin/picomado-server` を参照します。`active` でなければ `systemctl --user status picomado.service` と TOML を確認します。信頼できる LAN から設定した IPv4 とポート `16153` を開きます。
+インストールスクリプトはサーバーと最新の `pic2gray4px` を `~/.cargo/bin` に置き、取得した Git コミットを同じ場所の `pic2gray4px-source.toml` に記録します。既に CLI がありこの取得記録がない場合、手動導入済みの新しい版を保護するため CLI は上書きせずサーバーだけ入れます。上流の取得・ビルドに失敗した場合はインストールを中止し、既存の実行ファイルを保持します。オフラインの新規導入には使えません。ユニットは `~/.cargo/bin/picomado-server` を参照します。`active` でなければ `systemctl --user status picomado.service` と TOML を確認します。信頼できる LAN から設定した IPv4 とポート `16153` を開きます。
 
 Pico W を BOOTSEL モードにし、`firmware/build/$PM_DEVICE/$PM_DEVICE.uf2` を `RPI-RP2` ドライブへコピーします。コピー後に自動で再起動します。HOME Wi-Fi、サーバー接続、画面表示、ボタンを個別に確認します。Flash ID ファイルや承認記録は不要です。
 

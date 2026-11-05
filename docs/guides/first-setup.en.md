@@ -67,7 +67,7 @@ systemctl --user enable --now picomado.service
 systemctl --user is-active picomado.service
 ```
 
-The installer puts the server and current `pic2gray4px` in `~/.cargo/bin` and records the fetched Git commit in `pic2gray4px-source.toml` beside them. If fetching or building upstream fails, installation stops and existing executables stay in place. A new installation cannot complete offline. The unit points to `~/.cargo/bin/picomado-server`. Expect `active`; otherwise inspect `systemctl --user status picomado.service` and your TOML configuration. Open the configured IPv4 and port `16153` on your trusted LAN.
+The installer puts the server and current `pic2gray4px` in `~/.cargo/bin` and records the fetched Git commit in `pic2gray4px-source.toml` beside them. If an existing CLI has no such receipt, it may be a newer manual build; the installer preserves it and updates only the server. If fetching or building upstream fails, installation stops and existing executables stay in place. A new installation cannot complete offline. The unit points to `~/.cargo/bin/picomado-server`. Expect `active`; otherwise inspect `systemctl --user status picomado.service` and your TOML configuration. Open the configured IPv4 and port `16153` on your trusted LAN.
 
 Put the Pico W in BOOTSEL mode, then copy `firmware/build/$PM_DEVICE/$PM_DEVICE.uf2` to the `RPI-RP2` drive. It restarts after the copy. Check HOME Wi-Fi, server connection, the display and, where present, buttons separately. No Flash ID file or approval record is required.
 

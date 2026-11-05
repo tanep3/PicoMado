@@ -4,7 +4,7 @@
 
 変換ジョブは入力を安全に開き、center crop で LCD と E-ink の各寸法へ整形する。LCD は RGB565、E-ink は一時 PNG を外部 CLI に渡し出力を検査して mono1 にする。完成した LCD/E-ink バイト列はプラグイン状態に保存し、再起動後に復元する。外部 CLI は配布物に付属する実行ファイルのパスを優先し、開発用に明示的な絶対パスを指定可能にする。PATH 上の不明な同名コマンドへ黙ってフォールバックしない。
 
-現在の PicoMado はソースを Cargo でビルドし、サーバーを `~/.cargo/bin` に置く手順で、公開バイナリ Release はない。そこで既存のインストール手順の一コマンドを `service/deploy/install-server.sh` に置き換える。スクリプトは公開 Git の `main` を `cargo install --git https://github.com/tanep3/pic2gray4px.git --branch main --locked --force` で新しい一時 root に取得・ビルドし、完成を確認してから PicoMado サーバーと CLI を同じ bin ディレクトリに設置する。上流の Cargo.lock は各取得コミットの依存を固定する。配置時に `.crates.toml` の上流フルコミットと SHA256 を保存する。取得・ビルド失敗なら旧サーバーと CLI は触らず、インストール失敗を返す。新規導入と更新の両方で同じコマンドを使い、PicoMado 側で上流版を手動更新しない。実行時はネットワークを使わず、サーバー実行ファイルと同じディレクトリの CLI を呼ぶ。
+現在の PicoMado はソースを Cargo でビルドし、サーバーを `~/.cargo/bin` に置く手順で、公開バイナリ Release はない。そこで既存のインストール手順の一コマンドを `service/deploy/install-server.sh` に置き換える。スクリプトは公開 Git の `main` を `cargo install --git https://github.com/tanep3/pic2gray4px.git --branch main --locked --force` で新しい一時 root に取得・ビルドし、完成を確認してから PicoMado サーバーと CLI を同じ bin ディレクトリに設置する。上流の Cargo.lock は各取得コミットの依存を固定する。配置時に `.crates.toml` の上流フルコミットと SHA256 を保存する。取得・ビルド失敗なら旧サーバーと CLI は触らず、インストール失敗を返す。既存 CLI にこの取得記録がない場合は手動導入とみなし上書きせず、サーバーだけ更新する。新規導入と当インストーラー管理下の更新で同じコマンドを使い、PicoMado 側で上流版を手動更新しない。実行時はネットワークを使わず、サーバー実行ファイルと同じディレクトリの CLI を呼ぶ。
 
 上流 Git `main` を毎回追う方式は上流変更が次の PicoMado インストール時に反映される一方、日付だけでは同じ成果物を再現できない。取得コミットと SHA256 を保存して追跡可能にし、HTTPS と Cargo.lock を使うが、上流アカウントや公開元の侵害リスクは残る。オフライン新規導入は失敗し、更新では既存インストールを保持する。将来の上流 Release 起点の自動バンドルはオフライン利用と利用者の Rust 不要化に有利だが、現時点は両リポジトリとも Release がなく実施できない。利用時に最新版を毎回取得する方式は端末表示をネットワーク障害に依存させるため採用しない。
 
