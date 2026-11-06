@@ -328,13 +328,22 @@ impl ContentPlugin for RadarContent {
         self.devices = stored
             .into_iter()
             .map(|(id, s)| {
+                // A pre-density cache has LCD pixels but no native E-ink frame.
+                // Fetch a fresh generation at startup instead of keeping its
+                // old freshness deadline and showing an error until that hour.
+                let needs_eink = s.latest.as_ref().is_some_and(|set| {
+                    set.frames.iter().any(|frame| {
+                        BASE64.decode(&frame.eink).ok()
+                            .is_none_or(|pixels| pixels.len() != crate::eink::FRAME_BYTES)
+                    })
+                });
                 (
                     id,
                     RadarSlot {
                         incarnation: s.incarnation,
                         settings_revision: s.settings_revision,
                         browse: s.latest.map(RadarBrowse::new),
-                        last_success_unix: s.last_success_unix,
+                        last_success_unix: if needs_eink { None } else { s.last_success_unix },
                         last_attempt_unix: s.last_attempt_unix,
                         error: s.error,
                         generation: s.generation,
@@ -1188,6 +1197,37 @@ mod tests {
                 .unwrap(),
             expected
         );
+    }
+
+    #[test]
+    fn restored_pre_density_cache_requests_a_fresh_generation() {
+        let ctx = PluginContext {
+            token: crate::SessionToken {
+                device_id: "old-cache".into(),
+                incarnation: 1,
+                session_epoch: 1,
+            },
+            settings_revision: 1,
+            mode: Mode::Normal,
+        };
+        let mut content = RadarContent::default();
+        content.publish(&ctx, SAVED, "saved", "2026-10-12").unwrap();
+        let mut state = content.save_state();
+        state["old-cache"]["last_success_unix"] = serde_json::json!(100);
+        for frame in state["old-cache"]["latest"]["frames"].as_array_mut().unwrap() {
+            frame.as_object_mut().unwrap().remove("eink");
+        }
+        let mut restored = RadarContent::default();
+        restored.load_state(state).unwrap();
+        assert_eq!(restored.eink_frame_for(&ctx, &[]).unwrap(), error_eink());
+        let policy = crate::settings::PluginSettings::default().radar_fetch;
+        assert!(restored.plan_fetch(&ctx, 101, "2026-10-12", &policy).is_some());
+        let mut failed_state = restored.save_state();
+        failed_state["old-cache"]["error"] = serde_json::json!(true);
+        failed_state["old-cache"]["last_attempt_unix"] = serde_json::json!(102);
+        let mut failed = RadarContent::default();
+        failed.load_state(failed_state).unwrap();
+        assert!(failed.plan_fetch(&ctx, 103, "2026-10-12", &policy).is_none());
     }
 
     #[test]

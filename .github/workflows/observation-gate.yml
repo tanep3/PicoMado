@@ -20,5 +20,12 @@ jobs:
         run: |
           sudo timeout 180 apt-get update
           sudo env DEBIAN_FRONTEND=noninteractive timeout 300 apt-get install -y --no-install-recommends libwebp-dev ffmpeg
+      - name: Install pic2gray4px for server tests
+        timeout-minutes: 10
+        run: |
+          cargo install --git https://github.com/tanep3/pic2gray4px.git --branch main --locked --root "$RUNNER_TEMP/pic2gray4px"
+          "$RUNNER_TEMP/pic2gray4px/bin/pic2gray4px" --help
       - name: Server tests
+        env:
+          PICOMADO_PIC2GRAY4PX: ${{ runner.temp }}/pic2gray4px/bin/pic2gray4px
         run: cargo test --locked --all-features --manifest-path service/Cargo.toml
