@@ -1,6 +1,6 @@
 # RADAR-EINK-DENSITY-20261107
 
-Status: registered by the worker at the user's direction on 2026-11-07. The specification revision (this registration, the rain-radar requirements revision and the AC-04 adjustment, requirements README v1.3) was committed to main as `79465fa` with the user's approval, so the design stage is verified by that specification commit. Implementation is in progress. The user later authorized production server deployment, described below. Independent verification, operational-application stage approval and effectiveness confirmation remain with the parent. No device write was performed.
+Status: completed on 2026-11-07 by parent closure. Registered by the worker at the user's direction; the specification revision was committed to main as `79465fa` (design verified). Implemented by the Dots worker (`d8c4297`, `d3a829b`), with a legacy-cache migration follow-up (`afcdb91`) found and fixed during deployment; the production server was deployed at the user's authorization and the deployment recorded in `b5a2c16`. Independent verification was performed as a parent-delegated review (see the closure section). The user confirmed effectiveness on the physical E-ink panel. No firmware or device write was performed.
 
 ## Cause and measured evidence
 
@@ -49,7 +49,7 @@ Fallback: if conversion fails at generation time, keep the previous generation's
 
 ## Stages
 
-design: verified (specification commit `79465fa` on main, approved by the user). implementation: in_progress. independent_verification: not_started. operational_application: not_started. effectiveness_confirmation: not_started. The worker does not self-assert independent acceptance or final closure.
+design: verified (specification commit `79465fa` on main, approved by the user). implementation: verified. independent_verification: verified (parent-delegated review, see closure section). operational_application: verified (production deployment recorded in `b5a2c16`). effectiveness_confirmation: verified (user report on the physical panel, see closure section). Closed by the parent on 2026-11-07.
 
 ## Implementation record (worker, 2026-11-07)
 
@@ -79,3 +79,15 @@ The follow-up migration test and all nine radar tests passed with the installed 
 The migration follow-up was committed on canonical `main` as `afcdb91c892c21882c6087ef3432637cad8fadf9`. The user requested that they perform the push, so the worker did not push. The release server built from this commit replaced the first deployment; installed SHA-256 is `a7ad53e8eb23913e1dfdafcaae8a4ac1234c24bddbf34301a206f607a2da99a7`. Before replacement, the user service was stopped for a second full backup and consistent SQLite backup in the same private directory; the DB passed integrity check. After restart, the user service was active, the API returned HTTP 200, and saved order/settings matched the previous snapshot. Read-only DB inspection showed both E-ink devices and the LCD device each have five 3813-byte E-ink frames and `error=false`; the LCD device's legacy empty E-ink cache had refreshed immediately after this restart. The service remained active with E-ink heartbeats at 06:51 JST. Physical panel readability and parent-owned approval remain open.
 
 The exact CI server command `cargo test --locked --all-features --manifest-path service/Cargo.toml` passed locally with `PICOMADO_PIC2GRAY4PX=/tmp/radar-ci-pic2gray4px/bin/pic2gray4px`: 337 library tests passed, none failed, one ignored; integration suites passed (2 and 4 tests; other targets had zero or ignored tests). Log: `/tmp/radar-ci-all-features.log`, SHA-256 `9bc637edba5b060cfa03824691fcb32df8d31809d46d64890ae53b3b50bcf64a`. The converter installation log SHA-256 is `6b031d4e2516db104cdf649ffcd148fd4a37223329de0b4d539e8f67482c928f`. This verifies the local CI repair; hosted GitHub Actions remains unverified until the user pushes.
+
+## Parent closure (2026-11-07)
+
+Closed by the parent (user) after the deployment records above and the user's own physical-panel confirmation. Stage evidence is bound in the JSON ledger.
+
+Independent verification was performed as a parent-delegated review by Yuuko (Muse worker), independent of the implementing Dots worker. Scope: the diff of `d8c4297..b5a2c16` is confined to `service/src/radar.rs` and this change's own documents; the LCD renderer functions are untouched by the diff, matching the worker's byte-identity claim for LCD output; the committed host preview's SHA-256 matches the value recorded by the worker (`ce13c35b…`); the reported intensity monotonicity with conversion controls off (0.207 / 0.321 / 0.446 / 0.544 / 0.674 / 0.777 / 0.870 / 0.969) agrees with the pre-implementation host experiment performed for the specification (0.19–0.99 ladder). Test-suite results (302, then 303, then 337 library tests under the exact CI command) are taken from the worker's recorded logs with SHA-256 references and were not rerun by the reviewer.
+
+Operational application: the production server runs the `afcdb91` build (installed SHA-256 `a7ad53e8…`), deployed with full backups and integrity-checked SQLite snapshots; after the migration follow-up, all devices hold five populated 3813-byte E-ink frames with `error=false`, and E-ink heartbeats were observed at 06:51 JST. The first deployment's legacy-cache failure (empty E-ink fields in pre-density saved sets, E-ink showing the native error frame while LCD worked) was root-caused to the migration defaults and fixed in `afcdb91` with a dedicated legacy-state test; this incident and its fix are part of this change's record, not a separate change, because they arose inside its own rollout.
+
+Effectiveness confirmation: the user viewed the physical E-ink panel and reported on 2026-11-07: 「かなりよくなった。山形県あたりに雨雲がかかっているのが分かる」 — the radar is much more readable and the rain area over Yamagata is identifiable, which is the requirement's core (position and extent of the precipitation area, with monotonic intensity gradation).
+
+Residual items, recorded honestly and left open outside this change: the hosted GitHub Actions result for the final push had not been confirmed at closure time (the CI repair itself was verified locally under the exact CI command); the unrelated root-gate structural failure noted in the implementation record (firmware build SDK flags fixture) remains as recorded and is out of this change's scope.
