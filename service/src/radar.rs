@@ -5,9 +5,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, LazyLock};
+use std::{fs, path::PathBuf, process::{Command, Stdio}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use image::{ImageFormat, RgbaImage};
+use image::{GrayImage, ImageFormat, Luma, RgbaImage};
 use serde::{Deserialize, Serialize};
 use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, Time};
 
@@ -49,6 +50,8 @@ struct RadarFrame {
     validtime: String,
     observed: bool,
     pixels: String,
+    #[serde(default)]
+    eink: String,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct RadarSet {
@@ -233,6 +236,14 @@ impl ContentPlugin for RadarContent {
         }
         let (_, frame) = slot.browse.as_ref()?.current();
         lcd_frame(frame).ok()
+    }
+    fn eink_frame_for(&self, ctx: &PluginContext, _: &[u8]) -> Option<Vec<u8>> {
+        let slot = self.slot(ctx)?;
+        if slot.error {
+            return Some(error_eink());
+        }
+        let (_, frame) = slot.browse.as_ref()?.current();
+        Some(BASE64.decode(&frame.eink).ok().filter(|b| b.len() == crate::eink::FRAME_BYTES).unwrap_or_else(error_eink))
     }
     fn plan(
         &mut self,
@@ -581,10 +592,12 @@ fn parse_and_render(source: &[u8], id: &str) -> Result<RadarSet, String> {
             .collect::<Result<_, _>>()?;
         let nd = source.nodata.get(&key(&t)).ok_or("missing no-data layer")?;
         let pixels = render_lcd(&t.validtime, observed, &tiles, nd)?;
+        let eink = render_eink(&t.validtime, observed, &tiles, nd)?;
         frames.push(RadarFrame {
             validtime: t.validtime,
             observed,
             pixels: BASE64.encode(pixels),
+            eink: BASE64.encode(eink),
         });
     }
     Ok(RadarSet {
@@ -870,68 +883,97 @@ fn error_lcd() -> Vec<u8> {
     pixels.into_iter().flat_map(u16::to_be_bytes).collect()
 }
 
-/// Packed MSB-first, white=1 monochrome preview for the future 250×122
-/// E-ink path. Coast and precipitation are independent black strokes.
-pub fn render_eink_preview(source: &[u8], validtime: &str) -> Result<Vec<u8>, String> {
-    let source: RadarSource = serde_json::from_slice(source).map_err(|e| e.to_string())?;
-    let (times, _) = selected_times(&source.n1, &source.n2)?;
-    let (time, observed) = times
-        .iter()
-        .find(|(t, _)| t.validtime == validtime)
-        .ok_or("time absent")?;
-    let pngs = source.rain.get(&key(time)).ok_or("missing rain tiles")?;
-    let tiles: Vec<_> = pngs
-        .iter()
-        .map(|s| decode_tile(&BASE64.decode(s).map_err(|e| e.to_string())?))
-        .collect::<Result<_, _>>()?;
-    let rings = coverage_rings(
-        source
-            .nodata
-            .get(&key(time))
-            .ok_or("missing no-data layer")?,
-    )?;
-    let w = 250;
-    let h = 122;
-    let header = 25;
-    let mut pixels = vec![u16::MAX; w * h];
-    for x in 0..w {
-        pixels[(header - 1) * w + x] = 0;
-    }
-    for y in 0..h - header {
+const RAIN_COLORS: [[u8; 3]; 8] = [
+    [242, 242, 255], [160, 210, 255], [33, 140, 255], [0, 65, 255],
+    [250, 245, 0], [255, 153, 0], [255, 40, 0], [180, 0, 104],
+];
+const RAIN_GRAY: [u8; 8] = [205, 175, 145, 115, 85, 58, 30, 8];
+fn rain_gray(wet: [u8; 4]) -> Result<Option<u8>, String> {
+    if wet[3] <= 45 { return Ok(None); }
+    RAIN_COLORS.iter().position(|c| wet[..3] == c[..])
+        .map(|i| Some(RAIN_GRAY[i]))
+        .ok_or_else(|| format!("unknown JMA rain color: {:?}", wet))
+}
+fn grayscale_canvas(tiles: &[RgbaImage], geojson: &str) -> Result<GrayImage, String> {
+    let rings = coverage_rings(geojson)?;
+    let (w, h, header) = (250usize, 122usize, 25usize);
+    let mut image = GrayImage::from_pixel(w as u32, h as u32, Luma([255]));
+    for y in header..h {
         for x in 0..w {
-            let (mx, my) = screen_to_map(x, y, w, h - header);
+            let (mx, my) = screen_to_map(x, y - header, w, h - header);
             let base = sample_tile(&MAP[..], mx, my);
-            let wet = sample_tile(&tiles, mx, my)[3] > 45;
-            let near_wet = [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)]
-                .iter()
-                .any(|(dx, dy)| sample_tile(&tiles, mx + dx, my + dy)[3] > 45);
             let coast = land(base) != land(sample_tile(&MAP[..], mx + 1.5, my))
                 || land(base) != land(sample_tile(&MAP[..], mx - 1.5, my))
                 || land(base) != land(sample_tile(&MAP[..], mx, my + 1.5))
                 || land(base) != land(sample_tile(&MAP[..], mx, my - 1.5));
             let covered = rings.iter().any(|ring| in_ring(mx, my, ring));
-            if coast || wet || (!covered && (x + y) % 8 == 0 && !near_wet) {
-                pixels[(y + header) * w + x] = 0;
+            let gray = if coast { 0 } else if !covered { 150 }
+                else if let Some(g) = rain_gray(sample_tile(tiles, mx, my))? { g }
+                else if land(base) { 246 } else { 228 };
+            image.put_pixel(x as u32, y as u32, Luma([gray]));
+        }
+    }
+    Ok(image)
+}
+struct RadarTemp(PathBuf);
+impl Drop for RadarTemp { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
+fn convert_gray(image: &GrayImage) -> Result<Vec<u8>, String> {
+    convert_gray_with_options(image, false)
+}
+fn convert_gray_with_options(image: &GrayImage, auto: bool) -> Result<Vec<u8>, String> {
+    let cli = std::env::var_os("PICOMADO_PIC2GRAY4PX").map(PathBuf::from)
+        .or_else(|| std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("pic2gray4px"))))
+        .ok_or("pic2gray4px missing")?;
+    if !cli.is_absolute() || !cli.is_file() { return Err("pic2gray4px missing".into()); }
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?.as_nanos();
+    let root = std::env::temp_dir().join(format!("picomado-radar-{}-{nonce}", std::process::id()));
+    fs::create_dir(&root).map_err(|e| e.to_string())?;
+    let _guard = RadarTemp(root.clone());
+    let input = root.join("gray.png");
+    let output = root.join("mono.png");
+    image.save_with_format(&input, ImageFormat::Png).map_err(|e| e.to_string())?;
+    let mut command = Command::new(cli);
+    command.arg(&input).arg(&output);
+    if !auto { command.args(["--contrast", "off", "--unsharp", "off"]); }
+    let mut child = command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+        .spawn().map_err(|e| e.to_string())?;
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) => return Err("pic2gray4px failed".into()),
+            Err(e) => { let _ = child.kill(); let _ = child.wait(); return Err(e.to_string()); },
+            Ok(None) if start.elapsed() > Duration::from_secs(2) => {
+                let _ = child.kill(); let _ = child.wait(); return Err("pic2gray4px timeout".into());
             }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
         }
     }
-    paint_text(
-        &mut pixels,
-        (w, h),
-        4,
-        2,
-        &label(validtime, *observed)?,
-        16,
-        0,
-    );
-    paint_text(&mut pixels, (w, h), 130, 112, "気象庁/国土地理院", 8, 0);
-    let mut packed = vec![0u8; (w * h).div_ceil(8)];
-    for (i, pixel) in pixels.iter().enumerate() {
-        if *pixel != 0 {
-            packed[i / 8] |= 1 << (7 - i % 8);
-        }
+    let bytes = fs::read(output).map_err(|e| e.to_string())?;
+    crate::eink::from_png(&bytes).ok_or("invalid pic2gray4px frame".into())
+}
+fn solid_text(pixels: &mut [u8], x: usize, y: usize, text: &str, size: usize) {
+    let mut canvas = vec![u16::MAX; crate::eink::WIDTH * crate::eink::HEIGHT];
+    paint_text(&mut canvas, (crate::eink::WIDTH, crate::eink::HEIGHT), x, y, text, size, 0);
+    for (i, p) in canvas.iter().enumerate() {
+        if *p == 0 { pixels[i / 8] &= !(0x80 >> (i % 8)); }
     }
-    Ok(packed)
+}
+fn error_eink() -> Vec<u8> {
+    let mut pixels = vec![255; crate::eink::FRAME_BYTES];
+    solid_text(&mut pixels, 5, 3, "雨雲", 16);
+    solid_text(&mut pixels, 60, 52, "取得失敗", 20);
+    pixels
+}
+fn render_eink(validtime: &str, observed: bool, tiles: &[RgbaImage], geojson: &str) -> Result<Vec<u8>, String> {
+    let canvas = grayscale_canvas(tiles, geojson)?;
+    let mut pixels = convert_gray(&canvas)?;
+    for (i, gray) in canvas.pixels().enumerate() {
+        if gray[0] == 0 { pixels[i / 8] &= !(0x80 >> (i % 8)); }
+    }
+    solid_text(&mut pixels, 4, 2, &label(validtime, observed)?, 16);
+    solid_text(&mut pixels, 130, 112, "気象庁/国土地理院", 8);
+    Ok(pixels)
 }
 
 pub struct JmaRadarFetcher;
@@ -1174,10 +1216,11 @@ mod tests {
         }
         assert_ne!(set.frames[3].pixels, set.frames[4].pixels);
         assert!(set.frames[3].pixels != set.frames[0].pixels);
-        let eink = render_eink_preview(SAVED, "20261012032000").unwrap();
+        let eink = BASE64.decode(&set.frames[3].eink).unwrap();
         assert_eq!(eink.len(), (250usize * 122).div_ceil(8));
         assert!(eink.iter().any(|v| *v != 0xff));
-        assert_ne!(eink, render_eink_preview(SAVED, "20261012042000").unwrap());
+        assert_ne!(eink, BASE64.decode(&set.frames[4].eink).unwrap());
+        assert!(set.frames.iter().all(|f| BASE64.decode(&f.eink).unwrap().len() == 3813));
         if std::env::var_os("RADAR_PREVIEW").is_some() {
             let pixels = BASE64.decode(&set.frames[3].pixels).unwrap();
             let mut image = image::RgbImage::new(160, 80);
@@ -1207,6 +1250,79 @@ mod tests {
                 .save("/tmp/picomado-radar-eink-preview.png")
                 .unwrap();
         }
+    }
+    #[test]
+    fn semantic_rain_ladder_has_strictly_increasing_disc_darkness() {
+        let mut canvas = GrayImage::from_pixel(250, 122, Luma([228]));
+        for (i, color) in RAIN_COLORS.iter().enumerate() {
+            let gray = rain_gray([color[0], color[1], color[2], 255]).unwrap().unwrap();
+            let cx = 20 + i as i32 * 30;
+            for y in 45i32..75 {
+                for x in cx-14..cx+14 {
+                    if (x-cx).pow(2) + (y-60).pow(2) < 14*14 {
+                        canvas.put_pixel(x as u32, y as u32, Luma([gray]));
+                    }
+                }
+            }
+        }
+        let measure = |mono: &[u8]| -> Vec<f64> { (0..8).map(|i| {
+            let cx = 20 + i * 30;
+            let mut dark = 0;
+            let mut total = 0;
+            for y in 52..68 {
+                for x in cx-8..cx+8 {
+                    if (x as i32-cx as i32).pow(2)+(y as i32-60).pow(2) < 8*8 {
+                        let bit = y * 250 + x;
+                        dark += usize::from(mono[bit/8] & (0x80 >> (bit%8)) == 0);
+                        total += 1;
+                    }
+                }
+            }
+            dark as f64 / total as f64
+        }).collect() };
+        let mono = convert_gray(&canvas).unwrap();
+        let densities = measure(&mono);
+        let automatic = measure(&convert_gray_with_options(&canvas, true).unwrap());
+        eprintln!("radar density off: {densities:?}; auto: {automatic:?}");
+        assert!(densities.windows(2).all(|p| p[0] < p[1]));
+        assert!(automatic.windows(2).all(|p| p[0] < p[1]));
+    }
+    #[test]
+    fn rain_heavy_host_fixture_preview() {
+        if std::env::var_os("RADAR_HEAVY_PREVIEW").is_none() { return; }
+        let source: RadarSource = serde_json::from_slice(SAVED).unwrap();
+        let (times, _) = selected_times(&source.n1, &source.n2).unwrap();
+        let time = &times[3].0;
+        let tiles: Vec<_> = source.rain[&key(time)].iter()
+            .map(|s| decode_tile(&BASE64.decode(s).unwrap()).unwrap()).collect();
+        let mut canvas = grayscale_canvas(&tiles, &source.nodata[&key(time)]).unwrap();
+        // New rain-heavy host fixture over the saved JMA geography and coverage.
+        for y in 27..110i32 {
+            for x in 0..250i32 {
+                let band = ((x - 120) as f64 * 0.5 + (y - 70) as f64).abs();
+                let cell = (((x - 65).pow(2) + (y - 87).pow(2)) as f64).sqrt();
+                let weak = (((x - 194).pow(2) + (y - 52).pow(2)) as f64).sqrt();
+                let level = if cell < 24.0 { Some(if cell < 6.0 { 7 } else if cell < 13.0 { 6 } else { 5 }) }
+                    else if band < 16.0 { Some(if band < 5.0 { 4 } else if band < 10.0 { 3 } else { 2 }) }
+                    else if weak < 21.0 { Some(if weak < 10.0 { 1 } else { 0 }) } else { None };
+                if let Some(i) = level { canvas.put_pixel(x as u32, y as u32, Luma([RAIN_GRAY[i]])); }
+            }
+        }
+        let mono = convert_gray(&canvas).unwrap();
+        canvas.save("/tmp/radar-heavy-gray.png").unwrap();
+        let auto = convert_gray_with_options(&canvas, true).unwrap();
+        let mut preview = GrayImage::new(250, 122);
+        for i in 0..250*122usize {
+            preview.put_pixel((i%250) as u32, (i/250) as u32,
+                Luma([if mono[i/8] & (0x80 >> (i%8)) != 0 { 255 } else { 0 }]));
+        }
+        preview.save("/tmp/radar-heavy-preview.png").unwrap();
+        let mut auto_preview = GrayImage::new(250, 122);
+        for i in 0..250*122usize {
+            auto_preview.put_pixel((i%250) as u32, (i/250) as u32,
+                Luma([if auto[i/8] & (0x80 >> (i%8)) != 0 { 255 } else { 0 }]));
+        }
+        auto_preview.save("/tmp/radar-heavy-auto.png").unwrap();
     }
 
     #[test]
