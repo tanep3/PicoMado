@@ -54,6 +54,7 @@ design: verified (specification commit `79465fa` on main, approved by the user).
 ## Implementation record (worker, 2026-11-07)
 
 Implementation source and host preview were committed on canonical `main` as `d8c4297dd7cba1576726d1c5adcbb5a7ba4c9bd7`. This records worker progress only; parent acceptance is pending.
+The all-hour pairwise golden assertion is commit `d3a829bbad95dfb11403163308140515213c9d7e`; its passing test log is `/tmp/radar-all-hours-test.log` (SHA-256 `51809b8c737435e757ecb16cf3b6c62aa09d135b4597e24f132822c881c43f0d`).
 
 The native renderer reads the same decoded JMA tiles as the LCD renderer and generates a 250×122 grayscale canvas. JMA RGBA classes, weakest to strongest, map as follows: (242,242,255)→205; (160,210,255)→175; (33,140,255)→145; (0,65,255)→115; (250,245,0)→85; (255,153,0)→58; (255,40,0)→30; (180,0,104)→8. Transparent pixels are dry. An unknown opaque rain color rejects the generation instead of acquiring an arbitrary intensity. Sea is 228, land 246, no-data 150 uniformly, coastline 0 and overpainted solid after conversion. Text is painted solid after pic2gray4px conversion. The legacy `render_eink_preview` was removed.
 
