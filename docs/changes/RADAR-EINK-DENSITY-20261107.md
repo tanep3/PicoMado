@@ -1,6 +1,6 @@
 # RADAR-EINK-DENSITY-20261107
 
-Status: registered by the worker at the user's direction on 2026-11-07. The specification revision is drafted in this working tree and is not yet committed. Design is in progress; implementation, independent verification, operational application and effectiveness confirmation are not started. Parent acceptance and closure remain with the user. No commit, push, deployment or device write has been performed for this change.
+Status: registered by the worker at the user's direction on 2026-11-07. The specification revision (this registration, the rain-radar requirements revision and the AC-04 adjustment, requirements README v1.3) was committed to main as `79465fa` with the user's approval, so the design stage is verified by that specification commit. Implementation, independent verification, operational application and effectiveness confirmation are not started. Parent closure remains with the user. No deployment or device write has been performed for this change.
 
 ## Cause and measured evidence
 
@@ -49,4 +49,4 @@ Fallback: if conversion fails at generation time, keep the previous generation's
 
 ## Stages
 
-design: in_progress (this registration and the requirements revision are the draft specification; uncommitted). implementation: not_started. independent_verification: not_started. operational_application: not_started. effectiveness_confirmation: not_started. The worker does not self-assert independent acceptance or final closure.
+design: verified (specification commit `79465fa` on main, approved by the user). implementation: not_started. independent_verification: not_started. operational_application: not_started. effectiveness_confirmation: not_started. The worker does not self-assert independent acceptance or final closure.
