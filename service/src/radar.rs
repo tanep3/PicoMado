@@ -1221,6 +1221,7 @@ mod tests {
         assert!(eink.iter().any(|v| *v != 0xff));
         assert_ne!(eink, BASE64.decode(&set.frames[4].eink).unwrap());
         assert!(set.frames.iter().all(|f| BASE64.decode(&f.eink).unwrap().len() == 3813));
+        assert_eq!(set.frames.iter().map(|f| &f.eink).collect::<BTreeSet<_>>().len(), set.frames.len());
         if std::env::var_os("RADAR_PREVIEW").is_some() {
             let pixels = BASE64.decode(&set.frames[3].pixels).unwrap();
             let mut image = image::RgbImage::new(160, 80);
