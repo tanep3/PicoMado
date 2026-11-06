@@ -38,7 +38,12 @@
       "state": "not_started"
     },
     "implementation": {
-      "evidence": [],
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "d8c4297dd7cba1576726d1c5adcbb5a7ba4c9bd7"
+        }
+      ],
       "state": "in_progress"
     },
     "independent_verification": {
