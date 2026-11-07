@@ -42,3 +42,5 @@ typedef struct {uint16_t cid,signaling_cid,media_cid;int connection,source,initi
 void pm_bt_runtime_link_snapshot(pm_bt_link_snapshot *out);
 
 bool pm_bt_runtime_audio_finish(uint64_t generation,uint64_t final_frame);
+
+uint8_t pm_bt_runtime_connect_at(uint64_t generation,const uint8_t address[6],uint32_t received_ms);

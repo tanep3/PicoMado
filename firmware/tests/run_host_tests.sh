@@ -23,6 +23,12 @@ run bluetooth-packet-policy
 build bluetooth-connection-policy tests/bluetooth_connection_policy_test.c
 run bluetooth-connection-policy
 python3 tests/bluetooth_pipeline_test.py
+build bluetooth-recovery tests/bluetooth_recovery_test.c
+run bluetooth-recovery
+build bluetooth-recovery-runtime tests/bluetooth_recovery_runtime_test.c
+run bluetooth-recovery-runtime
+build bluetooth-stream-established tests/bluetooth_stream_established_test.c
+run bluetooth-stream-established
 build core tests/core_test.c src/core.c
 build wake tests/wake_test.c src/core.c
 build transform tests/lcd_transform_test.c

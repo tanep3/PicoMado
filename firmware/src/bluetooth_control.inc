@@ -80,7 +80,7 @@ static void poll_bluetooth(void){
             bt_pending=false;
             if(bt_action==1)pm_bt_runtime_stop(bt_token.generation);
             else if(bt_action==2)status=pm_bt_runtime_scan(bt_token.generation);
-            else status=pm_bt_runtime_connect(bt_token.generation,bt_target);
+            else status=pm_bt_runtime_connect_at(bt_token.generation,bt_target,bt_received_ms);
         }
     }
     pm_bt_event e;bool have=bt_initialized&&pm_bt_runtime_next(&e);
@@ -92,7 +92,8 @@ static void poll_bluetooth(void){
     if(status){bt_waiting=false;(void)bt_report("{\"event\":\"complete\",\"success\":false}");return;}
     if(!have||e.generation!=bt_token.generation||bt_timed_out)return;
     if(e.kind==PM_BT_LINK_DIAGNOSTIC){
-        pm_logf("bt link generation=%llu status=%u old_cid=%ld new_cid=%ld phase=%ld\n",(unsigned long long)e.generation,e.status,(long)e.detail1,(long)e.detail2,(long)e.detail3);
+        if(e.detail3==4)pm_logf("bt discover_wait generation=%llu cid=%ld waiting=%ld evidence=state_only\n",(unsigned long long)e.generation,(long)e.detail1,(long)e.detail2);
+        else pm_logf("bt link generation=%llu status=%u old_cid=%ld new_cid=%ld phase=%ld\n",(unsigned long long)e.generation,e.status,(long)e.detail1,(long)e.detail2,(long)e.detail3);
     }else if(e.kind==PM_BT_FOUND){
         char name[128],report[300];size_t n=0;
         for(size_t i=0;i<sizeof e.name&&e.name[i]&&n+2<sizeof name;i++){

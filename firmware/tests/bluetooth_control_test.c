@@ -27,6 +27,7 @@ bool pm_bt_runtime_ready(void){assert(locks);return ready_result;}
 void pm_bt_runtime_stop(uint64_t g){assert(locks);stop_calls++;last_stop=g;ready_result=false;}
 uint8_t pm_bt_runtime_scan(uint64_t g){assert(locks&&ready_result);scan_calls++;last_scan=g;return 0;}
 uint8_t pm_bt_runtime_connect(uint64_t g,const uint8_t address[6]){assert(locks&&ready_result);assert(address[5]==0x55);connect_calls++;last_connect=g;return 0;}
+uint8_t pm_bt_runtime_connect_at(uint64_t g,const uint8_t address[6],uint32_t received_ms){assert((uint32_t)(now_ms-received_ms)<25000);return pm_bt_runtime_connect(g,address);}
 void pm_bt_runtime_enable_input(bool enabled){assert(locks);(void)enabled;}
 bool pm_bt_runtime_next(pm_bt_event *out){assert(locks);if(!queued)return false;*out=event;queued=false;return true;}
 static bool pm_net_send(unsigned kind,const char *j){assert(!locks&&kind==21);reports++;snprintf(last_report,sizeof last_report,"%s",j);return true;}
