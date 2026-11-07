@@ -50,3 +50,35 @@ music関連9テスト成功（専用font2試験を含む）。サーバへの反
 ### ボタン修正のホスト検証
 
 `service/tests/local_music_input.rs` を追加し、2026-11-07 の最終修正ソースで `cargo test --manifest-path service/Cargo.toml --test local_music_input --no-default-features` は **7 passed / 0 failed**。公開 App 入力経路の再生/一時停止/位置を保持した再開、曲終端の1回 replay、2端末の独立、2曲がある場合の Up/Down チャンネル切替維持、再接続と再登録での古い session/incarnation 拒否、古い audio offer の不一致、非対応 name/mode の拒否、候補の同一端末/incarnation/plugin 限定を確認した。共通 application / Engine / terminal allowlist は変更していない。修正前の固定ソースを使った厳密な前後比較は未実施。全体の独立検証・本番反映・実機効果確認は親が別途確認する。
+
+## 端末 Sub を曲入れ替えへ変更する仕様案（2026-11-08、未実装）
+
+ユーザーの新要望は「ローカル音楽表示時、端末のサブメニューボタンは曲の入れ替えにしたい」。これが従来の物理 Sub = 再生/一時停止トグルを置き換える。以下は実装前の案であり、AVRCP との入力分離方針を確定し、仕様コミット後に実装する。
+
+### 現在の入力経路と制約
+
+- 4ボタン機の Sub は押下時に1回の SUB 操作。長押し専用動作はない。2ボタン機は左短押し=Up、左長押し=Sub、右短押し=Down、右長押し=Power（`firmware/src/core.c` の binding）。
+- AVRCP PLAY (`0x44`) / PAUSE (`0x46`) は両方 `PM_OP_SUB`、FORWARD (`0x4b`) は Down、BACKWARD (`0x4c`) は Up。押下重複を抑制し、release は次の押下を許可するだけ（`firmware/src/bluetooth_input.h`）。PLAY と PAUSE も個別の再生/停止指示ではなく現在は同じトグルである。
+- Normal の local-music は Sub だけをプラグインへ渡す。Up/Down は App 共通のチャンネル切替なので、現在 AVRCP FORWARD/BACKWARD も曲送り/曲戻しにはならない。
+- GPIO/SIM/AVRCP は `perform_operation` に合流し、wire の `enter_sub` / `up` / `down` は incarnation と session_epoch のみを持つ。起源・AVRCP opcode は service の入力意味として届かない。任意の observation 情報は診断用であり、制御の意味を復元する代用品にしない。
+- **実装 blocker:** local-music の Sub だけを順送りへ置き換えると AVRCP PLAY/PAUSE まで順送りになる。現在の wire では区別不能。端末 Sub と AVRCP の意味を分離する契約を別途確定するまで、その置換を適用しない。プロトコル拡張や AVRCP 割当変更をこの案だけで承認済みとしない。
+
+### 曲入れ替えの状態遷移案
+
+- 対象は Normal で local-music を表示している現在 session の端末のみ。端末の意味上の Sub を1回受けると、変換済み曲一覧の次の曲へ進み、最終曲から先頭へ循環する。順序は Web の `data.tracks` と同じ確定順（現状は track key の BTreeMap 順）を維持し、新しい並び替え設定は追加しない。
+- 再生途中の入れ替えは次曲の先頭から再生要求を継続する。一時停止/停止中または曲終端後なら、次曲を先頭の停止状態で選ぶ。曲変更を暗黙の再生開始にしない。
+- 未選曲で曲があれば先頭曲を停止状態で選ぶ。0曲なら無変更。1曲で既にその曲を選択済みなら位置・再生状態・generation を維持して無変更とし、意図しない先頭戻しを起こさない。
+- 実際に曲が変わる場合だけ新しい audio generation と表示世代を採用し、旧曲の非同期 audio offer を拒否する。他端末の曲・位置・状態・世代は維持する。stale session/incarnation、非対応 mode と入力 name は拒否する。
+- Normal の端末 Up/Down のチャンネル切替は維持する。Web の play/pause/stop も維持する。AVRCP の適切な再生・一時停止・曲送り/曲戻し割当は別の入力意味として確定する必要があり、端末 Up/Down の意味を流用して変更しない。
+- 無音ホスト試験は App の実入力経路で、循環・再生継続・停止維持・終端・未選曲・0/1曲・端末独立・stale offer/session/incarnation 拒否・チャンネル維持・AVRCP との意味分離を固定する。実機、USB、SSH、サービス変更、音声再生、本番適用は別承認と別証拠のまま。
+
+### 確定: 端末 Sub と AVRCP の独立契約（2026-11-08）
+
+親承認により入力分離を実装する。上記の blocker は専用 media input と capability 交渉で解決する設計に確定した。本節は従来 Sub トグル契約と上記未確定部分に優先する。実装開始は仕様コミットと親の開始指示後とする。
+
+- **新 wire:** kind `27`、type `media_input`、data は `incarnation: u64`, `session_epoch: u64`, `operation: "play" | "pause" | "next" | "previous"`。操作は独立した enum としてdecodeし、不明値を既存ボタンへ変換しない。session identity の生成モデルへ型を分類する。
+- **交渉:** 新firmwareは Hello capabilities に `media-input-v1` を広告する。新serverはその広告がある端末だけ Welcome.data に `media_input_version: 1` を返す。Rust側は欠落時 `None` の optional unsigned integer とする。旧serverの欠落、未知version、未Welcome、非ACTIVE/古いsessionでは新firmwareはAVRCP入力を送らず、旧Subへのfallbackもしない。新Welcomeごとに交渉状態をresetする。
+- **旧firmware互換:** `bluetooth-audio-v1` があり `media-input-v1` がない旧BT端末の generic Sub だけは、物理/AVRCPを識別できないため従来の再生/一時停止トグルを維持する。`media-input-v1` のある新端末とBT非対応端末の generic Sub は曲循環にする。端末IDを推測せず実際の能力情報だけを用いる。接続、他のchannelのSub、Normal Up/Downのチャンネル切替は従来どおり。
+- **AVRCP意味:** local-music表示中のNormal/current sessionのみで PLAY=再生、PAUSE=一時停止、NEXT=次曲、PREVIOUS=前曲。PLAY中のPLAY、停止中のPAUSEは無変更。PLAYは同曲の一時停止位置から再開し、終端後は先頭から開始する。未選曲なら先頭曲から再生、0曲なら無変更。NEXT/PREVIOUSは一覧順に双方向循環し、物理Subと同じ再生継続/停止維持/先頭位置/0・1曲ルールを適用する。選択した他channelやSub/Menu/Standbyには作用しない。PLAY/PAUSEをトグルと解釈しない。
+- **状態所有と境界:** firmwareはAVRCPを既存GPIO operationへ畳み込まず専用wireを送る。serviceはsession・capabilityを検証し、typed media operationを選択pluginへ渡す。local-musicの純粋遷移は引き続き `PluginInput → LocalMusicPlugin.candidates → PluginDataChanged` のaggregate採用後に確定する。既存pluginのlegacy Subは既定の通常Sub経路を維持し、local-musicだけが旧BTトグルを提供する。アプリ共通層にlocal-music等のplugin ID分岐を追加しない。
+- **追加検証:** 専用wire4操作のroundtrip、未知operation拒否、旧Welcomeのdecode、cap有無でWelcome交渉、stale session/incarnation拒否、他channel無変更、旧BTのトグル維持、新BT/非BTのSub曲循環、AVRCP PLAY/PAUSEの冪等性を無音host試験で固定する。全体compileは他担当のmute試験終了後に行う。再生中のproduction・USB・SSH・サービス・実音声は操作しない。
