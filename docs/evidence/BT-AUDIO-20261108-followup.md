@@ -172,3 +172,13 @@ Release build with `--release --locked --features caricature-retention-delete -j
 - E-ink build-only candidate SHA256 `17abf271fd00e959a2deef19859920682de199f6f6b01db0f69307b6f55e6da1`; no E-ink flash was requested or performed in this update.
 
 No push, SSH, production service change or hardware write was performed. Current branch author remains tane. Actual LBS long-hold/volume events, automatic recovery effectiveness and operational acceptance remain unverified on hardware; the user's favorable earlier music listening is separate evidence.
+
+## Authorized application completed, 2026-11-08 08:15–08:17 JST
+
+After the user explicitly directed immediate application again, the already-authorized server and LCD update was performed without SSH. A new consistent SQLite snapshot (integrity_check OK), matching prior server/config, and all4 music source/cache files were saved under `/home/tane/picomado-backups/20261108-apply-controls-081520` before changes.
+
+The existing install-server.sh route installed the validated release while preserving the unmanaged pic2gray4px. User service picomado was restarted and active. Installed server SHA256 is now `d4fc9a03c51e30738ef01278c272736a9ae30ec8b08ca5efc42a93f9ee8d4865`.
+
+USB serial/FlashID `E661640843239D21` matched registered LCD PicoMado-lcd1, not the experimental Bluetooth Pico. picotool loaded candidate `396f8df5c486ed358eb2e088604ece88d37123e987ef70a253fe6896abd88b9d`, verified100% and rebooted to application. `/tmp/picomado-controls-applied-flash.log` records success. Fresh LCD session2471 advertised media-input-v1; all3 devices were online. Web content contained the new range slider and mute checkbox. Saved volume20 migrated to muted=false without changing its effective value. Music remained playing=false, source/cache hashes matched, and no audio_start_sent appeared in the update journal. No music or test tone was initiated. E-ink firmware was not written.
+
+The saved LBS target connection subsequently ended in observed=failed, pending=null while LCD stayed online. Thus server/firmware application is complete, but automatic Bluetooth recovery is not accepted as effective. Speaker availability/pairing state and the failure's immediate cause were not established by this read-only final check. Actual AVRCP short/long/volume effects and music playback remain unverified on the new firmware. No push was performed; independent verification and closure remain with the user.
