@@ -30,7 +30,8 @@
         "2896889: bounded DISCOVER recovery specification",
         "e014e86: independent mute and volume slider specification",
         "6f02af5: negotiated media input and physical Sub separation specification",
-        "13a03f5: preserve AVRCP short controls, add long Cancel and volume specification"
+        "13a03f5: preserve AVRCP short controls, add long Cancel and volume specification",
+        "67d7d31: HCI comparison and host deadline diagnostic specification"
       ]
     },
     "implementation": {
@@ -61,7 +62,10 @@
         "Mute regression: library 376 passed, 1 shutdown timeout, 1 ignored; same compiled isolated failure test passed (44.75s); see docs/evidence/BT-AUDIO-20261108-followup.md",
         "b5cfa6c: six-operation negotiated media input and physical Sub cycling; not deployed",
         "400 Cargo tests passed, 0 failed, 2 ignored with PICOMADO_PIC2GRAY4PX configured; /tmp/picomado-media-v2-configured-all-features.log",
-        "Integrated release/UF2 staged, not deployed while sleeping user has connected LBS; docs/evidence/BT-AUDIO-20261108-followup.md"
+        "Integrated release/UF2 staged, not deployed while sleeping user has connected LBS; docs/evidence/BT-AUDIO-20261108-followup.md",
+        "72642fa: opt-in HCI drain comparison, default unchanged; SDK-body host tests and target-TU compile passed",
+        "344df92: bounded host deadline diagnostics; final Bluetooth 25 and transport 77 tests passed; not deployed",
+        "Limit16 full UF2 built (2c0ffb25), not flashed; passive TCP interval has no persistent stall; docs/evidence/BT-AUDIO-20261108-followup.md"
       ]
     },
     "independent_verification": {
