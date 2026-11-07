@@ -34,7 +34,8 @@
         "service/src/local_music.rs",
         "service/src/local_music/executor.rs",
         "docs/evidence/BT-AUDIO-20261107-host.md",
-        "All-features tests: 367 passed, 2 ignored; final library rerun: 361 passed, 1 ignored"
+        "All-features tests: 367 passed, 2 ignored; final library rerun: 361 passed, 1 ignored",
+        "Implementation commit 870098f"
       ]
     },
     "independent_verification": {

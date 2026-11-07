@@ -37,7 +37,8 @@
         "service/src/audio_transport.rs",
         "service/src/application_bluetooth.rs",
         "docs/evidence/BT-AUDIO-20261107-host.md",
-        "All-features tests: 367 passed, 2 ignored; final library rerun: 361 passed, 1 ignored"
+        "All-features tests: 367 passed, 2 ignored; final library rerun: 361 passed, 1 ignored",
+        "Implementation commit 870098f"
       ]
     },
     "independent_verification": {
