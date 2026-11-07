@@ -82,3 +82,18 @@ music関連9テスト成功（専用font2試験を含む）。サーバへの反
 - **AVRCP意味:** local-music表示中のNormal/current sessionのみで PLAY=再生、PAUSE=一時停止、NEXT=次曲、PREVIOUS=前曲。PLAY中のPLAY、停止中のPAUSEは無変更。PLAYは同曲の一時停止位置から再開し、終端後は先頭から開始する。未選曲なら先頭曲から再生、0曲なら無変更。NEXT/PREVIOUSは一覧順に双方向循環し、物理Subと同じ再生継続/停止維持/先頭位置/0・1曲ルールを適用する。選択した他channelやSub/Menu/Standbyには作用しない。PLAY/PAUSEをトグルと解釈しない。
 - **状態所有と境界:** firmwareはAVRCPを既存GPIO operationへ畳み込まず専用wireを送る。serviceはsession・capabilityを検証し、typed media operationを選択pluginへ渡す。local-musicの純粋遷移は引き続き `PluginInput → LocalMusicPlugin.candidates → PluginDataChanged` のaggregate採用後に確定する。既存pluginのlegacy Subは既定の通常Sub経路を維持し、local-musicだけが旧BTトグルを提供する。アプリ共通層にlocal-music等のplugin ID分岐を追加しない。
 - **追加検証:** 専用wire4操作のroundtrip、未知operation拒否、旧Welcomeのdecode、cap有無でWelcome交渉、stale session/incarnation拒否、他channel無変更、旧BTのトグル維持、新BT/非BTのSub曲循環、AVRCP PLAY/PAUSEの冪等性を無音host試験で固定する。全体compileは他担当のmute試験終了後に行う。再生中のproduction・USB・SSH・サービス・実音声は操作しない。
+
+### 置換仕様: 従来 AVRCP 操作と長押しキャンセル（2026-11-08、未実装）
+
+ユーザーの追加要件「基本AVRCP今のまま、PLAY/PAUSE長押しをキャンセル、音量ボタンそのまま」により、直前の独立 PLAY/PAUSE/NEXT/PREVIOUS 案の操作意味を置き換える。直前案の実装は未commit・未反映の候補であり、本節の仕様コミット後に変更する。物理 Sub の曲循環、旧BT端末だけ旧Subトグルを保護する条件、専用 kind `27` / `media_input` / `media-input-v1` / optional Welcome `media_input_version: 1` の交渉は維持する。
+
+- wire `operation` は `toggle_playback`, `channel_next`, `channel_previous`, `cancel`, `volume_up`, `volume_down` の6種類とする。未反映の旧4種類を互換用に残さず、未知operationとして拒否する。
+- AVRCP PLAY/PAUSE の短押しは両方 `toggle_playback`。local-music の再生/一時停止トグルを行い、終了した曲は先頭から再生する。他channelにはtoggleによる変更を加えない。PLAYとPAUSEを別々の冪等操作としては扱わない。
+- AVRCP NEXT/PREVは `channel_next` / `channel_previous`。serviceの既存 Down/Up 入力へ委譲し、Normalではチャンネル切替、Subでは既存のプラグイン内操作を維持する。曲送り/曲戻しにはしない。
+- PLAY/PAUSE 長押しはどちらも `cancel`。serviceの既存 Power入力へ委譲し、Sub中はキャンセル、Normal時は従来Powerの意味を維持する。PLAYとPAUSEを別のcancel/powerへ割り当てない。
+- gestureの短長判定はfirmware側でrelease時に一度だけ確定する。長押しに短押しが先行しない。PLAY/PAUSE押下の重複、古い接続世代、release欠落を任意の追加操作へ変換しない。閾値・押下保持期限はBT仕様の確定値へ揃える。
+- AVRCP VOLUME_UP/DOWN のイベントを受信した場合だけ `volume_up` / `volume_down` を送る。serviceの既存Bluetooth aggregateコマンドへ現在revisionで委譲し、対象端末だけ0..100範囲で増減する。`muted` は一切変更せず、音量変更をunmute・BT再接続・再生再開にしない。speaker側だけで処理され通知が来ない音量操作の結果は推測しない。1操作の増減幅は親の確定値を追記する。
+- 共通Appはcurrent session/incarnationとmedia capabilityを検証し、チャンネル・cancel・音量操作を既存aggregate入口へ委譲する。plugin ID分岐は追加しない。toggleだけを選択中のNormal pluginへtyped操作として渡す。
+- 新host試験は短toggle・長cancelの排他性、旧4op拒否、channel/sub操作維持、端末独立の音量clamp・永続化・mute不変、stale session拒否を追加する。実機での操作/音量/長押しの効果は未確認とし、再生中productionに触れない。
+
+確定値: PLAY/PAUSEはreleaseまでの保持時間が1800ms未満ならtoggle、1800ms以上ならcancelのみ。押下状態は10秒で失効し、期限後のreleaseは無操作。音量は受信した押下1回につき5ポイント（0..100へclamp）とし、押下重複・holdの自動反復を行わない。clamp境界で値が変わらない操作は永続revisionを増やさない。これらの値で親承認済み。
