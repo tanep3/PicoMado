@@ -97,3 +97,15 @@ music関連9テスト成功（専用font2試験を含む）。サーバへの反
 - 新host試験は短toggle・長cancelの排他性、旧4op拒否、channel/sub操作維持、端末独立の音量clamp・永続化・mute不変、stale session拒否を追加する。実機での操作/音量/長押しの効果は未確認とし、再生中productionに触れない。
 
 確定値: PLAY/PAUSEはreleaseまでの保持時間が1800ms未満ならtoggle、1800ms以上ならcancelのみ。押下状態は10秒で失効し、期限後のreleaseは無操作。音量は受信した押下1回につき5ポイント（0..100へclamp）とし、押下重複・holdの自動反復を行わない。clamp境界で値が変わらない操作は永続revisionを増やさない。これらの値で親承認済み。
+
+### 最新6操作の実装・ホスト検証（2026-11-08）
+
+仕様コミット `13a03f5` に従い実装した。独立PLAY/PAUSE/NEXT/PREVの旧4操作候補はcompile確認のみで未反映のまま置換し、現在のwire enumは最新6種類だけを受理する。Appは能力・sessionを検証して既存Down/Up/Power/Bluetooth aggregateへ委譲し、plugin IDで分岐しない。local-musicは物理Subの循環と再生トグルを純粋に計画し、aggregate採用後に選曲・位置・世代を保存する。欠落track参照は検証して未選曲扱いにし、indexによるpanicを防いだ。
+
+- **最終全Cargo:** `PICOMADO_PIC2GRAY4PX=/home/tane/bin/pic2gray4px cargo test --manifest-path service/Cargo.toml --all-features -- --test-threads=1` は **400 passed / 0 failed / 2 ignored**。内訳はlibrary381、server2、音楽integration13、official JMA4。libraryの1件とlive HTTPSの1件は既存のignore。既存shutdown・SQLite待機統合もPASSで、timeoutやassertionを緩めていない。
+- **音楽・media経路:** `service/tests/local_music_input.rs` の13件は、旧BTトグル、新BT/非BTのSub循環、0/1曲・未選曲・終端・端末分離・古いsession/offer、短toggle、チャンネル切替、天気Sub内の移動/キャンセル、音量±5と上下clamp、境界のrevision据置、Web側の古いmute revision拒否、最新muteの保持、永続化を検証。`service/src/media_input_contract_tests.rs` の3件はwire decode→App経路、6operation roundtrip、未知/旧play拒否、Welcome交渉・旧Welcome、旧BT互換とsession保護を検証した。別のplugin unitで欠落trackと不整合restoreも確認した。
+- **環境の前提:** pic2gray4pxはPATHで探索されず、上記環境変数の指定が必要。指定を欠いた初回全libraryは372 pass / 9 fail / 1 ignored。radar/fetchとそのSQLite待機統合が失敗したログを保持し、同じcompiled binaryの環境指定付きradar/SQLite単独PASSと、環境指定付き全suite PASSで分離した。コード故障やshutdownのflakyとして扱っていない。
+- **その他:** `python3 tools/generate_observation.py --check` と `git diff --check` はPASS。firmware側の6operation文字列、kind27、Welcome v1条件とserviceを直接照合した。firmware host/buildの証拠はBT-AUDIO側を参照する。
+- **未解決の既存検査:** 変更していないUIのNode全試験は22 pass / 6 failで、6件は `ui_video_fps.test.cjs` のfixtureに `renderEinkVideoControls` がない問題。fresh-out project_gateは49 structural中1件、既存 `test_actual_firmware_build_sdk_flags_and_offline_flash` の承認削除後return0問題で拒否された。いずれも今回の音楽/media変更に合わせて検査を緩めていない。
+
+最終Cargoログは `/tmp/picomado-media-v2-configured-all-features.log`。無音host検証であり、再生中production・SSH・USB・サービス反映・実音声確認・pushは行っていない。独立検証・運用適用・実機効果確認と変更クローズは親が別途判断する。

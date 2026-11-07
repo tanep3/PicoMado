@@ -26,7 +26,11 @@
     "design": {
       "state": "in_progress",
       "evidence": [
-        "6cfbd8f"
+        "6cfbd8f",
+        "2896889: bounded DISCOVER recovery specification",
+        "e014e86: independent mute and volume slider specification",
+        "6f02af5: negotiated media input and physical Sub separation specification",
+        "13a03f5: preserve AVRCP short controls, add long Cancel and volume specification"
       ]
     },
     "implementation": {
@@ -47,7 +51,17 @@
         "firmware/tests/bluetooth_pipeline_test.py: prepared packet, send-credit and cancellation structure",
         "docs/evidence/BT-AUDIO-20261108-followup.md",
         "Final combined all-features serial regression: 387 passed, 0 failed, 2 ignored; /tmp/picomado-final-volume-music-all.log (2026-11-08)",
-        "Follow-up implementation commit 5adecfa (safe volume, playback fixes, input regression tests)"
+        "Follow-up implementation commit 5adecfa (safe volume, playback fixes, input regression tests)",
+        "d94e25c: bounded DISCOVER recovery implementation; not deployed",
+        "firmware/tests/bluetooth_recovery_runtime_test.c",
+        "firmware/tests/bluetooth_recovery_test.c",
+        "firmware/tests/bluetooth_stream_established_test.c",
+        "Full firmware host regression and LCD/E-ink cross-build passed; /tmp/picomado-recovery-host-final.log",
+        "c4e823c: independent mute and volume slider implementation; not deployed",
+        "Mute regression: library 376 passed, 1 shutdown timeout, 1 ignored; same compiled isolated failure test passed (44.75s); see docs/evidence/BT-AUDIO-20261108-followup.md",
+        "b5cfa6c: six-operation negotiated media input and physical Sub cycling; not deployed",
+        "400 Cargo tests passed, 0 failed, 2 ignored with PICOMADO_PIC2GRAY4PX configured; /tmp/picomado-media-v2-configured-all-features.log",
+        "Integrated release/UF2 staged, not deployed while sleeping user has connected LBS; docs/evidence/BT-AUDIO-20261108-followup.md"
       ]
     },
     "independent_verification": {

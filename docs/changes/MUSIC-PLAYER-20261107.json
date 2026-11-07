@@ -24,7 +24,9 @@
   "stages": {
     "design": {
       "state": "in_progress",
-      "evidence": []
+      "evidence": [
+        "13a03f5: preserve AVRCP short controls, add long Cancel and volume specification"
+      ]
     },
     "implementation": {
       "state": "in_progress",
@@ -39,7 +41,10 @@
         "docs/changes/MUSIC-PLAYER-20261107.md",
         "docs/evidence/BT-AUDIO-20261108-followup.md",
         "Final combined all-features serial regression: 387 passed, 0 failed, 2 ignored; /tmp/picomado-final-volume-music-all.log (2026-11-08)",
-        "Follow-up implementation commit 5adecfa (safe volume, playback fixes, input regression tests)"
+        "Follow-up implementation commit 5adecfa (safe volume, playback fixes, input regression tests)",
+        "b5cfa6c: six-operation negotiated media input and physical Sub cycling; not deployed",
+        "400 Cargo tests passed, 0 failed, 2 ignored with PICOMADO_PIC2GRAY4PX configured; /tmp/picomado-media-v2-configured-all-features.log",
+        "Integrated release/UF2 staged, not deployed while sleeping user has connected LBS; docs/evidence/BT-AUDIO-20261108-followup.md"
       ]
     },
     "independent_verification": {
