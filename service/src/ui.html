@@ -194,13 +194,20 @@
       enabled.onchange=()=>{enabled.disabled=true;send({action:'set_enabled',enabled:enabled.checked})};
       label.append(enabled,el('span','Bluetoothを使用'));area.append(label);
       const volumeRow=el('div',undefined,'row'),volumeLabel=el('label','音量（デジタル減衰 0–100）'),volume=el('input');
-      volume.type='number';volume.min='0';volume.max='100';volume.step='1';volume.value=String(b.desired.volume??0);volume.setAttribute('aria-label',`${d.id} の音量`);
-      volumeLabel.append(volume);volumeRow.append(volumeLabel);
-      const applyVolume=button('音量を適用');applyVolume.type='button';
-      applyVolume.onclick=()=>{const v=Number(volume.value);if(volume.value.trim()===''||!Number.isInteger(v)||v<0||v>100){say('音量は0から100の整数で指定してください',true);return}applyVolume.disabled=true;send({action:'set_volume',volume:v})};
-      const mute=button('ミュート');mute.type='button';mute.onclick=()=>{mute.disabled=true;send({action:'set_volume',volume:0})};
-      volumeRow.append(applyVolume,mute);area.append(volumeRow);
-      area.append(el('p',(b.desired.volume??0)===0?'ミュート中（初期設定）。確認するときは低い値から慎重に上げてください。':`設定音量: ${b.desired.volume} / 100`,'plugin-note'));
+      volume.type='range';volume.min='0';volume.max='100';volume.step='1';volume.value=String(b.desired.volume??0);volume.setAttribute('aria-label',`${d.id} の音量`);
+      const volumeValue=el('output',volume.value);volume.oninput=()=>{volumeValue.textContent=volume.value};
+      volumeLabel.append(volume,volumeValue);volumeRow.append(volumeLabel);
+      const muteLabel=el('label',undefined,'toggle'),mute=el('input');mute.type='checkbox';mute.checked=b.desired.muted??((b.desired.volume??0)===0);mute.setAttribute('aria-label',`${d.id} のミュート`);
+      const saveAudio=async command=>{
+        if(busy){volume.value=String(b.desired.volume??0);volumeValue.textContent=volume.value;mute.checked=b.desired.muted??((b.desired.volume??0)===0);return}
+        volume.disabled=true;mute.disabled=true;
+        const ok=await send(command);
+        if(!ok){try{current=await api('/api/state');render()}catch{volume.value=String(b.desired.volume??0);volumeValue.textContent=volume.value;mute.checked=b.desired.muted??((b.desired.volume??0)===0);volume.disabled=false;mute.disabled=false;say('保存できませんでした。表示は最後に取得した設定です。再読み込みしてください。',true)}}
+      };
+      volume.onchange=()=>saveAudio({action:'set_volume',volume:Number(volume.value)});
+      mute.onchange=()=>saveAudio({action:'set_muted',muted:mute.checked});
+      muteLabel.append(mute,el('span','ミュート'));volumeRow.append(muteLabel);area.append(volumeRow);
+      area.append(el('p',mute.checked?'ミュート中。音量を調整しても、チェックを外すまで無音です。':`設定音量: ${b.desired.volume} / 100。低い値から慎重に確認してください。`,'plugin-note'));
       area.append(el('small','10はデジタル振幅1%、100は原音のままです。実際の音の大きさはスピーカー側の設定にも依存します。変更前に送った音声には短い遅れが残ります。','plugin-note'));
       if(b.desired.target)area.append(el('p',`接続先: ${b.desired.target}`,'plugin-note'));
       const scan=button('周辺のスピーカーを探す');scan.type='button';scan.disabled=!d.online||!b.desired.enabled||b.observed==='unsupported'||b.observed==='stopping';

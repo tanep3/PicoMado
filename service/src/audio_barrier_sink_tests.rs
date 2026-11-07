@@ -198,6 +198,9 @@ async fn ready_audio_tick_waits_for_receipt_then_starts_once_without_render() {
             },
         )
         .unwrap();
+    assert_eq!(app.read().unwrap().audio_volume(&session), 0);
+    app.lock().unwrap().bluetooth_command("audio",session.incarnation,5,
+        BluetoothAction::SetMuted { muted:false }).unwrap();
     service_audio(&mut sink, &app, &session, &mut audio, &mut rx, &mut pending)
         .await
         .unwrap();
@@ -222,15 +225,14 @@ async fn ready_audio_tick_waits_for_receipt_then_starts_once_without_render() {
         .bluetooth_command(
             "audio",
             session.incarnation,
-            5,
-            BluetoothAction::SetVolume {
-                volume: Default::default(),
-            },
+            6,
+            BluetoothAction::SetMuted { muted:true },
         )
         .unwrap();
     service_audio(&mut sink, &app, &session, &mut audio, &mut rx, &mut pending)
         .await
         .unwrap();
+    assert_eq!(app.read().unwrap().bluetooth_view("audio").desired.volume.value(),10);
     let sent = packets.lock().unwrap();
     let pcm: Vec<_> = sent[second_end..]
         .iter()
@@ -244,4 +246,17 @@ async fn ready_audio_tick_waits_for_receipt_then_starts_once_without_render() {
         std::fs::read(paths.cache.join("audio").join(format!("{key}.pcm"))).unwrap()[..4],
         [0x10, 0x27, 0x10, 0x27]
     );
+    let muted_end=sent.len();
+    drop(sent);
+    let end=audio.sender.sent_end().unwrap();audio.credit(identity,end,end,false);
+    app.lock().unwrap().bluetooth_command("audio",session.incarnation,7,
+        BluetoothAction::SetMuted { muted:false }).unwrap();
+    service_audio(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending).await.unwrap();
+    let sent=packets.lock().unwrap();
+    let pcm:Vec<_>=sent[muted_end..].iter().filter(|p|p.get(5)==Some(&24)).collect();
+    assert!(!pcm.is_empty());
+    assert!(pcm.iter().all(|p|p[46..].chunks_exact(2).all(|b|i16::from_le_bytes([b[0],b[1]])==100)));
+    assert_eq!(sent.iter().filter(|p|p.get(5)==Some(&22)).count(),1);
+    assert_eq!(audio.sender.identity(),Some(identity));
+
 }

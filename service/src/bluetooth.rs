@@ -56,13 +56,43 @@ impl Volume {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "StoredDesiredBluetooth")]
 pub struct DesiredBluetooth {
-    #[serde(default)]
     pub volume: Volume,
+    pub muted: bool,
     pub enabled: bool,
     pub target: Option<BluetoothAddress>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredDesiredBluetooth {
+    #[serde(default)]
+    volume: Volume,
+    #[serde(default, deserialize_with = "explicit_muted")]
+    muted: Option<bool>,
+    enabled: bool,
+    target: Option<BluetoothAddress>,
+}
+fn explicit_muted<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    bool::deserialize(d).map(Some)
+}
+impl TryFrom<StoredDesiredBluetooth> for DesiredBluetooth {
+    type Error = &'static str;
+    fn try_from(value: StoredDesiredBluetooth) -> Result<Self, Self::Error> {
+        Ok(Self { muted: value.muted.unwrap_or(value.volume.value() == 0),
+            volume: value.volume, enabled: value.enabled, target: value.target })
+    }
+}
+impl Default for DesiredBluetooth {
+    fn default() -> Self {
+        Self { volume: Volume::default(), muted: true, enabled: false, target: None }
+    }
+}
+impl DesiredBluetooth {
+    pub fn effective_volume(&self) -> u8 {
+        if self.muted { 0 } else { self.volume.value() }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -158,6 +188,9 @@ impl BluetoothDevice {
         &self.desired
     }
     /// A local gain preference does not invalidate a wireless command or link.
+    pub fn set_muted(&mut self, muted: bool) {
+        self.desired.muted = muted;
+    }
     pub fn set_volume(&mut self, volume: Volume) {
         self.desired.volume = volume;
     }
@@ -401,6 +434,27 @@ mod tests {
         }
     }
     #[test]
+    fn mute_migration_preserves_effective_volume_and_strict_types() {
+        assert!(DesiredBluetooth::default().muted);
+        for volume in [0,10,100] {
+            let old = format!(r#"{{"enabled":true,"target":null,"volume":{volume}}}"#);
+            let d: DesiredBluetooth = serde_json::from_str(&old).unwrap();
+            assert_eq!(d.muted, volume == 0);
+            assert_eq!(d.effective_volume(), volume);
+            for muted in [true,false] {
+                let mut value: serde_json::Value=serde_json::from_str(&old).unwrap();
+                value["muted"]=muted.into();
+                let d: DesiredBluetooth=serde_json::from_value(value).unwrap();
+                assert_eq!(d.volume.value(),volume);
+                assert_eq!(d.effective_volume(),if muted {0} else {volume});
+                assert_eq!(serde_json::from_str::<DesiredBluetooth>(&serde_json::to_string(&d).unwrap()).unwrap(),d);
+            }
+        }
+        for extra in [r#""muted":null"#,r#""muted":0"#,r#""muted":"true""#,r#""unknown":true"#] {
+            assert!(serde_json::from_str::<DesiredBluetooth>(&format!(r#"{{"enabled":false,"target":null,{extra}}}"#)).is_err());
+        }
+    }
+    #[test]
     fn volume_missing_migrates_to_mute_and_invalid_values_are_rejected() {
         let old: DesiredBluetooth =
             serde_json::from_str(r#"{"enabled":true,"target":null}"#).unwrap();
@@ -507,6 +561,7 @@ mod tests {
             enabled: true,
             target: Some(candidate(0).address),
             volume: Volume::default(),
+            muted: true,
         });
         d.bind(Some(1), true).unwrap();
         assert!(matches!(

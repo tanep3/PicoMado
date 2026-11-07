@@ -1277,6 +1277,19 @@ async fn bluetooth_command(
 mod bluetooth_web_tests {
     use super::*;
     #[test]
+    fn bluetooth_mute_api_is_strict_and_ui_uses_independent_controls() {
+        for muted in [serde_json::json!(true),serde_json::json!(false)] {
+            let body=serde_json::json!({"incarnation":1,"expected_revision":1,"command":{"action":"set_muted","muted":muted}});
+            assert!(serde_json::from_value::<BluetoothChange>(body).is_ok());
+        }
+        for command in [serde_json::json!({"action":"set_muted"}),serde_json::json!({"action":"set_muted","muted":null}),serde_json::json!({"action":"set_muted","muted":1}),serde_json::json!({"action":"set_muted","muted":"false"}),serde_json::json!({"action":"set_muted","muted":false,"volume":10})] {
+            assert!(serde_json::from_value::<BluetoothChange>(serde_json::json!({"incarnation":1,"expected_revision":1,"command":command})).is_err());
+        }
+        let ui=include_str!("ui.html");
+        assert!(ui.contains("volume.type='range'"));assert!(ui.contains("mute.type='checkbox'"));
+        assert!(ui.contains("action:'set_muted',muted:mute.checked"));
+    }
+    #[test]
     fn bluetooth_volume_api_rejects_invalid_values() {
         for volume in [serde_json::json!(0),serde_json::json!(10),serde_json::json!(100)] {
             let body=serde_json::json!({"incarnation":1,"expected_revision":1,"command":{"action":"set_volume","volume":volume}});
