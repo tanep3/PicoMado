@@ -46,7 +46,8 @@
         "Volume targeted tests: 4 passed; actual audio sink mute/live-volume test: 1 passed (2026-11-08)",
         "firmware/tests/bluetooth_pipeline_test.py: prepared packet, send-credit and cancellation structure",
         "docs/evidence/BT-AUDIO-20261108-followup.md",
-        "Final combined all-features serial regression: 387 passed, 0 failed, 2 ignored; /tmp/picomado-final-volume-music-all.log (2026-11-08)"
+        "Final combined all-features serial regression: 387 passed, 0 failed, 2 ignored; /tmp/picomado-final-volume-music-all.log (2026-11-08)",
+        "Follow-up implementation commit 5adecfa (safe volume, playback fixes, input regression tests)"
       ]
     },
     "independent_verification": {

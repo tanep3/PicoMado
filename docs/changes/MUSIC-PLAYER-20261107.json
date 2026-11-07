@@ -38,7 +38,8 @@
         "Implementation commit 870098f",
         "docs/changes/MUSIC-PLAYER-20261107.md",
         "docs/evidence/BT-AUDIO-20261108-followup.md",
-        "Final combined all-features serial regression: 387 passed, 0 failed, 2 ignored; /tmp/picomado-final-volume-music-all.log (2026-11-08)"
+        "Final combined all-features serial regression: 387 passed, 0 failed, 2 ignored; /tmp/picomado-final-volume-music-all.log (2026-11-08)",
+        "Follow-up implementation commit 5adecfa (safe volume, playback fixes, input regression tests)"
       ]
     },
     "independent_verification": {
