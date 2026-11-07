@@ -25,6 +25,7 @@ run bluetooth-packet-policy
 build bluetooth-connection-policy tests/bluetooth_connection_policy_test.c
 run bluetooth-connection-policy
 python3 tests/bluetooth_pipeline_test.py
+python3 tests/bluetooth_hci_drain_test.py
 build bluetooth-recovery tests/bluetooth_recovery_test.c
 run bluetooth-recovery
 build bluetooth-recovery-runtime tests/bluetooth_recovery_runtime_test.c
