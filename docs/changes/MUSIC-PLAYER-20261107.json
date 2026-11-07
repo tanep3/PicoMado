@@ -1,0 +1,46 @@
+{
+  "id": "MUSIC-PLAYER-20261107",
+  "title": "Web uploaded local music player",
+  "owner": "user (parent)",
+  "implementer": "Dots worker",
+  "status": "in_progress",
+  "standard": "development/standard/v1/standard.md",
+  "domain_authority": "docs/changes/MUSIC-PLAYER-20261107.md",
+  "design_artifacts": [
+    "docs/changes/MUSIC-PLAYER-20261107.md"
+  ],
+  "cause": "User wants an audio source plugin via Web UI uploads, ahead of internet radio.",
+  "introduction_cause": "No audio source plugin exists.",
+  "escape_cause": "New feature; playback intent is not proof of audible output.",
+  "dependencies": [
+    "BT-AUDIO-20261107 device audio delivery"
+  ],
+  "deliverables": [
+    "local-music plugin",
+    "Web upload and playback UI",
+    "AudioPlaybackSpec and executor",
+    "tests and evidence"
+  ],
+  "stages": {
+    "design": {
+      "state": "in_progress",
+      "evidence": []
+    },
+    "implementation": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}
