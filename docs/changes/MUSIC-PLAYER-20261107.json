@@ -50,7 +50,8 @@
       "state": "in_progress",
       "evidence": [
         "User-authorized server deployment and LCD E661640843239D21 firmware update on 2026-11-07; audio defects under investigation, not operationally complete",
-        "docs/changes/MUSIC-PLAYER-20261107.md"
+        "docs/changes/MUSIC-PLAYER-20261107.md",
+        "2026-11-08 user-authorized server0742d7b5 and LCDa053c4cf applied; all volume0/music stopped/hash preserved; initial BT reconnect failed, one saved-target retry connected. See docs/evidence/BT-AUDIO-20261108-followup.md."
       ]
     },
     "effectiveness_confirmation": {

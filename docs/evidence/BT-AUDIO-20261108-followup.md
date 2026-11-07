@@ -2,13 +2,13 @@
 
 ## Applied and observed
 
-The earlier pipeline LCD build b85e8d985312b12c3c648894075b7a33b28a50ff91b8b11a87ba097968ac2b34 and server 5ee400c740f00f5205d9c83ba1112a621c2045066fbed3b79debfac103790059 remain the last applied artifacts. A three-second tone completed (144000 frames, failed=0) and the user confirmed hearing it clearly. A following uploaded-music run sent 1331 packets / 1533312 frames before intentional pause at about32 seconds. These successes are limited trials.
+The earlier pipeline LCD build b85e8d985312b12c3c648894075b7a33b28a50ff91b8b11a87ba097968ac2b34 and server 5ee400c740f00f5205d9c83ba1112a621c2045066fbed3b79debfac103790059 were the applied artifacts before the later authorized update recorded below. A three-second tone completed (144000 frames, failed=0) and the user confirmed hearing it clearly. A following uploaded-music run sent 1331 packets / 1533312 frames before intentional pause at about32 seconds. These successes are limited trials.
 
 Subsequent user playback failed in a later connection generation: PCM and negotiated SBC both48000Hz, full9-frame packets, about2944 frames still buffered, but can-send wait increased from about0.9ms/packet in the successful tone to18.5ms/packet. A250ms lateness guard stopped the stream. Connection role remains a hypothesis, not a confirmed cause.
 
 The user reported unexpectedly loud music at night. The synthetic quiet tone did not validate real-track loudness. Playback was paused. No further automated sound, hardware update or service deployment is authorized in this follow-up without explicit permission.
 
-## Implemented, not applied
+## Implemented and host-tested before deployment
 
 - Per-device digital volume0–100, initially0/muted for old and new settings; squared gain so10 means1% amplitude,100 is unity. Original assets are unchanged. Existing buffered audio and speaker-owned announcements are not immediately controlled by PCM mute.
 - Live volume updates preserve radio commands, connection generation and audio-stream identity. Invalid values and stale sessions fail closed.
@@ -35,4 +35,14 @@ The first volume all-features library run had373 passes,1 timeout failure and1 i
 
 ## Deployment / rollback boundary
 
-The old DesiredBluetooth uses `deny_unknown_fields`. Once the new binary persists `volume` (including default0), the old binary cannot deserialize StoredState and startup fails. Stored schema version remains2, so this is not a supported binary-only downgrade. Before any authorized application, save a fresh consistent SQLite backup using its backup API (or a stopped-service snapshot) together with the current binary. Preserve later user changes when planning a later rollback; do not blindly overwrite a newer database. The old binary also lacks attenuation, so rollback does not authorize audible playback. No new-format volume state has been written to production; the earlier authorized playback/pause actions used the currently deployed server.
+The old DesiredBluetooth uses `deny_unknown_fields`. Once the new binary persists `volume` (including default0), the old binary cannot deserialize StoredState and startup fails. Stored schema version remains2, so this is not a supported binary-only downgrade. Before any authorized application, save a fresh consistent SQLite backup using its backup API (or a stopped-service snapshot) together with the current binary. Preserve later user changes when planning a later rollback; do not blindly overwrite a newer database. The old binary also lacks attenuation, so rollback does not authorize audible playback. This was the pre-deployment boundary. The authorized deployment below now writes new-format volume state; use its paired backup for any rollback.
+
+## Authorized deployment, 2026-11-08 00:40–00:43 JST
+
+The user explicitly approved updating the server and LCD after being told LBS could announce its connection. No song or test tone was played. Consistent SQLite backup via the backup API passed integrity_check, with matching old server binary/config and uploaded source files saved under `/home/tane/picomado-backups/20261108-pre-volume-003640`. Source/cache SHA-256 values were recorded and verified unchanged after application.
+
+- Server applied SHA-256 `0742d7b512bdd1145aacc3e738d97b26f044869f5950f9a9c2b4bae59a79c27e`; service active and updated WebUI served.
+- LCD FlashID `E661640843239D21` matched the registered `PicoMado-lcd1`; candidate UF2 `a053c4cf83f2f716711608b8fbad32affa0f106fd9765a1311776626ded88186` flashed and verified100%, then booted in fresh session2469. The experimental HFP device was untouched.
+- All three devices online, all volume values0, music playing=false. Core settings, enabled plugin lists and BT target/enabled intent preserved. No audio_start_sent appeared after the server restart.
+- Initial LBS auto-reconnect timed out waiting for A2DP discovery. One bounded disable/re-enable of the saved LBS connection (volume remained0) succeeded; final BT revision34, connected. This is not proof that automatic reconnect is fixed.
+- Actual reduced-volume playback, AVRCP physical-button behavior and the role policy's effect on audio timing remain unverified. Independent review/acceptance is still the parent's responsibility.
