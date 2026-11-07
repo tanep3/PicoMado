@@ -63,6 +63,7 @@ pub const EINK_VIDEO_CAPABILITY: &str = "eink-video-partial-v1";
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum WireMessage {
+    MediaInput { incarnation: u64, session_epoch: u64, operation: crate::content::MediaOperation },
     AudioFinish { incarnation:u64, session_epoch:u64, display_epoch:u64, stream_id:u64, final_frame:u64 },
     AudioStart { incarnation:u64, session_epoch:u64, display_epoch:u64, stream_id:u64, first_frame:u64, rate:u32 },
     AudioStop { incarnation:u64, session_epoch:u64, display_epoch:u64, stream_id:u64 },
@@ -86,6 +87,8 @@ pub enum WireMessage {
     Welcome {
         incarnation: u64,
         session_epoch: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media_input_version: Option<u32>,
     },
     Settings {
         snapshot: DeviceSnapshot,
@@ -177,6 +180,7 @@ pub enum WireMessage {
 impl WireMessage {
     pub(crate) fn kind(&self) -> u8 {
         match self {
+            Self::MediaInput { .. } => 27,
             Self::AudioFinish { .. } => 26,
             Self::AudioStart { .. } => 22,
             Self::AudioStop { .. } => 23,
@@ -498,7 +502,7 @@ impl Decoder {
                 self.buffer.clear();
                 return Err(ProtocolError::UnsupportedVersion);
             }
-            if !matches!(frame[1],1..=23|25..=26) {
+            if !matches!(frame[1],1..=23|25..=27) {
                 self.buffer.clear();
                 return Err(ProtocolError::UnknownKind);
             }

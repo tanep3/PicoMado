@@ -11,6 +11,11 @@ pub(crate) const MAX_SOURCE: u64 = 256 * 1024 * 1024;
 pub const SAMPLE_RATE: u32 = 48_000;
 pub const MAX_FRAMES: u64 = 48_000 * 7200;
 const TOGGLE_PLAYBACK: &str = "toggle-playback";
+const NEXT_TRACK: &str = "next-track";
+#[derive(Clone, Copy)]
+enum MusicControl { Next, Toggle }
+#[derive(Clone, Copy)]
+enum MusicOperation { Play, Pause, Next }
 pub(crate) fn good_name(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 255
@@ -106,7 +111,7 @@ impl Plugin for LocalMusicPlugin {
         // RefreshView is for Sub mode; music keeps normal channel navigation.
         let candidate = match event {
             Event::PluginInput { token, name }
-                if name == TOGGLE_PLAYBACK
+                if [TOGGLE_PLAYBACK, NEXT_TRACK].contains(&name.as_str())
                     && query.device(&token.device_id).is_some_and(|d| {
                         d.selected.as_deref() == Some(self.id()) && d.mode == Mode::Normal
                     }) =>
@@ -115,7 +120,7 @@ impl Plugin for LocalMusicPlugin {
                     query,
                     &token.device_id,
                     Priority::User,
-                    "music-toggle-playback",
+                    "music-control",
                     Transition::PluginDataChanged {
                         device_id: token.device_id.clone(),
                         incarnation: token.incarnation,
@@ -154,6 +159,56 @@ impl LocalMusicContent {
         let n = self.next_generation;
         self.next_generation = n.checked_add(1).ok_or(ContentError::Unavailable)?;
         Ok(n)
+    }
+    fn plan_control(&mut self, ctx: &PluginContext, control: MusicControl) -> Result<PluginPlan, ContentError> {
+        if ctx.mode != Mode::Normal { return Err(ContentError::Unsupported); }
+        let keys: Vec<_> = self.tracks.keys().cloned().collect();
+        if keys.is_empty() { return Err(ContentError::Unavailable); }
+        let current = self.devices.get(&ctx.token.device_id)
+            .filter(|s| s.incarnation == ctx.token.incarnation && self.tracks.contains_key(&s.key)).cloned();
+        let limit = current.as_ref().and_then(|s| self.tracks.get(&s.key)).map(|t| t.frames);
+        let position = current.as_ref().zip(limit).map(|(s, max)| s.position(self.clock, max));
+        let playing = current.as_ref().zip(position.zip(limit))
+            .is_some_and(|(s, (position, max))| s.playing && position < max);
+        let (operation, name) = match control {
+            MusicControl::Toggle => {
+                if current.is_none() { return Err(ContentError::Unavailable); }
+                (if playing { MusicOperation::Pause } else { MusicOperation::Play }, TOGGLE_PLAYBACK)
+            }
+            MusicControl::Next => (MusicOperation::Next, NEXT_TRACK),
+        };
+        let mut next = current.clone().unwrap_or(Selection {
+            incarnation: ctx.token.incarnation, key: keys[0].clone(), generation: 0,
+            position: 0, playing: false, started: self.clock,
+        });
+        let changed = match operation {
+            MusicOperation::Play if playing => false,
+            MusicOperation::Play => {
+                next.position = position.filter(|p| self.tracks.get(&next.key).is_some_and(|t| *p < t.frames)).unwrap_or(0);
+                next.playing = true;
+                true
+            }
+            MusicOperation::Pause if !playing => false,
+            MusicOperation::Pause => {
+                next.position = position.unwrap(); next.playing = false; true
+            }
+            MusicOperation::Next => {
+                let index = current.as_ref().and_then(|s| keys.iter().position(|key| key == &s.key));
+                let target = index.map(|i| (i + 1) % keys.len()).unwrap_or(0);
+                if current.as_ref().is_some_and(|s| s.key == keys[target]) { false }
+                else { next.key = keys[target].clone(); next.position = 0; next.playing = playing; true }
+            }
+        };
+        if changed {
+            next.generation = self.generation()?;
+            next.started = self.clock;
+            self.devices.insert(ctx.token.device_id.clone(), next);
+        }
+        Ok(PluginPlan {
+            event: changed.then(|| Event::PluginInput { token: ctx.token.clone(), name: name.into() }),
+            frame: self.current_frame(ctx),
+            position: PluginPosition { plugin: self.id().into(), dataset_id: "music".into(), target_date: String::new(), index: 0 },
+        })
     }
     fn spec(&self, ctx: &PluginContext) -> Option<AudioPlaybackSpec> {
         let s = self.devices.get(&ctx.token.device_id)?;
@@ -196,46 +251,20 @@ impl ContentPlugin for LocalMusicContent {
     fn position(&self, _: &PluginContext) -> Option<PluginPosition> {
         None
     }
-    fn plan(
-        &mut self,
-        ctx: &PluginContext,
-        action: ButtonAction,
-    ) -> Result<PluginPlan, ContentError> {
-        if action != ButtonAction::Sub || ctx.mode != Mode::Normal {
-            return Err(ContentError::Unsupported);
-        }
-        let gen = self.generation()?;
-        let s = self
-            .devices
-            .get_mut(&ctx.token.device_id)
-            .filter(|s| s.incarnation == ctx.token.incarnation)
-            .ok_or(ContentError::Unavailable)?;
-        let max = self
-            .tracks
-            .get(&s.key)
-            .ok_or(ContentError::Unavailable)?
-            .frames;
-        let position = s.position(self.clock, max);
-        // An elapsed finite track is stopped even if its request flag remains set.
-        // One press must replay it, rather than resetting it to a paused start.
-        let playing = s.playing && position < max;
-        s.position = if position >= max { 0 } else { position };
-        s.playing = !playing;
-        s.started = self.clock;
-        s.generation = gen;
-        Ok(PluginPlan {
-            event: Some(Event::PluginInput {
-                token: ctx.token.clone(),
-                name: TOGGLE_PLAYBACK.into(),
-            }),
-            frame: self.current_frame(ctx),
-            position: PluginPosition {
-                plugin: self.id().into(),
-                dataset_id: "music".into(),
-                target_date: String::new(),
-                index: 0,
-            },
-        })
+    fn plan(&mut self, ctx: &PluginContext, action: ButtonAction) -> Result<PluginPlan, ContentError> {
+        let control = match action {
+            ButtonAction::Sub => MusicControl::Next,
+            ButtonAction::Media(MediaOperation::TogglePlayback) => MusicControl::Toggle,
+            _ => return Err(ContentError::Unsupported),
+        };
+        self.plan_control(ctx, control)
+    }
+    fn plan_legacy_sub(&mut self, ctx: &PluginContext) -> Result<PluginPlan, ContentError> {
+        self.plan_control(ctx, MusicControl::Toggle)
+    }
+    fn button_work(&self, _: &PluginContext, _: ButtonAction) -> Option<PluginWorkPlan> {
+        // Persist selection/position and fence stale Web commands after accepted input.
+        Some(PluginWorkPlan::default())
     }
     fn session_reset(&mut self, id: &str, inc: u64) {
         if let Some(s) = self.devices.get_mut(id) {
@@ -552,6 +581,21 @@ mod tests {
         let job = PluginJob { token: JobToken {plugin:"local-music".into(),slot:"prepare".into(),generation:1},payload:p.jobs[0].payload.clone(),timeout_seconds:900,created_unix:0 };
         c.work_completed(&x,&job,&JobOutcome::Succeeded(json!(Track {key:"a".repeat(64),name:"x.wav".into(),frames:4800}))).unwrap();
         assert!(c.tracks.is_empty());
+    }
+    #[test]
+    fn missing_track_selection_is_safe_and_invalid_restore_is_rejected() {
+        let mut c = LocalMusicContent::default();
+        let x = ctx();
+        c.devices.insert("a".into(), Selection { incarnation:1, key:"b".repeat(64), generation:1, position:123, playing:true, started:0 });
+        c.next_generation=2;
+        assert!(c.plan(&x.devices[0].context, ButtonAction::Sub).is_err());
+        c.tracks.insert("a".repeat(64), Track {key:"a".repeat(64),name:"valid.wav".into(),frames:48000});
+        let invalid=c.save_state();
+        assert!(matches!(LocalMusicContent::default().load_state(invalid),Err(ContentError::InvalidSource)));
+        c.plan(&x.devices[0].context, ButtonAction::Sub).unwrap();
+        assert_eq!(c.devices["a"].key,"a".repeat(64));
+        assert!(!c.devices["a"].playing);
+        assert_eq!(c.devices["a"].position,0);
     }
     #[test]
     fn invalid_source_and_unknown_device_rejected() {

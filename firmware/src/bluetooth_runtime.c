@@ -22,7 +22,6 @@ static bool observed_packet_valid,observed_mode_valid;
 static uint32_t rate, timestamp, deadline;
 static uint64_t accepted_frames, consumed_frames, samples_sent;
 static bool streaming, pending, input_enabled;
-static bool pressed[128];
 static pm_bluetooth_audio audio;
 static btstack_timer_source_t timer;
 static btstack_sbc_encoder_bluedroid_t encoder_state;
@@ -177,7 +176,8 @@ static void send_audio(void){
  schedule_audio(1);
 }
 uint32_t pm_bt_runtime_rate(void){return rate;}
-void pm_bt_runtime_enable_input(bool enabled){input_enabled=enabled;memset(pressed,0,sizeof pressed);}
+static uint32_t input_epoch;
+void pm_bt_runtime_enable_input(bool enabled){input_enabled=enabled;input_epoch++;}
 bool pm_bt_runtime_audio_begin(uint64_t gen,uint64_t first_frame){
  if(!wanted||!cid||!encoder||!gen)return false;
  if(streaming)return false;
@@ -314,6 +314,7 @@ static void source_handler(uint8_t type,uint16_t channel,uint8_t *p,uint16_t siz
   handle_signaling_released(a2dp_subevent_signaling_connection_released_get_a2dp_cid(p));break;
  }
 }
+#include "bluetooth_remote_input.inc"
 static void remote_handler(uint8_t type,uint16_t channel,uint8_t *p,uint16_t size){
  (void)channel;(void)size;if(type!=HCI_EVENT_PACKET||hci_event_packet_get_type(p)!=HCI_EVENT_AVRCP_META)return;
  if(p[2]==AVRCP_SUBEVENT_CONNECTION_ESTABLISHED){
@@ -322,16 +323,12 @@ static void remote_handler(uint8_t type,uint16_t channel,uint8_t *p,uint16_t siz
   if(avrcp_subevent_connection_established_get_status(p)){if(c==remote_cid)remote_cid=0;stopped_if_idle();return;}
   if(!wanted||recovery_releasing()||memcmp(addr,peer,6)){avrcp_disconnect(c);return;}remote_cid=c;return;
  }
- if(p[2]==AVRCP_SUBEVENT_CONNECTION_RELEASED){if(avrcp_subevent_connection_released_get_avrcp_cid(p)==remote_cid)remote_cid=0;memset(pressed,0,sizeof pressed);stopped_if_idle();return;}
+ if(p[2]==AVRCP_SUBEVENT_CONNECTION_RELEASED){if(avrcp_subevent_connection_released_get_avrcp_cid(p)==remote_cid){remote_cid=0;input_epoch++;}stopped_if_idle();return;}
  if(p[2]!=AVRCP_SUBEVENT_OPERATION)return;
  uint16_t c=avrcp_subevent_operation_get_avrcp_cid(p);
  uint8_t op=avrcp_subevent_operation_get_operation_id(p);
  bool down=avrcp_subevent_operation_get_button_pressed(p)!=0;
- bool supported=op==AVRCP_OPERATION_ID_PLAY||op==AVRCP_OPERATION_ID_PAUSE||op==AVRCP_OPERATION_ID_FORWARD||op==AVRCP_OPERATION_ID_BACKWARD;
- if(!wanted||c!=remote_cid||!input_enabled||!supported||events.count>=4){return;}
- /* SDK auto-acknowledges valid opcodes before this callback. */
- if(pressed[op]==down)return;
- pressed[op]=down;emit((pm_bt_event){.kind=PM_BT_INPUT,.operation=op,.pressed=down});
+ handle_remote_input(c,op,down);
 }
 bool pm_bt_runtime_init(void){
  if(initialized)return init_ok;
@@ -375,7 +372,7 @@ uint8_t pm_bt_runtime_connect_at(uint64_t gen,const uint8_t address[6],uint32_t 
 }
 void pm_bt_runtime_stop(uint64_t gen){
  stopping=true;stop_generation=gen;retry_cancel();recovery_cancel();
- wanted=false;media_stop();encoder=NULL;rate=0;memset(pressed,0,sizeof pressed);if(remote_cid)avrcp_disconnect(remote_cid);if(scanning){gap_inquiry_stop();}
+ wanted=false;media_stop();encoder=NULL;rate=0;if(remote_cid)avrcp_disconnect(remote_cid);if(scanning){gap_inquiry_stop();}
  if(cid)a2dp_source_disconnect(cid);
  stopped_if_idle();
 }

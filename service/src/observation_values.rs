@@ -1,4 +1,4 @@
-// Generated; edit contracts/observation-domain.json. 474db353e570e1857a3ca92964cf51fb22d00a2e01f37a0bc9e7580969355323
+// Generated; edit contracts/observation-domain.json. 19ee46b84b2ab301adee7ebc2b42668d8c9974e470c501887cdd2334f22a4e06
 #![allow(dead_code, non_camel_case_types)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PicoSendAttemptOrdinal(u32);

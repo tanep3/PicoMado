@@ -132,8 +132,7 @@ async fn sqlite_wait_preserves_published_state_while_other_video_and_http_progre
                 &tx,
                 WireMessage::Welcome {
                     incarnation: b.incarnation,
-                    session_epoch: b.session_epoch,
-                },
+                    session_epoch: b.session_epoch, media_input_version: None },
                 b.session_epoch,
             )
             .await
@@ -561,8 +560,7 @@ async fn sqlite_wait_allows_native_static_browse_ack_and_merges_fresh_latest_wit
                     &tx,
                     WireMessage::Welcome {
                         incarnation: token.incarnation,
-                        session_epoch: token.session_epoch,
-                    },
+                        session_epoch: token.session_epoch, media_input_version: None },
                     token.session_epoch,
                     None,
                     Some(token.clone()),
@@ -819,8 +817,7 @@ async fn sqlite_wait_normal_ack_still_delivers_fresh_native_weather_after_commit
             &tx,
             WireMessage::Welcome {
                 incarnation: token.incarnation,
-                session_epoch: token.session_epoch,
-            },
+                session_epoch: token.session_epoch, media_input_version: None },
             token.session_epoch,
             None,
             Some(token.clone()),

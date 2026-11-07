@@ -12,6 +12,8 @@ build() { local name=$1; shift; cc "${base[@]}" "$@" -o "$work/$name"; }
 run() { local name=$1; shift; "$work/$name" "$@"; printf 'PASS %s %s\n' "$name" "$*"; }
 build bluetooth-input tests/bluetooth_input_test.c
 run bluetooth-input
+build bluetooth-remote-input tests/bluetooth_remote_input_test.c
+run bluetooth-remote-input
 build bluetooth-audio tests/bluetooth_audio_test.c
 run bluetooth-audio
 build bluetooth-control tests/bluetooth_control_test.c

@@ -1423,6 +1423,38 @@ impl App {
         self.contents.get(selected)?.position(&ctx)
     }
 
+    /// Negotiated remote operations retain channel/Power meanings and never unmute.
+    pub fn media_input(&mut self, token: &SessionToken, operation: crate::content::MediaOperation) -> Result<InputResult, AppError> {
+        use crate::content::MediaOperation;
+        let device = self.runtime.world.devices.get(&token.device_id).ok_or(AppError::NotFound)?;
+        if !session_current(device, token) { return Err(AppError::Conflict("stale session")); }
+        if !device.capabilities.contains("media-input-v1") { return Err(AppError::Invalid("media input not negotiated")); }
+        let action = match operation {
+            MediaOperation::ChannelNext => Some(ButtonAction::Down),
+            MediaOperation::ChannelPrevious => Some(ButtonAction::Up),
+            MediaOperation::Cancel => Some(ButtonAction::Power),
+            MediaOperation::TogglePlayback if device.mode == Mode::Normal => Some(ButtonAction::Media(operation)),
+            MediaOperation::TogglePlayback => None,
+            MediaOperation::VolumeUp | MediaOperation::VolumeDown => {
+                let view = self.bluetooth_view(&token.device_id);
+                let old = view.desired.volume.value();
+                let value = if operation == MediaOperation::VolumeUp {
+                    old.saturating_add(5).min(100)
+                } else { old.saturating_sub(5) };
+                if value != old {
+                    let volume = crate::bluetooth::Volume::try_from(value)
+                        .map_err(|_| AppError::Invalid("invalid volume"))?;
+                    self.bluetooth_command(&token.device_id, token.incarnation, view.revision,
+                        crate::application::BluetoothAction::SetVolume { volume })?;
+                }
+                None
+            }
+        };
+        if let Some(action) = action { return self.button(token, action); }
+        let (selected, display_epoch) = self.selection_for(token).ok_or(AppError::NotFound)?;
+        Ok(InputResult::Selection { selected, display_epoch })
+    }
+
     /// Interpret common input and dispatch plugin-specific controls through
     /// the content contract. No plugin ID is branched on here.
     pub fn button(
@@ -1454,6 +1486,9 @@ impl App {
         self.observe_plugin_date(token, today_jst)?;
         let device = &self.runtime.world.devices[&token.device_id];
         let selected = device.selected.clone();
+        let legacy_media_sub = action == ButtonAction::Sub
+            && device.capabilities.contains("bluetooth-audio-v1")
+            && !device.capabilities.contains("media-input-v1");
         let ctx = PluginContext {
             token: token.clone(),
             settings_revision: device.settings_revision,
@@ -1510,7 +1545,11 @@ impl App {
             .clone();
         let preparing = std::time::Instant::now();
         plugin.observe_monotonic_time(self.monotonic_millis());
-        let plan = plugin.plan(&ctx, action);
+        let plan = if legacy_media_sub {
+            plugin.plan_legacy_sub(&ctx)
+        } else {
+            plugin.plan(&ctx, action)
+        };
         self.image_preparation_us = self
             .image_preparation_us
             .saturating_add(preparing.elapsed().as_micros());

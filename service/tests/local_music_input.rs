@@ -3,7 +3,7 @@
 use picomado_core::{
     application::{App, AppError, InputResult},
     clock::{ClockContent, ClockPlugin},
-    content::{ButtonAction, ContentPlugin},
+    content::{ButtonAction, ContentPlugin, MediaOperation},
     local_music::{LocalMusicContent, LocalMusicPlugin, SAMPLE_RATE},
     plugin_jobs::{AudioPlaybackSpec, PluginPaths},
     plugins::PluginSet,
@@ -22,18 +22,24 @@ struct Fixture {
 }
 impl Fixture {
     fn new(frames: u64) -> Self {
+        Self::with_tracks(frames, 2)
+    }
+    fn with_tracks(frames: u64, count: u8) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let key = "a".repeat(64);
         let mut music = LocalMusicContent::default();
         // Use the same validated state loader as restart, without filesystem audio.
+        let tracks: std::collections::BTreeMap<_, _> = (0..count)
+            .map(|i| {
+                let key = ((b'a' + i) as char).to_string().repeat(64);
+                (
+                    key.clone(),
+                    json!({"key":key,"name":format!("fixture-{i}.wav"),"frames":frames}),
+                )
+            })
+            .collect();
         music
-            .load_state(json!({
-                "tracks": {
-                    &key: {"key":key,"name":"fixture.wav","frames":frames},
-                    "b".repeat(64): {"key":"b".repeat(64),"name":"second.wav","frames":frames}
-                },
-                "devices": {}, "next_generation": 1
-            }))
+            .load_state(json!({"tracks":tracks,"devices":{},"next_generation":1}))
             .unwrap();
         let mut plugins = PluginSet::default();
         plugins
@@ -56,7 +62,13 @@ impl Fixture {
         }
     }
     fn hello(&mut self, id: &str) -> SessionToken {
-        let token = self.app.hello(id, ["lcd".into()].into(), 1).unwrap();
+        self.hello_with_caps(id, &["lcd", "bluetooth-audio-v1"])
+    }
+    fn hello_with_caps(&mut self, id: &str, caps: &[&str]) -> SessionToken {
+        let token = self
+            .app
+            .hello(id, caps.iter().map(|c| (*c).into()).collect(), 1)
+            .unwrap();
         assert_eq!(
             self.app.selection_for(&token).unwrap().0.as_deref(),
             Some(PLUGIN)
@@ -320,4 +332,270 @@ fn music_rule_targets_only_the_input_device_and_selected_plugin() {
     // Query fixtures exercise rule refusal even before the Engine's selected-plugin route.
     world.devices.get_mut("a").unwrap().selected = Some("clock".into());
     assert_eq!(rules.candidates(&View(&world), &event).count(), 0);
+}
+
+#[test]
+fn physical_sub_cycles_new_bt_and_non_bt_devices_preserving_playback() {
+    for caps in [
+        vec!["lcd", "bluetooth-audio-v1", "media-input-v1"],
+        vec!["lcd"],
+    ] {
+        let mut f = Fixture::new(SAMPLE_RATE as u64 * 60);
+        let t = f.hello_with_caps("one", &caps);
+        f.command("one", "play");
+        let first = f.app.audio_playback_for(&t).unwrap();
+        f.sub(&t);
+        let next = f.app.audio_playback_for(&t).unwrap();
+        assert_eq!(next.2.asset_id, "b".repeat(64));
+        assert_eq!(next.2.start_frame, 0);
+        assert!(next.2.generation > first.2.generation);
+        assert!(!same_offer(&f.app, &t, &first));
+        f.sub(&t);
+        assert_eq!(f.app.audio_playback_for(&t).unwrap().2.asset_id, f.key);
+        f.command("one", "pause");
+        f.sub(&t);
+        assert!(f.app.audio_playback_for(&t).is_none());
+        assert_eq!(f.state("one")["key"], "b".repeat(64));
+        assert_eq!(f.state("one")["position_ms"], 0);
+    }
+}
+
+#[test]
+fn media_short_toggle_and_channel_navigation_keep_their_existing_meaning() {
+    let mut f = Fixture::new(SAMPLE_RATE as u64 * 60);
+    let t = f.hello_with_caps("one", &["lcd", "media-input-v1"]);
+    f.sub(&t); // Physical Sub selects the first track without autoplay.
+    f.app
+        .media_input(&t, MediaOperation::TogglePlayback)
+        .unwrap();
+    let first = f.app.audio_playback_for(&t).unwrap();
+    wait_until(&f.app, first.2.started_mono_ms + 5);
+    f.app
+        .media_input(&t, MediaOperation::TogglePlayback)
+        .unwrap();
+    assert!(f.app.audio_playback_for(&t).is_none());
+    let paused = f.state("one");
+    f.app
+        .media_input(&t, MediaOperation::TogglePlayback)
+        .unwrap();
+    let resumed = f.app.audio_playback_for(&t).unwrap();
+    assert_eq!(
+        resumed.2.start_frame / 48,
+        paused["position_ms"].as_u64().unwrap()
+    );
+    f.app.media_input(&t, MediaOperation::ChannelNext).unwrap();
+    assert_eq!(f.app.selection_for(&t).unwrap().0.as_deref(), Some("clock"));
+    let before = f.app.selection_for(&t);
+    f.app
+        .media_input(&t, MediaOperation::TogglePlayback)
+        .unwrap();
+    assert_eq!(f.app.selection_for(&t), before);
+    f.app
+        .media_input(&t, MediaOperation::ChannelPrevious)
+        .unwrap();
+    assert_eq!(f.app.audio_playback_for(&t).unwrap().2.asset_id, f.key);
+    f.app.media_input(&t, MediaOperation::Cancel).unwrap();
+    assert_eq!(f.app.session_mode(&t), Some("standby"));
+    f.app
+        .media_input(&t, MediaOperation::TogglePlayback)
+        .unwrap();
+    assert!(f.app.audio_playback_for(&t).is_none());
+}
+
+#[test]
+fn zero_one_unselected_and_ended_tracks_have_bounded_semantics() {
+    for count in [0, 1] {
+        let mut f = Fixture::with_tracks(SAMPLE_RATE as u64 * 60, count);
+        let t = f.hello_with_caps("one", &["lcd", "media-input-v1"]);
+        f.app
+            .media_input(&t, MediaOperation::TogglePlayback)
+            .unwrap();
+        assert!(f.state("one").is_null()); // Toggle does not select an unknown track.
+        f.app.button(&t, ButtonAction::Sub).unwrap();
+        assert!(f.app.audio_playback_for(&t).is_none());
+        if count == 0 {
+            f.app
+                .media_input(&t, MediaOperation::TogglePlayback)
+                .unwrap();
+            assert!(f.state("one").is_null());
+        } else {
+            f.app
+                .media_input(&t, MediaOperation::TogglePlayback)
+                .unwrap();
+            let playing = f.app.audio_playback_for(&t).unwrap();
+            f.sub(&t);
+            assert!(same_offer(&f.app, &t, &playing));
+        }
+    }
+    let mut f = Fixture::new(48);
+    let t = f.hello_with_caps("ended", &["lcd", "media-input-v1"]);
+    f.sub(&t);
+    f.app
+        .media_input(&t, MediaOperation::TogglePlayback)
+        .unwrap();
+    let first = f.app.audio_playback_for(&t).unwrap();
+    wait_until(&f.app, first.2.started_mono_ms + 2);
+    f.app
+        .media_input(&t, MediaOperation::TogglePlayback)
+        .unwrap();
+    let replay = f.app.audio_playback_for(&t).unwrap();
+    assert_eq!(replay.2.start_frame, 0);
+    assert!(replay.2.generation > first.2.generation);
+    wait_until(&f.app, replay.2.started_mono_ms + 2);
+    f.sub(&t);
+    assert!(f.app.audio_playback_for(&t).is_none());
+    assert_eq!(f.state("ended")["key"], "b".repeat(64));
+}
+
+#[test]
+fn media_rejects_stale_and_unnegotiated_input() {
+    let mut f = Fixture::new(SAMPLE_RATE as u64 * 60);
+    let old = f.hello_with_caps("one", &["lcd", "media-input-v1"]);
+    let current = f.hello_with_caps("one", &["lcd", "media-input-v1"]);
+    assert!(f
+        .app
+        .media_input(&old, MediaOperation::TogglePlayback)
+        .is_err());
+    let legacy = f.hello("legacy");
+    assert!(f
+        .app
+        .media_input(&legacy, MediaOperation::TogglePlayback)
+        .is_err());
+    f.app.delete_device("one", current.incarnation).unwrap();
+    let _new = f.hello_with_caps("one", &["lcd", "media-input-v1"]);
+    assert!(f
+        .app
+        .media_input(&current, MediaOperation::TogglePlayback)
+        .is_err());
+}
+
+#[test]
+fn media_volume_uses_current_revision_clamps_and_never_unmutes() {
+    use picomado_core::{application::BluetoothAction, bluetooth::Volume};
+    let mut f = Fixture::new(SAMPLE_RATE as u64 * 60);
+    let a = f.hello_with_caps("a", &["lcd", "bluetooth-audio-v1", "media-input-v1"]);
+    let b = f.hello_with_caps("b", &["lcd", "bluetooth-audio-v1", "media-input-v1"]);
+    let initial = f.app.bluetooth_view("a");
+    f.app
+        .bluetooth_command(
+            "a",
+            a.incarnation,
+            initial.revision,
+            BluetoothAction::SetVolume {
+                volume: Volume::try_from(98).unwrap(),
+            },
+        )
+        .unwrap();
+    let stale = f.app.bluetooth_view("a").revision;
+    f.app.media_input(&a, MediaOperation::VolumeUp).unwrap();
+    let upper = f.app.bluetooth_view("a");
+    assert_eq!(upper.desired.volume.value(), 100);
+    assert!(upper.desired.muted);
+    assert_eq!(f.app.audio_volume(&a), 0);
+    f.app.media_input(&a, MediaOperation::VolumeUp).unwrap();
+    assert_eq!(f.app.bluetooth_view("a").revision, upper.revision);
+    assert!(f
+        .app
+        .bluetooth_command(
+            "a",
+            a.incarnation,
+            stale,
+            BluetoothAction::SetMuted { muted: false }
+        )
+        .is_err());
+    f.app.media_input(&a, MediaOperation::VolumeDown).unwrap();
+    let down = f.app.bluetooth_view("a");
+    assert_eq!(down.desired.volume.value(), 95);
+    assert!(down.desired.muted);
+    assert_eq!(f.app.bluetooth_view("b").desired.volume.value(), 0);
+    f.app
+        .bluetooth_command(
+            "a",
+            a.incarnation,
+            down.revision,
+            BluetoothAction::SetMuted { muted: false },
+        )
+        .unwrap();
+    f.app.media_input(&a, MediaOperation::VolumeDown).unwrap();
+    assert_eq!(f.app.audio_volume(&a), 90); // A latest unmute is not undone either.
+    assert!(!f.app.bluetooth_view("a").desired.muted);
+    for _ in 0..20 {
+        f.app.media_input(&a, MediaOperation::VolumeDown).unwrap();
+    }
+    let lower = f.app.bluetooth_view("a");
+    assert_eq!(lower.desired.volume.value(), 0);
+    assert!(!lower.desired.muted);
+    f.app.media_input(&a, MediaOperation::VolumeDown).unwrap();
+    assert_eq!(f.app.bluetooth_view("a").revision, lower.revision);
+    assert_eq!(f.app.audio_volume(&b), 0);
+    let mut plugins = PluginSet::default();
+    plugins
+        .register(
+            Box::new(LocalMusicPlugin),
+            Box::new(LocalMusicContent::default()),
+        )
+        .unwrap();
+    plugins
+        .register(Box::new(ClockPlugin), Box::new(ClockContent::default()))
+        .unwrap();
+    let reopened = App::open_with_plugin_set(
+        &f._temp.path().join("state.db"),
+        &f._temp.path().join("plugins"),
+        Arc::new(picomado_core::fetch::SystemClock),
+        plugins,
+    )
+    .unwrap();
+    assert_eq!(reopened.bluetooth_view("a").desired, lower.desired);
+}
+
+#[test]
+fn media_channel_and_cancel_preserve_weather_sub_navigation() {
+    struct Day;
+    impl picomado_core::fetch::Clock for Day {
+        fn unix_seconds(&self) -> i64 {
+            1791792000
+        }
+        fn today_jst(&self) -> String {
+            "2026-10-12".into()
+        }
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let mut plugins = PluginSet::default();
+    plugins
+        .register(
+            Box::new(picomado_core::weather::WeatherPlugin),
+            Box::new(picomado_core::weather::WeatherContent::default()),
+        )
+        .unwrap();
+    let mut app = App::open_with_plugin_set(
+        &temp.path().join("state.db"),
+        &temp.path().join("plugins"),
+        Arc::new(Day),
+        plugins,
+    )
+    .unwrap();
+    let t = app
+        .hello("weather", ["lcd".into(), "media-input-v1".into()].into(), 1)
+        .unwrap();
+    app.publish_plugin_source(
+        "weather",
+        &t,
+        1,
+        include_bytes!("../assets/jma-tokyo-20261012.json"),
+        "cached",
+        "2026-10-12",
+    )
+    .unwrap();
+    app.button(&t, ButtonAction::Sub).unwrap();
+    assert_eq!(app.session_mode(&t), Some("sub"));
+    let start = app.plugin_position(&t).unwrap().index;
+    app.media_input(&t, MediaOperation::ChannelNext).unwrap();
+    assert_eq!(app.plugin_position(&t).unwrap().index, start + 1);
+    app.media_input(&t, MediaOperation::TogglePlayback).unwrap();
+    assert_eq!(app.plugin_position(&t).unwrap().index, start + 1);
+    app.media_input(&t, MediaOperation::ChannelPrevious)
+        .unwrap();
+    assert_eq!(app.plugin_position(&t).unwrap().index, start);
+    app.media_input(&t, MediaOperation::Cancel).unwrap();
+    assert_eq!(app.session_mode(&t), Some("normal"));
 }

@@ -77,6 +77,9 @@ static pm_token drawing_token;
 #endif
 static uint8_t active_profile,menu_profile;
 static uint64_t owner_epoch=1,incarnation,session_epoch,display_epoch;
+#if PM_BLUETOOTH_AUDIO
+static pm_media_input_session media_input_session;
+#endif
 static uint32_t started_ms,retry_ms=5000,last_heartbeat_ms;
 static bool wifi_enabled,await_selection,sub_mode,have_display,pending_standby,pending_sub_cancel;
 static enum { WIFI_PM_UNREQUESTED, WIFI_PM_PENDING, WIFI_PM_CHECKED } wifi_pm_status;
@@ -699,7 +702,7 @@ static bool send_hello(void){
         "\"capabilities\":[\"%s\",\"buttons%u\",\"frame-bytes-v1\"%s%s],\"screen_owner_epoch\":%llu}}",
         PM_DEVICE_ID,pm_display_capability(),PM_BUTTON_COUNT,
 #if PM_BLUETOOTH_AUDIO
-        ",\"bluetooth-audio-v1\",\"audio-buffer-4096-v1\"",
+        ",\"bluetooth-audio-v1\",\"audio-buffer-4096-v1\",\"media-input-v1\"",
 #else
         "",
 #endif
@@ -906,6 +909,11 @@ static pm_api_result api_welcome(uint8_t kind,const char *j){
         if(!number(j,"incarnation",&incarnation)||!number(j,"session_epoch",&session_epoch)){
             retry();return PM_API_ERROR;
         }
+#if PM_BLUETOOTH_AUDIO
+        uint64_t media_version=0;
+        (void)number(j,"media_input_version",&media_version);
+        pm_media_input_welcome(&media_input_session,incarnation,session_epoch,media_version);
+#endif
         if(settings.incarnation!=incarnation){
             uint32_t selected=settings.profile;defaults();settings.profile=selected;
         }

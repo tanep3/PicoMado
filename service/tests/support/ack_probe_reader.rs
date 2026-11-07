@@ -38,8 +38,7 @@ async fn switch_probe_static_socket_for(device_id:&str) -> (
     let token = match read_wire(&mut ws).await {
         WireMessage::Welcome {
             incarnation,
-            session_epoch,
-        } => SessionToken {
+            session_epoch, .. } => SessionToken {
             device_id: device_id.into(),
             incarnation,
             session_epoch,
@@ -264,7 +263,7 @@ async fn ack_probe_admission_regressions(app:&SharedApp,existing:&tokio_tungsten
  let (mut late,_)=tokio_tungstenite::connect_async(&url).await.unwrap();
  let (mut current,_)=tokio_tungstenite::connect_async(&url).await.unwrap();
  current.send(ClientMessage::Binary(encode(&hello).unwrap().into())).await.unwrap();
- let (current_inc,current_session)=match read_wire(&mut current).await{WireMessage::Welcome{incarnation,session_epoch}=>(incarnation,session_epoch),other=>panic!("{other:?}")};assert!(matches!(read_wire(&mut current).await,WireMessage::Settings{..}));
+ let (current_inc,current_session)=match read_wire(&mut current).await{WireMessage::Welcome {incarnation,session_epoch, .. }=>(incarnation,session_epoch),other=>panic!("{other:?}")};assert!(matches!(read_wire(&mut current).await,WireMessage::Settings{..}));
  // Accepted Hello registration is nonblocking and may require its next message.
  let old_connection=previous_connection;
  let mut accepted_connection=old_connection;
@@ -283,7 +282,7 @@ async fn ack_probe_admission_regressions(app:&SharedApp,existing:&tokio_tungsten
  let (mut newest,_)=tokio_tungstenite::connect_async(&url).await.unwrap();
  let (held_tx,held_rx)=tokio::sync::oneshot::channel();let holder=crate::ack_probe::test_hold_state(held_tx);held_rx.await.unwrap();
  newest.send(ClientMessage::Binary(encode(&hello).unwrap().into())).await.unwrap();
- let token=match read_wire(&mut newest).await{WireMessage::Welcome{incarnation,session_epoch}=>SessionToken{device_id:"ack-path-trace-regression".into(),incarnation,session_epoch},other=>panic!("{other:?}")};
+ let token=match read_wire(&mut newest).await{WireMessage::Welcome {incarnation,session_epoch, .. }=>SessionToken{device_id:"ack-path-trace-regression".into(),incarnation,session_epoch},other=>panic!("{other:?}")};
  assert!(matches!(read_wire(&mut newest).await,WireMessage::Settings{..}));holder.join().unwrap();
  newest.send(ClientMessage::Binary(encode(&WireMessage::Heartbeat{incarnation:token.incarnation,session_epoch:token.session_epoch,applied_revision:1}).unwrap().into())).await.unwrap();
  let rebound=tokio::time::timeout(Duration::from_secs(1),async{loop{let conn=crate::ack_probe::test_records().iter().rev().find(|r|r.event==Event::Bind).unwrap().connection;if conn>connection{break conn;}tokio::time::sleep(Duration::from_millis(1)).await;}}).await.unwrap();

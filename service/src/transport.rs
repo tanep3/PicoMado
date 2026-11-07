@@ -40,6 +40,7 @@ fn wire_label(message: &WireMessage) -> &'static str {
         WireMessage::Next { .. } => "next",
         WireMessage::Power { .. } => "power",
         WireMessage::EnterSub { .. } => "sub",
+        WireMessage::MediaInput { .. } => "media_input",
         WireMessage::Up { .. } => "up",
         WireMessage::Down { .. } => "down",
         WireMessage::ReceiptAck { .. } => "receipt_ack",
@@ -183,6 +184,7 @@ fn process_inner(
             return Err("duplicate_hello");
         }
         let caps: BTreeSet<_> = capabilities.into_iter().collect();
+        let media_input_version = caps.contains("media-input-v1").then_some(1);
         let waiting = std::time::Instant::now();
         let mut guard = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Reader).map_err(|_| "unavailable")?;
         *lock_wait = waiting.elapsed();
@@ -203,6 +205,7 @@ fn process_inner(
         return Ok(Some(WireMessage::Welcome {
             incarnation: token.incarnation,
             session_epoch: token.session_epoch,
+            media_input_version,
         }));
     }
     let token = current.as_ref().ok_or("hello_required")?;
@@ -221,6 +224,19 @@ fn process_inner(
                 Ok(())|Err(AppError::Conflict("stale Bluetooth operation"))|Err(AppError::Conflict("Bluetooth operation expired"))=>Ok(None),
                 Err(_)=>Err("invalid_bluetooth_report"),
             }
+        }
+        WireMessage::MediaInput { incarnation, session_epoch, operation } => {
+            if incarnation != token.incarnation || session_epoch != token.session_epoch {
+                return Err("stale_session");
+            }
+            guard.media_input(token, operation).map_err(|_| "invalid_media_input")?;
+            let (selected, display_epoch) = guard.selection_for(token).ok_or("stale_session")?;
+            Ok(Some(WireMessage::InputAccepted {
+                input_context: Some(crate::protocol::InputContext {
+                    incarnation, session_epoch, display_epoch,
+                    mode: guard.session_mode(token).unwrap_or("normal").into(),
+                }), selected, display_epoch,
+            }))
         }
         WireMessage::SettingsStored {
             incarnation,
@@ -1350,8 +1366,7 @@ mod tests {
         let session = match read_wire(&mut ws).await {
             WireMessage::Welcome {
                 incarnation,
-                session_epoch,
-            } => SessionToken {
+                session_epoch, .. } => SessionToken {
                 device_id: "push".into(),
                 incarnation,
                 session_epoch,
@@ -1428,7 +1443,7 @@ mod tests {
             capabilities:vec!["lcd".into(),crate::protocol::FRAME_BYTES_CAPABILITY.into(),crate::protocol::LCD_PUSH_CAPABILITY.into()],
         }).unwrap().into())).await.unwrap();
         let session=match read_wire(&mut ws).await {
-            WireMessage::Welcome{incarnation,session_epoch}=>SessionToken{device_id:"push-static".into(),incarnation,session_epoch},
+            WireMessage::Welcome {incarnation,session_epoch, .. }=>SessionToken{device_id:"push-static".into(),incarnation,session_epoch},
             other=>panic!("{other:?}"),
         };
         assert!(matches!(read_wire(&mut ws).await,WireMessage::Settings{..}));
@@ -1480,7 +1495,7 @@ mod tests {
             capabilities:vec!["eink".into(),crate::protocol::FRAME_BYTES_CAPABILITY.into(),crate::protocol::EINK_CLOCK_CAPABILITY.into()],
         }).unwrap().into())).await.unwrap();
         let session=match read_wire(&mut ws).await {
-            WireMessage::Welcome{incarnation,session_epoch}=>SessionToken{device_id:"paper-latest".into(),incarnation,session_epoch},
+            WireMessage::Welcome {incarnation,session_epoch, .. }=>SessionToken{device_id:"paper-latest".into(),incarnation,session_epoch},
             other=>panic!("{other:?}"),
         };
         assert!(matches!(read_wire(&mut ws).await,WireMessage::Settings{..}));
@@ -1603,8 +1618,7 @@ mod tests {
             let session = match read_wire(&mut ws).await {
                 WireMessage::Welcome {
                     incarnation,
-                    session_epoch,
-                } => SessionToken {
+                    session_epoch, .. } => SessionToken {
                     device_id: "desk".into(),
                     incarnation,
                     session_epoch,
@@ -2058,8 +2072,7 @@ mod tests {
             &tx,
             WireMessage::Welcome {
                 incarnation: token.incarnation,
-                session_epoch: token.session_epoch,
-            },
+                session_epoch: token.session_epoch, media_input_version: None },
             token.session_epoch,
             None,
             Some(token.clone()),
@@ -2084,7 +2097,7 @@ mod tests {
                 _ => Vec::new(),
             })
             .collect();
-        assert!(matches!(messages.first(), Some(WireMessage::Welcome { incarnation, session_epoch })
+        assert!(matches!(messages.first(), Some(WireMessage::Welcome { incarnation, session_epoch, .. })
             if *incarnation == token.incarnation && *session_epoch == token.session_epoch));
         assert!(matches!(messages.get(1), Some(WireMessage::Settings { .. })));
         tx.send(WriterCommand::Stop).await.unwrap();
@@ -2141,8 +2154,7 @@ mod tests {
         slow_tx
             .send(WriterCommand::reply(WireMessage::Welcome {
                 incarnation: 1,
-                session_epoch: 1,
-            }))
+                session_epoch: 1, media_input_version: None }))
             .await
             .unwrap();
         fast_tx
@@ -2152,8 +2164,7 @@ mod tests {
         fast_tx
             .send(WriterCommand::reply(WireMessage::Welcome {
                 incarnation: fast.incarnation,
-                session_epoch: fast.session_epoch,
-            }))
+                session_epoch: fast.session_epoch, media_input_version: None }))
             .await
             .unwrap();
         tokio::time::timeout(Duration::from_secs(2), async {
@@ -3294,8 +3305,7 @@ mod tests {
         tx.send(WriterCommand::Bind(session.clone())).await.unwrap();
         tx.send(WriterCommand::reply(WireMessage::Welcome {
             incarnation: 1,
-            session_epoch: 1,
-        }))
+            session_epoch: 1, media_input_version: None }))
         .await
         .unwrap();
         let old = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer)
@@ -3595,8 +3605,7 @@ mod tests {
         let (incarnation, first_epoch) = match read_wire(&mut first).await {
             WireMessage::Welcome {
                 incarnation,
-                session_epoch,
-            } => (incarnation, session_epoch),
+                session_epoch, .. } => (incarnation, session_epoch),
             other => panic!("{other:?}"),
         };
         let settings = read_wire(&mut first).await;
@@ -3791,8 +3800,7 @@ mod tests {
             let (incarnation, session_epoch) = match read_wire(&mut ws).await {
                 WireMessage::Welcome {
                     incarnation,
-                    session_epoch,
-                } => (incarnation, session_epoch),
+                    session_epoch, .. } => (incarnation, session_epoch),
                 other => panic!("{other:?}"),
             };
             assert!(matches!(
@@ -4004,8 +4012,7 @@ mod tests {
         let (incarnation, session_epoch) = match read_wire(&mut ws).await {
             WireMessage::Welcome {
                 incarnation,
-                session_epoch,
-            } => (incarnation, session_epoch),
+                session_epoch, .. } => (incarnation, session_epoch),
             other => panic!("{other:?}"),
         };
         assert!(matches!(
@@ -4209,8 +4216,7 @@ mod tests {
         let (incarnation, session_epoch) = match read_wire(&mut ws).await {
             WireMessage::Welcome {
                 incarnation,
-                session_epoch,
-            } => (incarnation, session_epoch),
+                session_epoch, .. } => (incarnation, session_epoch),
             other => panic!("{other:?}"),
         };
         assert!(matches!(
@@ -4604,3 +4610,7 @@ mod tests {
 #[cfg(test)]
 #[path="bluetooth_transport_tests.rs"]
 mod bluetooth_transport_tests;
+
+#[cfg(test)]
+#[path = "media_input_contract_tests.rs"]
+mod media_input_contract_tests;

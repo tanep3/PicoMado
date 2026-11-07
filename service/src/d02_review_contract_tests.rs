@@ -87,8 +87,7 @@ async fn d02_review_partial_completion_retains_latest_until_rendered() {
                 &tx,
                 WireMessage::Welcome {
                     incarnation: token.incarnation,
-                    session_epoch: token.session_epoch,
-                },
+                    session_epoch: token.session_epoch, media_input_version: None },
                 token.session_epoch,
                 None,
                 Some(token.clone()),

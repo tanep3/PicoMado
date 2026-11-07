@@ -182,7 +182,8 @@
       "AudioStart",
       "AudioStop",
       "AudioStatus",
-      "AudioFinish"
+      "AudioFinish",
+      "MediaInput"
     ],
     "sessionless": [
       "Hello",

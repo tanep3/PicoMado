@@ -63,8 +63,7 @@ async fn d02_review_unrelated_enable_revision_preserves_latest_delivery() {
                 &tx,
                 WireMessage::Welcome {
                     incarnation: token.incarnation,
-                    session_epoch: token.session_epoch,
-                },
+                    session_epoch: token.session_epoch, media_input_version: None },
                 token.session_epoch,
                 None,
                 Some(token.clone()),

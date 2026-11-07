@@ -11,8 +11,14 @@ use crate::{Event, Mode, SessionToken};
 use serde_json::Value;
 use std::collections::BTreeSet;
 
+/// Semantic media input, separate from GPIO and channel navigation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaOperation { TogglePlayback, ChannelNext, ChannelPrevious, Cancel, VolumeUp, VolumeDown }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonAction {
+    Media(MediaOperation),
     Next,
     Sub,
     Up,
@@ -186,6 +192,11 @@ pub trait ContentPlugin: Send + Sync {
         ctx: &PluginContext,
         action: ButtonAction,
     ) -> Result<PluginPlan, ContentError>;
+    /// Legacy Bluetooth firmware folded PLAY/PAUSE into generic Sub.
+    /// Other plugins preserve their ordinary Sub behavior by default.
+    fn plan_legacy_sub(&mut self, ctx: &PluginContext) -> Result<PluginPlan, ContentError> {
+        self.plan(ctx, ButtonAction::Sub)
+    }
     /// Optional archive work requested by a button plan. The host commits it
     /// after accepting the button event; implementations keep IO in workers.
     fn button_work(&self, _ctx: &PluginContext, _action: ButtonAction) -> Option<PluginWorkPlan> {

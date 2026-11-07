@@ -1,6 +1,13 @@
 /* Main-loop IO adapter: never send socket data from the BT callback. */
 #if PM_BLUETOOTH_AUDIO
-static pm_input_result perform_operation(pm_operation,unsigned,bool);
+static bool send_media_input(pm_media_operation operation){
+    const char *name=pm_media_operation_name(operation);
+    if(!name || !pm_media_input_allowed(&media_input_session,incarnation,session_epoch,state==ACTIVE))return false;
+    int n=snprintf(outbound_json,sizeof outbound_json,
+        "{\"type\":\"media_input\",\"data\":{\"incarnation\":%llu,\"session_epoch\":%llu,\"operation\":\"%s\"}}",
+        (unsigned long long)incarnation,(unsigned long long)session_epoch,name);
+    return n>0&&(size_t)n<sizeof outbound_json&&pm_net_send(27,outbound_json);
+}
 typedef struct {uint64_t session,generation,command_id,expires_ms;} pm_bt_command_token;
 static pm_bt_command_token bt_token;
 static uint64_t bt_incarnation;
@@ -9,6 +16,7 @@ static uint8_t bt_target[6];
 static bool bt_initialized,bt_pending,bt_preparing,bt_waiting,bt_timed_out;
 static uint32_t bt_received_ms;
 static pm_bluetooth_input bt_input;
+static uint32_t bt_input_epoch;
 static bool bt_report(const char *report){
     int n=snprintf(outbound_json,sizeof outbound_json,
         "{\"type\":\"bluetooth_report\",\"data\":{\"incarnation\":%llu,\"session_epoch\":%llu,\"token\":{\"session\":%llu,\"generation\":%llu,\"command_id\":%llu,\"expires_ms\":%llu},\"report\":%s}}",
@@ -48,6 +56,7 @@ static void poll_bluetooth(void){
         cyw43_arch_lwip_begin();if(bt_initialized)pm_bt_runtime_stop(0);cyw43_arch_lwip_end();
         bt_pending=false;pm_bluetooth_input_reset(&bt_input,0,false);return;
     }
+    pm_bluetooth_input_expire(&bt_input,to_ms_since_boot(get_absolute_time()));
     /* expires_ms belongs to the host clock and is echoed only. A local budget
      * bounds deferred readiness/stop/connection work independently. */
     if(bt_waiting&&bt_initialized){
@@ -117,7 +126,12 @@ static void poll_bluetooth(void){
     }else if(e.kind==PM_BT_DISCONNECTED){
         pm_bluetooth_input_reset(&bt_input,e.generation,false);(void)bt_report("{\"event\":\"disconnected\"}");
     }else if(e.kind==PM_BT_INPUT){
-        pm_operation op;if(pm_bluetooth_input_event(&bt_input,e.generation,e.operation,!e.pressed,&op))perform_operation(op,3,false);
+        /* AVRCP can reconnect while A2DP and its command generation survive. */
+        if(bt_input_epoch!=e.input_epoch){
+            bt_input_epoch=e.input_epoch;
+            pm_bluetooth_input_reset(&bt_input,e.generation,bt_input.connected);
+        }
+        pm_media_operation op;if(pm_bluetooth_input_event(&bt_input,e.generation,e.operation,!e.pressed,e.input_ms,to_ms_since_boot(get_absolute_time()),&op))(void)send_media_input(op);
     }
 }
 #else

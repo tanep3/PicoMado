@@ -5,7 +5,7 @@
 typedef enum { PM_BT_READY, PM_BT_FOUND, PM_BT_SCAN_DONE, PM_BT_CONNECTED,
  PM_BT_DISCONNECTED, PM_BT_INPUT, PM_BT_ERROR, PM_BT_CODEC, PM_BT_UNDERFLOW, PM_BT_STOPPED, PM_BT_LINK_DIAGNOSTIC } pm_bt_event_kind;
 typedef struct { pm_bt_event_kind kind; uint64_t generation; uint16_t status;
- uint8_t address[6],operation; bool pressed; uint32_t rate,device_class; int32_t detail1,detail2,detail3; char name[64]; } pm_bt_event;
+ uint8_t address[6],operation; bool pressed; uint32_t input_ms,input_epoch,rate,device_class; int32_t detail1,detail2,detail3; char name[64]; } pm_bt_event;
 bool pm_bt_runtime_init(void);
 bool pm_bt_runtime_next(pm_bt_event *event);
 uint32_t pm_bt_runtime_dropped(void);

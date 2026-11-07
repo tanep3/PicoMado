@@ -105,8 +105,7 @@ async fn delayed_older_hello_with_failed_reply_does_not_evict_active_video() {
         .find_map(|message| match message {
             WireMessage::Welcome {
                 incarnation,
-                session_epoch,
-            } => Some(SessionToken {
+                session_epoch, .. } => Some(SessionToken {
                 device_id: "ordered-video".into(),
                 incarnation,
                 session_epoch,
