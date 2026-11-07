@@ -699,7 +699,7 @@ static bool send_hello(void){
         "\"capabilities\":[\"%s\",\"buttons%u\",\"frame-bytes-v1\"%s%s],\"screen_owner_epoch\":%llu}}",
         PM_DEVICE_ID,pm_display_capability(),PM_BUTTON_COUNT,
 #if PM_BLUETOOTH_AUDIO
-        ",\"bluetooth-audio-v1\"",
+        ",\"bluetooth-audio-v1\",\"audio-buffer-4096-v1\"",
 #else
         "",
 #endif
@@ -1345,7 +1345,11 @@ int main(void){
             uint8_t kind;
             // Bound cooperative receive work so image decoding cannot starve
             // network polling or physical input under continuous playback.
-            unsigned budget=video_mode()?8u:2u;
+            bool realtime_media=video_mode();
+#if PM_BLUETOOTH_AUDIO
+            realtime_media |= bt_media.active;
+#endif
+            unsigned budget=realtime_media?8u:2u;
             for(unsigned messages=0;messages<budget && pm_net_take(&kind,json,sizeof json);messages++){
                 if(recover_transport_failure())break;
                 uint64_t process_started=pm_stats_clock();
@@ -1390,6 +1394,10 @@ int main(void){
             }
         }
         poll_switch_feedback();
-        finish_loop(loop_started);sleep_ms(state==ACTIVE && video_mode()?1u:5u);
+        bool realtime_media=video_mode();
+#if PM_BLUETOOTH_AUDIO
+        realtime_media |= bt_media.active;
+#endif
+        finish_loop(loop_started);sleep_ms(state==ACTIVE && realtime_media?1u:5u);
     }
 }

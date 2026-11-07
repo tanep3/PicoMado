@@ -193,6 +193,15 @@
       const label=el('label',undefined,'toggle'),enabled=el('input');enabled.type='checkbox';enabled.checked=b.desired.enabled;
       enabled.onchange=()=>{enabled.disabled=true;send({action:'set_enabled',enabled:enabled.checked})};
       label.append(enabled,el('span','Bluetoothを使用'));area.append(label);
+      const volumeRow=el('div',undefined,'row'),volumeLabel=el('label','音量（デジタル減衰 0–100）'),volume=el('input');
+      volume.type='number';volume.min='0';volume.max='100';volume.step='1';volume.value=String(b.desired.volume??0);volume.setAttribute('aria-label',`${d.id} の音量`);
+      volumeLabel.append(volume);volumeRow.append(volumeLabel);
+      const applyVolume=button('音量を適用');applyVolume.type='button';
+      applyVolume.onclick=()=>{const v=Number(volume.value);if(volume.value.trim()===''||!Number.isInteger(v)||v<0||v>100){say('音量は0から100の整数で指定してください',true);return}applyVolume.disabled=true;send({action:'set_volume',volume:v})};
+      const mute=button('ミュート');mute.type='button';mute.onclick=()=>{mute.disabled=true;send({action:'set_volume',volume:0})};
+      volumeRow.append(applyVolume,mute);area.append(volumeRow);
+      area.append(el('p',(b.desired.volume??0)===0?'ミュート中（初期設定）。確認するときは低い値から慎重に上げてください。':`設定音量: ${b.desired.volume} / 100`,'plugin-note'));
+      area.append(el('small','10はデジタル振幅1%、100は原音のままです。実際の音の大きさはスピーカー側の設定にも依存します。変更前に送った音声には短い遅れが残ります。','plugin-note'));
       if(b.desired.target)area.append(el('p',`接続先: ${b.desired.target}`,'plugin-note'));
       const scan=button('周辺のスピーカーを探す');scan.type='button';scan.disabled=!d.online||!b.desired.enabled||b.observed==='unsupported'||b.observed==='stopping';
       scan.onclick=()=>{scan.disabled=true;send({action:'discover'})};area.append(scan);

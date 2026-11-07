@@ -2,7 +2,7 @@
 mod executor;
 use crate::content::*;
 use crate::plugin_jobs::*;
-use crate::{Candidate, Capability, Event, Plugin, WorldQuery};
+use crate::{Candidate, Capability, Event, Mode, Plugin, Priority, Transition, WorldQuery};
 pub use executor::LocalMusicExecutor;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(crate) const MAX_SOURCE: u64 = 256 * 1024 * 1024;
 pub const SAMPLE_RATE: u32 = 48_000;
 pub const MAX_FRAMES: u64 = 48_000 * 7200;
+const TOGGLE_PLAYBACK: &str = "toggle-playback";
 pub(crate) fn good_name(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 255
@@ -98,10 +99,33 @@ impl Plugin for LocalMusicPlugin {
     }
     fn candidates<'a>(
         &'a self,
-        _: &'a dyn WorldQuery,
-        _: &'a Event,
+        query: &'a dyn WorldQuery,
+        event: &'a Event,
     ) -> Box<dyn Iterator<Item = Candidate> + 'a> {
-        Box::new(std::iter::empty())
+        // Engine validates the PluginInput session before consulting these rules.
+        // RefreshView is for Sub mode; music keeps normal channel navigation.
+        let candidate = match event {
+            Event::PluginInput { token, name }
+                if name == TOGGLE_PLAYBACK
+                    && query.device(&token.device_id).is_some_and(|d| {
+                        d.selected.as_deref() == Some(self.id()) && d.mode == Mode::Normal
+                    }) =>
+            {
+                Some(Candidate::new(
+                    query,
+                    &token.device_id,
+                    Priority::User,
+                    "music-toggle-playback",
+                    Transition::PluginDataChanged {
+                        device_id: token.device_id.clone(),
+                        incarnation: token.incarnation,
+                        plugin: self.id().into(),
+                    },
+                ))
+            }
+            _ => None,
+        };
+        Box::new(candidate.into_iter())
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -177,46 +201,33 @@ impl ContentPlugin for LocalMusicContent {
         ctx: &PluginContext,
         action: ButtonAction,
     ) -> Result<PluginPlan, ContentError> {
+        if action != ButtonAction::Sub || ctx.mode != Mode::Normal {
+            return Err(ContentError::Unsupported);
+        }
         let gen = self.generation()?;
         let s = self
             .devices
             .get_mut(&ctx.token.device_id)
             .filter(|s| s.incarnation == ctx.token.incarnation)
             .ok_or(ContentError::Unavailable)?;
-        let keys: Vec<_> = self.tracks.keys().cloned().collect();
-        match action {
-            ButtonAction::Sub => {
-                let max = self
-                    .tracks
-                    .get(&s.key)
-                    .ok_or(ContentError::Unavailable)?
-                    .frames;
-                s.position = s.position(self.clock, max);
-                if s.position >= max {
-                    s.position = 0;
-                }
-                s.playing = !s.playing;
-                s.started = self.clock;
-            }
-            ButtonAction::Up | ButtonAction::Down => {
-                let i = keys
-                    .iter()
-                    .position(|k| k == &s.key)
-                    .ok_or(ContentError::Unavailable)?;
-                let n = if action == ButtonAction::Down {
-                    (i + 1) % keys.len()
-                } else {
-                    (i + keys.len() - 1) % keys.len()
-                };
-                s.key = keys[n].clone();
-                s.position = 0;
-                s.started = self.clock;
-            }
-            _ => return Err(ContentError::Unsupported),
-        }
+        let max = self
+            .tracks
+            .get(&s.key)
+            .ok_or(ContentError::Unavailable)?
+            .frames;
+        let position = s.position(self.clock, max);
+        // An elapsed finite track is stopped even if its request flag remains set.
+        // One press must replay it, rather than resetting it to a paused start.
+        let playing = s.playing && position < max;
+        s.position = if position >= max { 0 } else { position };
+        s.playing = !playing;
+        s.started = self.clock;
         s.generation = gen;
         Ok(PluginPlan {
-            event: None,
+            event: Some(Event::PluginInput {
+                token: ctx.token.clone(),
+                name: TOGGLE_PLAYBACK.into(),
+            }),
             frame: self.current_frame(ctx),
             position: PluginPosition {
                 plugin: self.id().into(),
@@ -251,7 +262,7 @@ impl ContentPlugin for LocalMusicContent {
             .and_then(|s| self.tracks.get(&s.key))
             .map(|t| t.name.as_str())
             .unwrap_or("NO MUSIC");
-        Some(crate::lcd_text::status_frame(
+        Some(crate::music_text::lcd(
             if s.is_some_and(|s| s.playing) {
                 "MUSIC REQUESTED"
             } else {
@@ -259,6 +270,11 @@ impl ContentPlugin for LocalMusicContent {
             },
             text,
         ))
+    }
+    fn eink_frame_for(&self, ctx: &PluginContext, _: &[u8]) -> Option<Vec<u8>> {
+        let selection = self.devices.get(&ctx.token.device_id).filter(|s| s.incarnation == ctx.token.incarnation);
+        let name = selection.and_then(|s| self.tracks.get(&s.key)).map(|t| t.name.as_str()).unwrap_or("NO MUSIC");
+        Some(crate::music_text::eink(if selection.is_some_and(|s|s.playing) {"MUSIC REQUESTED"} else {"MUSIC STOPPED"}, name))
     }
     fn audio_playback(&self, ctx: &PluginContext) -> Option<AudioPlaybackSpec> {
         self.spec(ctx)

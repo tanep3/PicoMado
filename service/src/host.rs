@@ -14,6 +14,11 @@ pub enum HostError {
     Runner(AppError),
 }
 
+// Low-latency controls and PCM chunks must not wait for a delayed TCP ACK.
+fn disable_nagle(stream: &tokio::net::TcpStream) -> std::io::Result<()> {
+    stream.set_nodelay(true)
+}
+
 async fn wait_shutdown(mut receiver: watch::Receiver<bool>) {
     while !*receiver.borrow() && receiver.changed().await.is_ok() {}
 }
@@ -44,6 +49,11 @@ where
         use axum::serve::ListenerExt;
         use std::os::fd::AsRawFd;
         let listener = listener.tap_io(|stream| {
+            if let Err(error) = disable_nagle(stream) {
+                eprintln!("picomado socket_nodelay_failed {error}");
+                unsafe { libc::shutdown(stream.as_raw_fd(), libc::SHUT_RDWR); }
+                return;
+            }
             let size = crate::lcd_stream::SOCKET_SEND_BUFFER_BYTES as libc::c_int;
             // SO_SNDBUF is doubled by Linux (metadata included), so this
             // bounds kernel storage to 64KiB rather than auto-growing it.
@@ -266,5 +276,19 @@ mod tests {
             Err(HostError::Runner(AppError::Conflict("test runner failure")))
         ));
         assert!(tokio::net::TcpStream::connect(address).await.is_err());
+    }
+}
+
+#[cfg(test)]
+mod audio_socket_tests {
+    #[tokio::test]
+    async fn realtime_socket_disables_nagle() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let connect = tokio::net::TcpStream::connect(listener.local_addr().unwrap());
+        let (peer, accepted) = tokio::join!(connect, listener.accept());
+        let _peer = peer.unwrap();
+        let (socket, _) = accepted.unwrap();
+        super::disable_nagle(&socket).unwrap();
+        assert!(socket.nodelay().unwrap());
     }
 }

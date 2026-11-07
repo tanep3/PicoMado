@@ -38,7 +38,15 @@
         "service/src/application_bluetooth.rs",
         "docs/evidence/BT-AUDIO-20261107-host.md",
         "All-features tests: 367 passed, 2 ignored; final library rerun: 361 passed, 1 ignored",
-        "Implementation commit 870098f"
+        "Implementation commit 870098f",
+        "docs/changes/BT-AUDIO-20261107.md",
+        "ad5ff75: safe per-device volume specification and playback findings",
+        "service/src/music_text.rs and dedicated Japanese/ASCII music font",
+        "service all-features regression before volume: 376 passed, 2 ignored (2026-11-07)",
+        "Volume targeted tests: 4 passed; actual audio sink mute/live-volume test: 1 passed (2026-11-08)",
+        "firmware/tests/bluetooth_pipeline_test.py: prepared packet, send-credit and cancellation structure",
+        "docs/evidence/BT-AUDIO-20261108-followup.md",
+        "Final combined all-features serial regression: 387 passed, 0 failed, 2 ignored; /tmp/picomado-final-volume-music-all.log (2026-11-08)"
       ]
     },
     "independent_verification": {
@@ -46,8 +54,12 @@
       "evidence": []
     },
     "operational_application": {
-      "state": "not_started",
-      "evidence": []
+      "state": "in_progress",
+      "evidence": [
+        "User-authorized server deployment and LCD E661640843239D21 firmware update on 2026-11-07; audio defects under investigation, not operationally complete",
+        "docs/changes/BT-AUDIO-20261107.md",
+        "New volume defaults to mute and new connection-role comparison are implemented on host only; not deployed or audibly validated."
+      ]
     },
     "effectiveness_confirmation": {
       "state": "not_started",

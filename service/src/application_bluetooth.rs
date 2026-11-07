@@ -25,6 +25,7 @@ pub struct BluetoothView {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum BluetoothAction {
+    SetVolume { volume: crate::bluetooth::Volume },
     SetEnabled {
         enabled: bool,
     },
@@ -99,6 +100,20 @@ impl App {
     fn bluetooth_now(&self) -> u64 {
         self.mono_origin.elapsed().as_millis().min(u64::MAX as u128) as u64
     }
+    pub fn audio_volume(&self,session:&SessionToken)->u8 {
+        self.runtime.world.devices.get(&session.device_id)
+            .filter(|d|session_current(d,session)&&d.online)
+            .map(|d|self.runtime.bluetooth_saved(&session.device_id,d.incarnation).desired.volume.value())
+            .unwrap_or(0)
+    }
+    pub fn audio_buffer_capacity(&self, session: &SessionToken) -> u64 {
+        if self.runtime.world.devices.get(&session.device_id).is_some_and(|d|
+            session_current(d,session) && d.online
+            && d.capabilities.contains(crate::protocol::BLUETOOTH_AUDIO_CAPABILITY)
+            && d.capabilities.contains(crate::audio_transport::LARGE_RING_CAPABILITY)) {
+            crate::audio_transport::LARGE_RING_FRAMES
+        } else { crate::audio_transport::RING_FRAMES }
+    }
     pub fn bluetooth_supported(&self, session: &SessionToken) -> bool {
         self.runtime.world.devices.get(&session.device_id).is_some_and(|d| session_current(d,session)&&d.capabilities.contains("bluetooth-audio-v1"))
     }
@@ -159,8 +174,12 @@ impl App {
                 return Err(AppError::Conflict("stale Bluetooth revision"));
             }
             let live = state.sync_bluetooth(id)?;
+            if let BluetoothAction::SetVolume { volume } = action {
+                live.model.set_volume(volume);
+            } else {
             live.model.expire(now);
             let effect = match action {
+                BluetoothAction::SetVolume { .. } => unreachable!("handled above"),
                 BluetoothAction::SetEnabled { enabled } => live.model.set_enabled(enabled, now),
                 BluetoothAction::Discover {} => live.model.discover(now).map(Some),
                 BluetoothAction::Pair { discovery, target } => {
@@ -169,6 +188,7 @@ impl App {
             }
             .map_err(bluetooth_error)?;
             live.queued = effect;
+            }
             saved.desired = live.model.desired().clone();
             saved.revision = saved
                 .revision
@@ -236,6 +256,37 @@ mod bluetooth_integration_tests {
     use super::*;
     fn caps() -> BTreeSet<String> {
         ["lcd".into(), "bluetooth-audio-v1".into()].into()
+    }
+    #[test]
+    fn volume_is_per_device_persisted_and_does_not_restart_or_cancel() {
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("volume.sqlite");
+        let mut app=App::open(&path).unwrap();let a=app.hello("a",caps(),1).unwrap();let b=app.hello("b",caps(),1).unwrap();
+        app.bluetooth_command("a",a.incarnation,1,BluetoothAction::SetEnabled{enabled:true}).unwrap();
+        app.bluetooth_command("a",a.incarnation,2,BluetoothAction::Discover{}).unwrap();
+        let pending=app.bluetooth_view("a").pending;let queued=app.runtime.bluetooth_live["a"].queued.clone();
+        let display=crate::display_token("a",&app.runtime.world.devices["a"]);
+        app.bluetooth_command("a",a.incarnation,3,BluetoothAction::SetVolume{volume:crate::bluetooth::Volume::try_from(10).unwrap()}).unwrap();
+        assert_eq!(app.audio_volume(&a),10);assert_eq!(app.audio_volume(&b),0);
+        assert_eq!(app.bluetooth_view("a").pending,pending);assert_eq!(app.runtime.bluetooth_live["a"].queued,queued);
+        assert_eq!(crate::display_token("a",&app.runtime.world.devices["a"]),display);
+        assert!(app.bluetooth_command("a",a.incarnation,3,BluetoothAction::SetVolume{volume:Default::default()}).is_err());
+        app.pause_next_persistence(Box::new(||Err(AppError::Conflict("fixture storage failure"))));
+        assert!(app.bluetooth_command("a",a.incarnation,4,BluetoothAction::SetVolume{volume:Default::default()}).is_err());
+        assert_eq!(app.audio_volume(&a),10);
+        drop(app);let mut app=App::open(&path).unwrap();assert_eq!(app.bluetooth_view("a").desired.volume.value(),10);
+        assert_eq!(app.audio_volume(&a),0); // restarted/offline session is fail-closed
+        app.bluetooth_command("a",a.incarnation,4,BluetoothAction::SetVolume{volume:Default::default()}).unwrap();
+        assert_eq!(app.bluetooth_view("a").desired.volume.value(),0);
+    }
+    #[test]
+    fn negotiated_capacity_requires_current_capable_session() {
+        let dir=tempfile::tempdir().unwrap();let mut app=App::open(&dir.path().join("capacity.sqlite")).unwrap();
+        let legacy=app.hello("a",caps(),1).unwrap();assert_eq!(app.audio_buffer_capacity(&legacy),2048);
+        let mut upgraded=caps();upgraded.insert(crate::audio_transport::LARGE_RING_CAPABILITY.into());
+        let current=app.hello("a",upgraded,1).unwrap();assert_eq!(app.audio_buffer_capacity(&current),4096);
+        assert_eq!(app.audio_buffer_capacity(&legacy),2048);
+        let other=app.hello("b",caps(),1).unwrap();assert_eq!(app.audio_buffer_capacity(&other),2048);
+        app.disconnect(current.clone()).unwrap();assert_eq!(app.audio_buffer_capacity(&current),2048);
     }
     #[test]
     fn desired_survives_restart_but_commands_do_not() {

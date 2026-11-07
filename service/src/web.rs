@@ -1277,6 +1277,17 @@ async fn bluetooth_command(
 mod bluetooth_web_tests {
     use super::*;
     #[test]
+    fn bluetooth_volume_api_rejects_invalid_values() {
+        for volume in [serde_json::json!(0),serde_json::json!(10),serde_json::json!(100)] {
+            let body=serde_json::json!({"incarnation":1,"expected_revision":1,"command":{"action":"set_volume","volume":volume}});
+            assert!(serde_json::from_value::<BluetoothChange>(body).is_ok());
+        }
+        for volume in [serde_json::json!(-1),serde_json::json!(101),serde_json::json!(10.5),serde_json::json!("10"),serde_json::Value::Null] {
+            let body=serde_json::json!({"incarnation":1,"expected_revision":1,"command":{"action":"set_volume","volume":volume}});
+            assert!(serde_json::from_value::<BluetoothChange>(body).is_err());
+        }
+    }
+    #[test]
     fn bluetooth_dto_rejects_unknown_and_accepts_actions() {
         let good=r#"{"incarnation":1,"expected_revision":1,"command":{"action":"discover"}}"#;
         assert!(serde_json::from_str::<BluetoothChange>(good).is_ok());

@@ -7,7 +7,7 @@
 /* BT-AUDIO-20261107: pure bounded PCM ingress. This is NOT a wire decoder.
  * The adapter must serialize calls (same async-context lock) and decode bytes
  * explicitly. Samples are stereo signed16; positions count stereo frames. */
-#define PM_BT_PCM_FRAMES 2048u
+#define PM_BT_PCM_FRAMES 4096u
 #define PM_BT_PCM_CHANNELS 2u
 _Static_assert((PM_BT_PCM_FRAMES&(PM_BT_PCM_FRAMES-1))==0,"power of two ring");
 typedef struct {

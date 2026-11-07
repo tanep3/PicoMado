@@ -32,3 +32,21 @@ Web UIから音源をアップロードし、選択したPicoMado端末のBlueto
 統合ホスト検証: [BT-AUDIO-20261107-host.md](../evidence/BT-AUDIO-20261107-host.md)。
 
 実装コミット: `870098f`。独立検証・本番適用・効果確認は未実施。
+
+## 実機曲名表示の修正（2026-11-07）
+
+曲名が文字化けするとの指摘を調査し、天気用限定文字集合に英小文字やピリオドがなく、fallbackの`?`になっていたことを確認。音楽専用Noto Sans CJK JP資産を追加した。ASCII印字文字、JIS X0208、半角カナなど7038文字、14/16px、1bit約560KB。生成スクリプト・出典情報・既存フォントライセンス参照を同梱する。既存天気資産と描画は変更しない。LCD160x80とE-ink250x122をそれぞれnative描画し、切り詰めは文字境界と省略記号で行う。収録外文字はreplacement glyphで明示する。
+
+music関連9テスト成功（専用font2試験を含む）。サーバへの反映はユーザー承認済み。無音の調査はBT-AUDIO-20261107側へ記録。再生時間表示だけを出音成功の証拠とはしない。
+
+## 物理再生ボタンの状態採用修正（2026-11-07、実装前契約）
+
+- **原因と比較:** Web の play/pause は `accept_work_plan` で変更済み content を採用する。一方、物理ボタンの `App::button_at` は content の clone に `plan` を実行し、返された event が aggregate に受理された場合だけ clone を採用する。local-music は再生状態を変更しても `event: None` を返しており、Sub の受付ログがあっても変更と描画が捨てられていた。plugin 単体の直接呼出試験ではこの境界の違いを検出できなかった。これは入力状態採用の欠陥であり、Bluetooth 接続・PCM/SBC 配送・実際の出音とは別の原因である。
+- **採用契約:** 既存 weather の session 付き `PluginInput → Plugin.candidates` と同じ入口を使い、local-music の候補は既存 `Transition::PluginDataChanged` とする。plan は現在の SessionToken と `toggle-playback` を持つ `PluginInput` を返し、rules は選択中 local-music / Normal / 対応 name の場合だけ検証済み token と同じ device ID / incarnation を対象にする。既存 aggregate が session を検証・受理した後だけ content と画面を採用する。`Event::PluginDataChanged` の端末 allowlist 外という境界と `RefreshView` の Sub 専用契約は維持し、共通入口・遷移の適用範囲は広げない。
+- **Sub の意味:** 選曲済みで停止中なら再生、再生途中なら現在位置で一時停止、停止位置から再開する。曲終端では再生中フラグが残っていても終了扱いにし、1回の Sub で先頭から再生要求する。各採用操作で音声 generation を更新し、古い非同期 read offer の再利用を防ぐ。選曲のない Sub は無変更。
+- **既存操作の維持:** Normal の Up/Down/Next は従来どおりチャンネル切替。音楽の曲送りには割り当てない。変更は対象端末だけに作用し、他端末の音声 offer と表示世代を変えない。再接続・端末削除後の自動再生は禁止のまま。
+- **無音の検証境界:** `App::button_at` と公開 API を通る integration test で再生/一時停止/再開/終端 replay、端末独立、チャンネル操作、stale session/incarnation/offer 拒否を確認する。temp DB と純粋な音源メタデータのみを使い、音声再生・実機・USB・SSH・サービス変更を行わない。合格しても出音と物理ボタンの実機効果は未確認として分離する。
+
+### ボタン修正のホスト検証
+
+`service/tests/local_music_input.rs` を追加し、2026-11-07 の最終修正ソースで `cargo test --manifest-path service/Cargo.toml --test local_music_input --no-default-features` は **7 passed / 0 failed**。公開 App 入力経路の再生/一時停止/位置を保持した再開、曲終端の1回 replay、2端末の独立、2曲がある場合の Up/Down チャンネル切替維持、再接続と再登録での古い session/incarnation 拒否、古い audio offer の不一致、非対応 name/mode の拒否、候補の同一端末/incarnation/plugin 限定を確認した。共通 application / Engine / terminal allowlist は変更していない。修正前の固定ソースを使った厳密な前後比較は未実施。全体の独立検証・本番反映・実機効果確認は親が別途確認する。

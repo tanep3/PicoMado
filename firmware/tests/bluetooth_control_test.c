@@ -33,6 +33,8 @@ static bool pm_net_send(unsigned kind,const char *j){assert(!locks&&kind==21);re
 /* Minimal fixture parser: adapter validation is tested, JSON parser is not replaced in production. */
 static bool number(const char *j,const char *key,uint64_t *v){char needle[80];snprintf(needle,sizeof needle,"\"%s\":",key);const char *p=strstr(j,needle);if(!p)return false;char *end;*v=strtoull(p+strlen(needle),&end,10);return end!=p+strlen(needle);}
 static bool string_equals(const char *j,const char *key,const char *v){char needle[100];snprintf(needle,sizeof needle,"\"%s\":\"%s\"",key,v);return strstr(j,needle)!=NULL;}
+void pm_bt_runtime_link_snapshot(pm_bt_link_snapshot *out){assert(locks);memset(out,0,sizeof *out);}
+static void pm_logf(const char *fmt,...){(void)fmt;assert(!locks);}
 #include "../src/bluetooth_control.inc"
 static pm_input_result perform_operation(pm_operation op,unsigned source,bool flag){(void)op;(void)source;(void)flag;inputs++;return (pm_input_result)0;}
 static void emit(pm_bt_event_kind kind,uint64_t generation){assert(!queued);event=(pm_bt_event){.kind=kind,.generation=generation};queued=true;}

@@ -35,7 +35,10 @@
         "service/src/local_music/executor.rs",
         "docs/evidence/BT-AUDIO-20261107-host.md",
         "All-features tests: 367 passed, 2 ignored; final library rerun: 361 passed, 1 ignored",
-        "Implementation commit 870098f"
+        "Implementation commit 870098f",
+        "docs/changes/MUSIC-PLAYER-20261107.md",
+        "docs/evidence/BT-AUDIO-20261108-followup.md",
+        "Final combined all-features serial regression: 387 passed, 0 failed, 2 ignored; /tmp/picomado-final-volume-music-all.log (2026-11-08)"
       ]
     },
     "independent_verification": {
@@ -43,8 +46,11 @@
       "evidence": []
     },
     "operational_application": {
-      "state": "not_started",
-      "evidence": []
+      "state": "in_progress",
+      "evidence": [
+        "User-authorized server deployment and LCD E661640843239D21 firmware update on 2026-11-07; audio defects under investigation, not operationally complete",
+        "docs/changes/MUSIC-PLAYER-20261107.md"
+      ]
     },
     "effectiveness_confirmation": {
       "state": "not_started",

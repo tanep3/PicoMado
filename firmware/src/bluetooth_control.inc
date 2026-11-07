@@ -50,6 +50,15 @@ static void poll_bluetooth(void){
     }
     /* expires_ms belongs to the host clock and is echoed only. A local budget
      * bounds deferred readiness/stop/connection work independently. */
+    if(bt_waiting&&bt_initialized){
+        static uint32_t last_link_snapshot_ms;
+        uint32_t now=to_ms_since_boot(get_absolute_time());
+        if((uint32_t)(now-last_link_snapshot_ms)>=2000){
+            last_link_snapshot_ms=now;pm_bt_link_snapshot d;
+            cyw43_arch_lwip_begin();pm_bt_runtime_link_snapshot(&d);cyw43_arch_lwip_end();
+            pm_logf("bt setup cid=%u exists=%u conn=%d sig=%u source=%d initiator=%d outgoing=%u discover=%u configured=%u have=%u endpoint=%d media=%u\n",d.cid,d.exists,d.connection,d.signaling_cid,d.source,d.initiator,d.outgoing,d.discover,d.configured,d.have_config,d.endpoint,d.media_cid);
+        }
+    }
     if(bt_waiting&&(uint32_t)(to_ms_since_boot(get_absolute_time())-bt_received_ms)>=25000){
         bt_waiting=false;bt_pending=false;bt_timed_out=true;
         cyw43_arch_lwip_begin();if(bt_initialized)pm_bt_runtime_stop(bt_token.generation);cyw43_arch_lwip_end();
@@ -82,7 +91,9 @@ static void poll_bluetooth(void){
     }
     if(status){bt_waiting=false;(void)bt_report("{\"event\":\"complete\",\"success\":false}");return;}
     if(!have||e.generation!=bt_token.generation||bt_timed_out)return;
-    if(e.kind==PM_BT_FOUND){
+    if(e.kind==PM_BT_LINK_DIAGNOSTIC){
+        pm_logf("bt link generation=%llu status=%u old_cid=%ld new_cid=%ld phase=%ld\n",(unsigned long long)e.generation,e.status,(long)e.detail1,(long)e.detail2,(long)e.detail3);
+    }else if(e.kind==PM_BT_FOUND){
         char name[128],report[300];size_t n=0;
         for(size_t i=0;i<sizeof e.name&&e.name[i]&&n+2<sizeof name;i++){
             unsigned char c=e.name[i];if(c<32||c>=127)continue;
@@ -101,7 +112,7 @@ static void poll_bluetooth(void){
         if(e.kind==PM_BT_STOPPED&&bt_action!=1)return;
         bt_waiting=false;
         (void)bt_report("{\"event\":\"complete\",\"success\":true}");
-    }else if(e.kind==PM_BT_ERROR){bt_waiting=false;if(!bt_input.connected)(void)bt_report("{\"event\":\"complete\",\"success\":false}");
+    }else if(e.kind==PM_BT_ERROR){pm_logf("bt runtime error generation=%llu status=0x%04x d1=%ld d2=%ld d3=%ld\n",(unsigned long long)e.generation,e.status,(long)e.detail1,(long)e.detail2,(long)e.detail3);bt_waiting=false;if(!bt_input.connected)(void)bt_report("{\"event\":\"complete\",\"success\":false}");
     }else if(e.kind==PM_BT_DISCONNECTED){
         pm_bluetooth_input_reset(&bt_input,e.generation,false);(void)bt_report("{\"event\":\"disconnected\"}");
     }else if(e.kind==PM_BT_INPUT){

@@ -18,6 +18,11 @@ build bluetooth-control tests/bluetooth_control_test.c
 run bluetooth-control
 build bluetooth-media tests/bluetooth_media_test.c
 run bluetooth-media
+build bluetooth-packet-policy tests/bluetooth_packet_policy_test.c
+run bluetooth-packet-policy
+build bluetooth-connection-policy tests/bluetooth_connection_policy_test.c
+run bluetooth-connection-policy
+python3 tests/bluetooth_pipeline_test.py
 build core tests/core_test.c src/core.c
 build wake tests/wake_test.c src/core.c
 build transform tests/lcd_transform_test.c

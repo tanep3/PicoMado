@@ -31,9 +31,36 @@ impl From<BluetoothAddress> for String {
     }
 }
 
+/// Per-device digital attenuation control, never an acoustic loudness guarantee.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "u8", into = "u8")]
+pub struct Volume(u8);
+impl TryFrom<u8> for Volume {
+    type Error = &'static str;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        if value <= 100 {
+            Ok(Self(value))
+        } else {
+            Err("volume must be 0..100")
+        }
+    }
+}
+impl From<Volume> for u8 {
+    fn from(value: Volume) -> Self {
+        value.0
+    }
+}
+impl Volume {
+    pub fn value(self) -> u8 {
+        self.0
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DesiredBluetooth {
+    #[serde(default)]
+    pub volume: Volume,
     pub enabled: bool,
     pub target: Option<BluetoothAddress>,
 }
@@ -129,6 +156,10 @@ impl BluetoothDevice {
     }
     pub fn desired(&self) -> &DesiredBluetooth {
         &self.desired
+    }
+    /// A local gain preference does not invalidate a wireless command or link.
+    pub fn set_volume(&mut self, volume: Volume) {
+        self.desired.volume = volume;
     }
     pub fn observed(&self) -> Observed {
         self.observed
@@ -370,6 +401,29 @@ mod tests {
         }
     }
     #[test]
+    fn volume_missing_migrates_to_mute_and_invalid_values_are_rejected() {
+        let old: DesiredBluetooth =
+            serde_json::from_str(r#"{"enabled":true,"target":null}"#).unwrap();
+        assert_eq!(old.volume.value(), 0);
+        for value in ["-1", "101", "256", "10.5", "null", "\"10\""] {
+            assert!(serde_json::from_str::<Volume>(value).is_err());
+        }
+        for value in [0, 10, 100] {
+            assert_eq!(
+                serde_json::from_str::<Volume>(&value.to_string())
+                    .unwrap()
+                    .value(),
+                value
+            );
+        }
+        let mut d = device();
+        d.discover(0).unwrap();
+        let pending = d.pending();
+        d.set_volume(Volume::try_from(10).unwrap());
+        assert_eq!(d.pending(), pending);
+        assert_eq!(d.observed(), Observed::Discovering);
+    }
+    #[test]
     fn stale_and_isolated() {
         let mut a = device();
         let b = device();
@@ -452,6 +506,7 @@ mod tests {
         let mut d = BluetoothDevice::new(DesiredBluetooth {
             enabled: true,
             target: Some(candidate(0).address),
+            volume: Volume::default(),
         });
         d.bind(Some(1), true).unwrap();
         assert!(matches!(

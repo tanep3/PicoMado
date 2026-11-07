@@ -1,0 +1,17 @@
+{
+  "family": [
+    "Noto Sans CJK JP",
+    "Regular"
+  ],
+  "sizes": [
+    14,
+    16
+  ],
+  "source_sha256": "b76b0433203017ca80401b2ee0dd69350349871c4b19d504c34dbdd80541690a",
+  "characters": 7038,
+  "baselines": [
+    15,
+    16
+  ],
+  "license": "NOTO-COPYRIGHT"
+}

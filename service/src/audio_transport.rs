@@ -3,7 +3,35 @@ pub const AUDIO_CHUNK_KIND: u8 = 24;
 pub const PCM_FRAME_BYTES: usize = 4;
 pub const MAX_CHUNK_FRAMES: usize = 256;
 pub const RING_FRAMES: u64 = 2048;
+pub const LARGE_RING_FRAMES: u64 = 4096;
+pub const LARGE_RING_CAPABILITY: &str = "audio-buffer-4096-v1";
 const HEADER_BYTES: usize = 46; // length + version/kind + five big-endian u64s
+
+/// Attenuate a disposable s16le stereo packet. Source assets are never modified.
+/// Squared control: 10 -> 0.01 gain (-40 dB), 100 -> unity, 0 -> exact silence.
+pub fn apply_volume(pcm: &mut [u8], volume: u8) -> Result<(), AudioError> {
+    if volume > 100 {
+        return Err(AudioError::InvalidVolume);
+    }
+    if pcm.len() % PCM_FRAME_BYTES != 0 {
+        return Err(AudioError::InvalidLength);
+    }
+    if volume == 0 {
+        pcm.fill(0);
+        return Ok(());
+    }
+    if volume == 100 {
+        return Ok(());
+    }
+    let gain = i32::from(volume) * i32::from(volume);
+    for sample in pcm.chunks_exact_mut(2) {
+        let value = i32::from(i16::from_le_bytes([sample[0], sample[1]]));
+        let attenuated =
+            (value * gain / 10000).clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
+        sample.copy_from_slice(&attenuated.to_le_bytes());
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StreamIdentity {
@@ -21,6 +49,8 @@ pub enum AudioError {
     NonContiguous,
     NoCredit,
     InvalidCredit,
+    InvalidCapacity,
+    InvalidVolume,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DecodedChunk<'a> {
@@ -108,6 +138,7 @@ pub struct AudioSender {
     incarnation: u64,
     session_epoch: u64,
     last_stream_id: u64,
+    capacity: u64,
     active: Option<Stream>,
 }
 impl AudioSender {
@@ -116,8 +147,20 @@ impl AudioSender {
             incarnation,
             session_epoch,
             last_stream_id: 0,
+            capacity: RING_FRAMES,
             active: None,
         }
+    }
+    /// Negotiated capacity changes only between streams. Legacy peers retain 2048.
+    pub fn set_capacity(&mut self, frames: u64) -> Result<(), AudioError> {
+        if self.active.is_some() || !matches!(frames, RING_FRAMES | LARGE_RING_FRAMES) {
+            return Err(AudioError::InvalidCapacity);
+        }
+        self.capacity = frames;
+        Ok(())
+    }
+    pub fn capacity(&self) -> u64 {
+        self.capacity
     }
     /// Allocate a new stream even for a repeat start at the same position.
     /// Retain this allocator for the entire transport session, including across stop.
@@ -163,7 +206,7 @@ impl AudioSender {
     }
     pub fn allowance(&self) -> usize {
         self.active.as_ref().map_or(0, |s| {
-            (RING_FRAMES.saturating_sub(s.sent - s.consumed))
+            (self.capacity.saturating_sub(s.sent - s.consumed))
                 .min(MAX_CHUNK_FRAMES as u64)
                 .min(u64::MAX - s.sent) as usize
         })
@@ -197,7 +240,12 @@ impl AudioSender {
         let Some(s) = self.active.as_mut().filter(|s| s.identity == identity) else {
             return Ok(false);
         };
-        if consumed < s.start || accepted < s.start || consumed > accepted || accepted > s.sent {
+        if consumed < s.start
+            || accepted < s.start
+            || consumed > accepted
+            || accepted > s.sent
+            || accepted - consumed > self.capacity
+        {
             return Err(AudioError::InvalidCredit);
         }
         if accepted < s.accepted || consumed < s.consumed {
@@ -213,6 +261,78 @@ impl AudioSender {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn volume_is_exact_silence_squared_attenuation_and_unity() {
+        let source: Vec<u8> = [i16::MIN, -10000, -1, 0, 1, 10000, i16::MAX, 1234]
+            .into_iter()
+            .flat_map(i16::to_le_bytes)
+            .collect();
+        let mut muted = source.clone();
+        apply_volume(&mut muted, 0).unwrap();
+        assert!(muted.iter().all(|b| *b == 0));
+        let mut unity = source.clone();
+        apply_volume(&mut unity, 100).unwrap();
+        assert_eq!(unity, source);
+        let mut quiet = source.clone();
+        apply_volume(&mut quiet, 10).unwrap();
+        let values: Vec<_> = quiet
+            .chunks_exact(2)
+            .map(|b| i16::from_le_bytes([b[0], b[1]]))
+            .collect();
+        assert_eq!(values, vec![-327, -100, 0, 0, 0, 100, 327, 12]);
+        for volume in 0..=100 {
+            let mut bytes = source.clone();
+            apply_volume(&mut bytes, volume).unwrap();
+            for (a, b) in bytes.chunks_exact(2).zip(source.chunks_exact(2)) {
+                assert!(
+                    i32::from(i16::from_le_bytes([a[0], a[1]])).abs()
+                        <= i32::from(i16::from_le_bytes([b[0], b[1]])).abs()
+                );
+            }
+        }
+        let mut invalid = source.clone();
+        assert_eq!(
+            apply_volume(&mut invalid, 101),
+            Err(AudioError::InvalidVolume)
+        );
+        assert_eq!(invalid, source);
+        assert_eq!(
+            apply_volume(&mut [1, 2, 3], 10),
+            Err(AudioError::InvalidLength)
+        );
+    }
+    #[test]
+    fn negotiated_capacity_is_bounded_and_changes_only_between_streams() {
+        let mut sender = AudioSender::new(1, 2);
+        assert_eq!(sender.capacity(), 2048);
+        assert_eq!(sender.set_capacity(8192), Err(AudioError::InvalidCapacity));
+        sender.set_capacity(4096).unwrap();
+        let id = sender.start(3, 0).unwrap();
+        assert_eq!(sender.set_capacity(2048), Err(AudioError::InvalidCapacity));
+        for n in 0..16 {
+            assert_eq!(sender.allowance(), 256);
+            sender.record_sent(n * 256, 256).unwrap();
+        }
+        assert_eq!(sender.allowance(), 0);
+        assert_eq!(sender.record_sent(4096, 1), Err(AudioError::NoCredit));
+        sender.apply_credit(id, 4096, 256).unwrap();
+        sender.record_sent(4096, 256).unwrap();
+        assert!(!sender.apply_credit(id, 4096, 256).unwrap());
+        assert_eq!(sender.allowance(), 0);
+        assert_eq!(
+            sender.apply_credit(id, 4352, 0),
+            Err(AudioError::InvalidCredit)
+        );
+        sender.stop();
+        sender.set_capacity(2048).unwrap();
+        let fresh = sender.start(4, 0).unwrap();
+        assert_ne!(id, fresh);
+        for n in 0..8 {
+            sender.record_sent(n * 256, 256).unwrap();
+        }
+        assert_eq!(sender.allowance(), 0);
+        assert!(!sender.apply_credit(id, 4096, 4096).unwrap());
+    }
     #[test]
     fn bounded_credit_duplicate_reordered_and_underflow() {
         let mut sender = AudioSender::new(1, 2);

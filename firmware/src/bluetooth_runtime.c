@@ -1,5 +1,7 @@
 /* BT-AUDIO-20261107: bounded shared-runtime adapter. Hardware validation remains required. */
 #include "bluetooth_runtime.h"
+#include "bluetooth_connection_policy.h"
+#include "bluetooth_packet_policy.h"
 #include "btstack.h"
 #include "classic/btstack_sbc_bluedroid.h"
 static pm_bt_event queue[8];
@@ -12,6 +14,11 @@ static bd_addr_t peer;
 static uint16_t cid;
 static uint8_t seid;
 static uint16_t remote_cid;
+static uint16_t observed_packet_handle,observed_packet_types,observed_mode_handle,observed_mode_interval;
+static bool observed_packet_valid,observed_mode_valid;
+#ifndef PM_BT_INCOMING_MASTER_POLICY
+#define PM_BT_INCOMING_MASTER_POLICY 0
+#endif
 static uint32_t rate, timestamp, deadline;
 static uint64_t accepted_frames, consumed_frames, samples_sent;
 static bool streaming, pending, input_enabled;
@@ -20,47 +27,147 @@ static pm_bluetooth_audio audio;
 static btstack_timer_source_t timer;
 static btstack_sbc_encoder_bluedroid_t encoder_state;
 static const btstack_sbc_encoder_t *encoder;
-static uint8_t encoded[256];
+static uint8_t encoded[1000];
+static unsigned prepared_count,prepared_bytes;
+static void prepare_audio(void);
+static uint32_t empty_since,can_requested_ms,timer_due_ms;
+static bool timer_scheduled;
+static pm_bt_audio_diagnostics diagnostics;
+void pm_bt_runtime_audio_diagnostics(pm_bt_audio_diagnostics *out){if(out)*out=diagnostics;}
+static void schedule_audio(uint32_t delay){
+ timer_due_ms=btstack_run_loop_get_time_ms()+delay;timer_scheduled=true;
+ btstack_run_loop_set_timer(&timer,delay);btstack_run_loop_add_timer(&timer);
+}
+static bool waiting_pcm,clock_started,pcm_eof;
+static uint64_t pcm_end,pcm_first;
 static void tick(btstack_timer_source_t *t);
 static uint8_t caps[]={0x33,0x15,2,53}, configuration[4];
 static uint8_t source_record[150], target_record[200];
 static btstack_packet_callback_registration_t registration;
+static void emit(pm_bt_event e);
+static btstack_timer_source_t connect_timer;
+static uint64_t retry_generation;
+static unsigned retry_count;
+static bool retry_pending;
+static void retry_cancel(void){btstack_run_loop_remove_timer(&connect_timer);retry_pending=false;}
+static void retry_connect(btstack_timer_source_t *t);
+static void retry_schedule(void){
+ if(!wanted||stopping||retry_pending)return;
+ if(retry_count>=3){emit((pm_bt_event){.kind=PM_BT_ERROR,.status=ERROR_CODE_ACL_CONNECTION_ALREADY_EXISTS});wanted=false;return;}
+ retry_generation=generation;retry_count++;retry_pending=true;
+ btstack_run_loop_set_timer(&connect_timer,500);btstack_run_loop_add_timer(&connect_timer);
+}
+
 static void emit(pm_bt_event e){
  if(!e.generation)e.generation=generation;
  if(count==8){if(dropped!=UINT32_MAX)++dropped;return;}
  queue[(rd+count)%8]=e;++count;
 }
+static void retry_connect(btstack_timer_source_t *t){
+ (void)t;retry_pending=false;
+ if(!wanted||stopping||retry_generation!=generation)return;
+ /* Lookup is scoped to the explicitly selected peer, after SDK cleanup. */
+ avdtp_connection_t *existing=avdtp_get_connection_for_bd_addr(peer);
+ if(existing)cid=existing->avdtp_cid;
+ uint16_t next=cid;
+ uint8_t status=a2dp_source_establish_stream(peer,&next);
+ if(!status){cid=next;return;}
+ if(status==ERROR_CODE_ACL_CONNECTION_ALREADY_EXISTS||
+    (existing&&status==ERROR_CODE_COMMAND_DISALLOWED)){retry_schedule();return;}
+ emit((pm_bt_event){.kind=PM_BT_ERROR,.status=status});wanted=false;
+}
 bool pm_bt_runtime_next(pm_bt_event *e){if(!e||!count)return false;*e=queue[rd];rd=(rd+1)%8;--count;return true;}
 uint32_t pm_bt_runtime_dropped(void){return dropped;}
 static void media_stop(void){
- streaming=false;pending=false;btstack_run_loop_remove_timer(&timer);pm_bluetooth_audio_stop(&audio);
+ streaming=false;pending=false;prepared_count=prepared_bytes=0;btstack_run_loop_remove_timer(&timer);pm_bluetooth_audio_stop(&audio);
+}
+static unsigned ready_packet(void){
+ unsigned frames=encoder->num_audio_frames(&encoder_state);
+ unsigned reserve=pm_bt_sbc_bytes((unsigned)encoder_state.params.s16BitPool,
+     encoder_state.params.s16ChannelMode==SBC_CHANNEL_MODE_JOINT_STEREO);
+ int mtu=a2dp_max_media_payload_size(cid,seid);
+ unsigned target=pm_bt_packet_frames(rate,frames,reserve,mtu>0?(size_t)mtu:0,sizeof encoded);
+ return pm_bt_ready_packet(target,frames,audio.used,pcm_eof,accepted_frames,pcm_end);
 }
 static void tick(btstack_timer_source_t *t){
  (void)t;if(!wanted||!streaming||!encoder)return;
- if(!pending){pending=true;a2dp_source_stream_endpoint_request_can_send_now(cid,seid);}
+ if(timer_scheduled){uint32_t now=btstack_run_loop_get_time_ms();int32_t late=(int32_t)(now-timer_due_ms);timer_scheduled=false;
+  if(late>0){diagnostics.timer_late_total_ms+=(uint32_t)late;if((uint32_t)late>diagnostics.timer_late_max_ms)diagnostics.timer_late_max_ms=(uint32_t)late;}}
+ if(pending)return;
+ if(!prepared_count&&!ready_packet()){
+  uint32_t now=btstack_run_loop_get_time_ms();
+  if(!waiting_pcm){waiting_pcm=true;empty_since=now;}
+  if(now-empty_since>=50){emit((pm_bt_event){.kind=PM_BT_UNDERFLOW});media_stop();a2dp_source_pause_stream(cid,seid);return;}
+  schedule_audio(5);return;
+ }
+ waiting_pcm=false;
+ if(!prepared_count)prepare_audio();
+ if(!streaming||!prepared_count)return;
+ /* Encode the next packet while the previous packet is in the controller,
+  * then wait for its absolute sample-clock deadline before requesting credit. */
+ if(clock_started){
+  int32_t delay=pm_bt_packet_delay(deadline,samples_sent,rate,btstack_run_loop_get_time_ms());
+  if(delay>0){schedule_audio((uint32_t)delay);return;}
+ }
+ if(!pending){pending=true;can_requested_ms=btstack_run_loop_get_time_ms();a2dp_source_stream_endpoint_request_can_send_now(cid,seid);}
+}
+static void prepare_audio(void){
+ if(!streaming||!wanted||!encoder||prepared_count)return;
+ uint32_t send_started=btstack_run_loop_get_time_ms();
+ unsigned frames=encoder->num_audio_frames(&encoder_state);
+ int mtu=a2dp_max_media_payload_size(cid,seid);
+ int16_t pcm[256];
+ /* Compute exact encoded size from negotiated16x8/stereo and chosen bitpool;
+  * SDK packet length is still zero before the first encode. */
+ unsigned bytes;
+ unsigned reserve=pm_bt_sbc_bytes((unsigned)encoder_state.params.s16BitPool,
+     encoder_state.params.s16ChannelMode==SBC_CHANNEL_MODE_JOINT_STEREO);
+ unsigned target=pm_bt_packet_frames(rate,frames,reserve,mtu>0?(size_t)mtu:0,sizeof encoded);
+ if(frames!=128||!target){emit((pm_bt_event){.kind=PM_BT_ERROR,.status=0xff01,.detail1=(int32_t)frames,.detail2=(int32_t)reserve,.detail3=mtu});media_stop();return;}
+ if(audio.used<frames){
+  if(!waiting_pcm){waiting_pcm=true;empty_since=send_started;}
+  if(send_started-empty_since>=50){emit((pm_bt_event){.kind=PM_BT_UNDERFLOW});media_stop();a2dp_source_pause_stream(cid,seid);return;}
+  schedule_audio(5);return;
+ }
+ waiting_pcm=false;
+ unsigned eligible=pm_bt_ready_packet(target,frames,audio.used,pcm_eof,accepted_frames,pcm_end);
+ if(!eligible){schedule_audio(5);return;}
+ target=eligible;
+ unsigned count=0,used=1;
+ while(count<target&&audio.used>=frames){
+  if(!pm_bluetooth_audio_pop(&audio,pcm,frames))break;
+  uint8_t status=encoder->encode_signed_16(&encoder_state,pcm,encoded+used);
+  bytes=encoder->sbc_buffer_length(&encoder_state);
+  if(status||!bytes||bytes>reserve){emit((pm_bt_event){.kind=PM_BT_ERROR,.status=0xff01,.detail1=status,.detail2=(int32_t)bytes,.detail3=mtu});media_stop();return;}
+  used+=bytes;count++;
+ }
+ uint32_t encode_ms=btstack_run_loop_get_time_ms()-send_started;
+ diagnostics.encode_total_ms+=encode_ms;if(encode_ms>diagnostics.encode_max_ms)diagnostics.encode_max_ms=encode_ms;
+ diagnostics.last_count=count;diagnostics.last_bytes=used;diagnostics.mtu=(uint32_t)mtu;
+ encoded[0]=(uint8_t)count;
+ prepared_count=count;prepared_bytes=used;
 }
 static void send_audio(void){
- pending=false;if(!streaming||!wanted||!encoder)return;
- unsigned frames=encoder->num_audio_frames(&encoder_state);
- unsigned bytes=encoder->sbc_buffer_length(&encoder_state);
- int16_t pcm[256];
- if(frames>128||bytes+1>sizeof encoded||bytes+1>(unsigned)a2dp_max_media_payload_size(cid,seid)){
-  emit((pm_bt_event){.kind=PM_BT_ERROR,.status=0xff01});media_stop();return;
- }
- if(!pm_bluetooth_audio_pop(&audio,pcm,frames)){
-  emit((pm_bt_event){.kind=PM_BT_UNDERFLOW});media_stop();a2dp_source_pause_stream(cid,seid);return;
- }
- consumed_frames+=frames;
- encoded[0]=1;encoder->encode_signed_16(&encoder_state,pcm,encoded+1);
- uint8_t status=a2dp_source_stream_send_media_payload_rtp(cid,seid,0,timestamp,encoded,bytes+1);
- if(status){emit((pm_bt_event){.kind=PM_BT_ERROR,.status=status});media_stop();return;}
- timestamp+=frames;samples_sent+=frames;
- /* Absolute sample clock avoids millisecond rounding drift. No catch-up burst. */
+ pending=false;if(!streaming||!wanted||!encoder||!prepared_count)return;
+ uint32_t send_started=btstack_run_loop_get_time_ms();
+ uint32_t wait=send_started-can_requested_ms;diagnostics.can_wait_total_ms+=wait;
+ if(wait>diagnostics.can_wait_max_ms)diagnostics.can_wait_max_ms=wait;
+ unsigned count=prepared_count,used=prepared_bytes,frames=128;
+ int mtu=a2dp_max_media_payload_size(cid,seid);
+ uint8_t status=a2dp_source_stream_send_media_payload_rtp(cid,seid,0,timestamp,encoded,used);
+ if(status){emit((pm_bt_event){.kind=PM_BT_ERROR,.status=status,.detail1=(int32_t)used,.detail2=mtu,.detail3=(int32_t)(btstack_run_loop_get_time_ms()-send_started)});media_stop();return;}
  uint32_t now=btstack_run_loop_get_time_ms();
- uint32_t due=deadline+(uint32_t)((samples_sent*1000)/rate);
- int32_t delay=(int32_t)(due-now);
- if(delay < -100){emit((pm_bt_event){.kind=PM_BT_ERROR,.status=0xff02});media_stop();return;}
- btstack_run_loop_set_timer(&timer,delay>0?(uint32_t)delay:1);btstack_run_loop_add_timer(&timer);
+ /* Anchor to first successful transmission, excluding asynchronous START /
+  * can-send latency. Thereafter never silently reset the sample clock. */
+ if(!clock_started){deadline=now;clock_started=true;}
+ prepared_count=prepared_bytes=0;
+ consumed_frames+=count*frames; /* Credit/completion never outruns successful RTP send. */
+ diagnostics.packets++;diagnostics.frames+=count*frames;
+ timestamp+=count*frames;samples_sent+=count*frames;
+ int32_t delay=pm_bt_packet_delay(deadline,samples_sent,rate,now);
+ if(delay < -250){emit((pm_bt_event){.kind=PM_BT_ERROR,.status=0xff02,.detail1=delay,.detail2=(int32_t)(now-send_started),.detail3=(int32_t)samples_sent});media_stop();return;}
+ /* Separate turn: no recursive encoding/request chain from synchronous grants. */
+ schedule_audio(1);
 }
 uint32_t pm_bt_runtime_rate(void){return rate;}
 void pm_bt_runtime_enable_input(bool enabled){input_enabled=enabled;memset(pressed,0,sizeof pressed);}
@@ -68,9 +175,18 @@ bool pm_bt_runtime_audio_begin(uint64_t gen,uint64_t first_frame){
  if(!wanted||!cid||!encoder||!gen)return false;
  if(streaming)return false;
  if(!pm_bluetooth_audio_start(&audio,gen,rate))return false;
+ memset(&diagnostics,0,sizeof diagnostics);diagnostics.bitpool=(uint32_t)encoder_state.params.s16BitPool;timer_scheduled=false;
+ prepared_count=prepared_bytes=0;
+ pcm_eof=false;pcm_end=0;pcm_first=first_frame;
  audio.next_frame=first_frame;accepted_frames=consumed_frames=first_frame;return true;
 }
+bool pm_bt_runtime_audio_finish(uint64_t gen,uint64_t end){
+ if(!audio.active||audio.generation!=gen||end<accepted_frames||end<pcm_first||(end-pcm_first)%128)return false;
+ if(pcm_eof&&end!=pcm_end)return false;
+ pcm_eof=true;pcm_end=end;return true;
+}
 pm_bluetooth_audio_result pm_bt_runtime_audio_push(uint64_t gen,uint64_t frame,const int16_t *pcm,size_t frames){
+ if(pcm_eof&&(frame>pcm_end||frames>pcm_end-frame))return PM_BT_PCM_INVALID;
  pm_bluetooth_audio_result result=pm_bluetooth_audio_push(&audio,gen,frame,pcm,frames);
  if(result==PM_BT_PCM_OK)accepted_frames=audio.next_frame;return result;
 }
@@ -92,6 +208,20 @@ static void hci_handler(uint8_t type,uint16_t channel,uint8_t *p,uint16_t size){
  (void)channel;(void)size;if(type!=HCI_EVENT_PACKET)return;
  bd_addr_t address;
  switch(hci_event_packet_get_type(p)){
+ case HCI_EVENT_CONNECTION_PACKET_TYPE_CHANGED:
+  if(hci_event_connection_packet_type_changed_get_status(p)==0){
+   observed_packet_handle=hci_event_connection_packet_type_changed_get_handle(p);
+   observed_packet_types=hci_event_connection_packet_type_changed_get_packet_types(p);observed_packet_valid=true;
+  }break;
+ case HCI_EVENT_MODE_CHANGE:
+  if(hci_event_mode_change_get_status(p)==0){
+   observed_mode_handle=hci_event_mode_change_get_handle(p);
+   observed_mode_interval=hci_event_mode_change_get_interval(p);observed_mode_valid=true;
+  }break;
+ case HCI_EVENT_DISCONNECTION_COMPLETE:
+  if(hci_event_disconnection_complete_get_connection_handle(p)==observed_packet_handle)observed_packet_valid=false;
+  if(hci_event_disconnection_complete_get_connection_handle(p)==observed_mode_handle)observed_mode_valid=false;
+  break;
  case BTSTACK_EVENT_STATE:
   ready=btstack_event_state_get_state(p)==HCI_STATE_WORKING;
   if(ready)emit((pm_bt_event){.kind=PM_BT_READY});break;
@@ -117,30 +247,51 @@ static void source_handler(uint8_t type,uint16_t channel,uint8_t *p,uint16_t siz
  case A2DP_SUBEVENT_SIGNALING_CONNECTION_ESTABLISHED:{
   uint16_t c=a2dp_subevent_signaling_connection_established_get_a2dp_cid(p);
   uint8_t status=a2dp_subevent_signaling_connection_established_get_status(p);
-  if(c!=cid){if(!status)a2dp_source_disconnect(c);return;}
-  if(!wanted){if(!status)a2dp_source_disconnect(c);else{cid=0;stopped_if_idle();}return;}
-  if(status){emit((pm_bt_event){.kind=PM_BT_ERROR,.status=status});cid=0;wanted=false;}
+  bd_addr_t incoming;a2dp_subevent_signaling_connection_established_get_bd_addr(p,incoming);
+  if(!status){
+   if(!pm_bt_accept_peer(wanted,stopping,peer,incoming)){a2dp_source_disconnect(c);return;}
+   /* The selected speaker may win simultaneous establishment. Adopt its CID;
+    * callbacks for the losing outgoing CID can no longer clear this owner. */
+   uint16_t previous=cid;cid=c;retry_cancel();
+   emit((pm_bt_event){.kind=PM_BT_LINK_DIAGNOSTIC,.detail1=previous,.detail2=c,.detail3=1});
+   return;
+  }
+  if(!pm_bt_owns_failure(cid,c))return;
+  if(!wanted||stopping){cid=0;stopped_if_idle();return;}
+  cid=0;
+  if(status==ERROR_CODE_ACL_CONNECTION_ALREADY_EXISTS){
+   emit((pm_bt_event){.kind=PM_BT_LINK_DIAGNOSTIC,.status=status,.detail1=c,.detail3=2});
+   retry_schedule();return;
+  }
+  emit((pm_bt_event){.kind=PM_BT_ERROR,.status=status});wanted=false;
   break;}
  case A2DP_SUBEVENT_SIGNALING_MEDIA_CODEC_SBC_CONFIGURATION:{
   if(!wanted||a2dp_subevent_signaling_media_codec_sbc_configuration_get_a2dp_cid(p)!=cid)return;
   rate=a2dp_subevent_signaling_media_codec_sbc_configuration_get_sampling_frequency(p);
   unsigned channels=a2dp_subevent_signaling_media_codec_sbc_configuration_get_num_channels(p);
   unsigned mode=a2dp_subevent_signaling_media_codec_sbc_configuration_get_channel_mode(p);
-  if(channels!=2||(rate!=44100&&rate!=48000)||(mode!=AVDTP_CHANNEL_MODE_STEREO&&mode!=AVDTP_CHANNEL_MODE_JOINT_STEREO)){
+  if(a2dp_subevent_signaling_media_codec_sbc_configuration_get_block_length(p)!=16||
+     a2dp_subevent_signaling_media_codec_sbc_configuration_get_subbands(p)!=8||
+     a2dp_subevent_signaling_media_codec_sbc_configuration_get_max_bitpool_value(p)>53||
+     a2dp_subevent_signaling_media_codec_sbc_configuration_get_max_bitpool_value(p)<2||channels!=2||(rate!=44100&&rate!=48000)||(mode!=AVDTP_CHANNEL_MODE_STEREO&&mode!=AVDTP_CHANNEL_MODE_JOINT_STEREO)){
    emit((pm_bt_event){.kind=PM_BT_ERROR,.status=0xff03});pm_bt_runtime_stop(generation);return;
   }
+  unsigned bitpool=pm_bt_choose_bitpool(
+   a2dp_subevent_signaling_media_codec_sbc_configuration_get_min_bitpool_value(p),
+   a2dp_subevent_signaling_media_codec_sbc_configuration_get_max_bitpool_value(p));
+  if(!bitpool){emit((pm_bt_event){.kind=PM_BT_ERROR,.status=0xff03});pm_bt_runtime_stop(generation);return;}
   encoder=btstack_sbc_encoder_bluedroid_init_instance(&encoder_state);
   encoder->configure(&encoder_state,SBC_MODE_STANDARD,
    a2dp_subevent_signaling_media_codec_sbc_configuration_get_block_length(p),
    a2dp_subevent_signaling_media_codec_sbc_configuration_get_subbands(p),
    (btstack_sbc_allocation_method_t)(a2dp_subevent_signaling_media_codec_sbc_configuration_get_allocation_method(p)-1),rate,
-   a2dp_subevent_signaling_media_codec_sbc_configuration_get_max_bitpool_value(p),
+   bitpool,
    mode==AVDTP_CHANNEL_MODE_STEREO?SBC_CHANNEL_MODE_STEREO:SBC_CHANNEL_MODE_JOINT_STEREO);
   emit((pm_bt_event){.kind=PM_BT_CODEC,.rate=rate});break;}
  case A2DP_SUBEVENT_STREAM_STARTED:
   if(!wanted||a2dp_subevent_stream_started_get_a2dp_cid(p)!=cid)return;
   if(!audio.active){a2dp_source_pause_stream(cid,seid);return;}
-  streaming=true;timestamp=0;samples_sent=0;deadline=btstack_run_loop_get_time_ms();tick(&timer);break;
+  streaming=true;clock_started=false;waiting_pcm=false;timestamp=0;samples_sent=0;deadline=btstack_run_loop_get_time_ms();tick(&timer);break;
  case A2DP_SUBEVENT_STREAMING_CAN_SEND_MEDIA_PACKET_NOW:
   if(a2dp_subevent_streaming_can_send_media_packet_now_get_a2dp_cid(p)==cid)send_audio();break;
  case A2DP_SUBEVENT_STREAM_SUSPENDED:
@@ -153,6 +304,7 @@ static void source_handler(uint8_t type,uint16_t channel,uint8_t *p,uint16_t siz
   if(c!=cid)return;
   uint8_t status=a2dp_subevent_stream_established_get_status(p);
   if(!wanted){a2dp_source_disconnect(c);return;}
+  if(!status)retry_cancel();
   emit((pm_bt_event){.kind=status?PM_BT_ERROR:PM_BT_CONNECTED,.status=status});
   if(!status&&!remote_cid){uint16_t rc=0;if(!avrcp_connect(peer,&rc))remote_cid=rc;}
   break;}
@@ -183,6 +335,9 @@ static void remote_handler(uint8_t type,uint16_t channel,uint8_t *p,uint16_t siz
 bool pm_bt_runtime_init(void){
  if(initialized)return init_ok;
  initialized=true;
+ /* Match SDK A2DP source demo: request local master on incoming reconnect.
+  * This is a requested policy, not evidence the peer/controller granted it. */
+ hci_set_master_slave_policy(PM_BT_INCOMING_MASTER_POLICY);
  l2cap_init();sdp_init();a2dp_source_init();a2dp_source_register_packet_handler(source_handler);
  avdtp_stream_endpoint_t *ep=a2dp_source_create_stream_endpoint(AVDTP_AUDIO,AVDTP_CODEC_SBC,caps,sizeof caps,configuration,sizeof configuration);
  if(!ep)return false;
@@ -193,7 +348,7 @@ bool pm_bt_runtime_init(void){
  registration.callback=hci_handler;hci_add_event_handler(&registration);
  gap_set_local_name("PicoMado");gap_discoverable_control(0);gap_ssp_set_io_capability(SSP_IO_CAPABILITY_NO_INPUT_NO_OUTPUT);
  hci_set_inquiry_mode(INQUIRY_MODE_RSSI_AND_EIR);
- timer.process=tick;init_ok=hci_power_control(HCI_POWER_ON)==0;return init_ok;
+ timer.process=tick;connect_timer.process=retry_connect;init_ok=hci_power_control(HCI_POWER_ON)==0;return init_ok;
 }
 uint8_t pm_bt_runtime_scan(uint64_t gen){
  if(!ready||stopping||scanning||wanted||cid||!gen)return ERROR_CODE_COMMAND_DISALLOWED;
@@ -201,14 +356,40 @@ uint8_t pm_bt_runtime_scan(uint64_t gen){
 }
 uint8_t pm_bt_runtime_connect(uint64_t gen,const uint8_t address[6]){
  if(!ready||stopping||scanning||wanted||cid||!gen||!address)return ERROR_CODE_COMMAND_DISALLOWED;
- generation=gen;memcpy(peer,address,6);wanted=true;
- uint8_t status=a2dp_source_establish_stream(peer,&cid);if(status){wanted=false;cid=0;}return status;
+ generation=gen;memcpy(peer,address,6);wanted=true;retry_count=0;retry_cancel();
+ uint8_t status=a2dp_source_establish_stream(peer,&cid);
+ if(status==ERROR_CODE_ACL_CONNECTION_ALREADY_EXISTS){
+  avdtp_connection_t *existing=avdtp_get_connection_for_bd_addr(peer);
+  cid=existing?existing->avdtp_cid:0;
+  emit((pm_bt_event){.kind=PM_BT_LINK_DIAGNOSTIC,.status=status,.detail1=cid,.detail3=3});
+  retry_schedule();return 0; /* accepted pending work, never CONNECTED */
+ }
+ if(status){wanted=false;cid=0;}return status;
 }
 void pm_bt_runtime_stop(uint64_t gen){
- stopping=true;stop_generation=gen;
+ stopping=true;stop_generation=gen;retry_cancel();
  wanted=false;media_stop();encoder=NULL;rate=0;memset(pressed,0,sizeof pressed);if(remote_cid)avrcp_disconnect(remote_cid);if(scanning){gap_inquiry_stop();}
  if(cid)a2dp_source_disconnect(cid);
  stopped_if_idle();
 }
 
 bool pm_bt_runtime_audio_active(void){return audio.active;}
+
+void pm_bt_runtime_link_snapshot(pm_bt_link_snapshot *out){
+ if(!out)return;memset(out,0,sizeof *out);out->cid=cid;out->endpoint=-1;out->role=out->mode=0xff;out->handle=0xffff;
+ avdtp_connection_t *c=cid?avdtp_get_connection_for_avdtp_cid(cid):NULL;
+ if(!c)return;
+ out->handle=c->con_handle;
+ hci_connection_t *h=hci_connection_for_handle(c->con_handle);
+ if(h){out->role=h->role;out->mode=h->connection_mode;}
+ out->packet_types_known=observed_packet_valid&&observed_packet_handle==c->con_handle;
+ if(out->packet_types_known)out->packet_types=observed_packet_types;
+ out->interval_known=observed_mode_valid&&observed_mode_handle==c->con_handle;
+ if(out->interval_known)out->mode_interval=observed_mode_interval;
+ out->exists=true;out->connection=c->state;out->signaling_cid=c->l2cap_signaling_cid;
+ out->initiator=c->initiator_connection_state;
+ a2dp_config_process_t *p=&c->a2dp_source_config_process;
+ out->source=p->state;out->outgoing=p->outgoing_active;out->discover=p->discover_seps;
+ out->configured=p->stream_endpoint_configured;out->have_config=p->have_config;
+ if(p->local_stream_endpoint){out->endpoint=p->local_stream_endpoint->state;out->media_cid=p->local_stream_endpoint->l2cap_media_cid;}
+}

@@ -1200,3 +1200,37 @@ mod tests {
         playback.await.unwrap().unwrap();
     }
 }
+
+impl App {
+    /// AudioStart carries a display context. Receipt establishes that context on
+    /// the device; subsequent PCM progress is independent of image/render ACKs.
+    pub fn audio_display_received(&self, display: &crate::DisplayToken) -> bool {
+        self.runtime.world.devices.get(&display.device_id).is_some_and(|device|
+            crate::display_current(device, display) && device.last_received_frame.is_some())
+    }
+}
+
+#[cfg(test)]
+mod audio_display_barrier_tests {
+    use super::*;
+    #[test]
+    fn ready_tick_waits_for_current_receipt_not_render_or_old_ack() {
+        let temp=tempfile::tempdir().unwrap();
+        let mut app=App::open(&temp.path().join("audio-display.sqlite")).unwrap();
+        let session=app.hello("audio", ["lcd".into()].into(), 1).unwrap();
+        let first=crate::display_token("audio", &app.runtime.world.devices["audio"]);
+        // Ready audio ticks before receipt cannot start. No physical renderer needed.
+        for _ in 0..3 {assert!(!app.audio_display_received(&first));}
+        app.runtime.world.devices.get_mut("audio").unwrap().last_received_frame=Some(10);
+        assert!(app.audio_display_received(&first));
+        assert_eq!(app.runtime.world.devices["audio"].last_rendered_frame,None);
+        // Real display invalidation clears receipt, old display remains inadmissible.
+        crate::invalidate_display("audio",app.runtime.world.devices.get_mut("audio").unwrap(),&mut vec![]);
+        let next=crate::display_token("audio", &app.runtime.world.devices["audio"]);
+        assert!(!app.audio_display_received(&first));assert!(!app.audio_display_received(&next));
+        let stale=crate::FrameToken {device_id:"audio".into(),incarnation:session.incarnation,session_epoch:session.session_epoch,display_epoch:first.display_epoch,screen_owner_epoch:first.screen_owner_epoch,frame_id:10};
+        assert!(!app.frame_is_current(&stale));
+        app.runtime.world.devices.get_mut("audio").unwrap().last_received_frame=Some(11);
+        assert!(app.audio_display_received(&next));assert!(!app.audio_display_received(&first));
+    }
+}
