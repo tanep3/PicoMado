@@ -98,7 +98,7 @@ impl Runtime {
     }
 }
 impl App {
-    fn bluetooth_now(&self) -> u64 {
+    pub(crate) fn bluetooth_now(&self) -> u64 {
         self.mono_origin.elapsed().as_millis().min(u64::MAX as u128) as u64
     }
     pub fn audio_volume(&self,session:&SessionToken)->u8 {
@@ -165,6 +165,7 @@ impl App {
         action: BluetoothAction,
     ) -> Result<BluetoothView, AppError> {
         let now = self.bluetooth_now();
+        let mut expired=None;
         self.change(|_, state| {
             let d = state.world.devices.get(id).ok_or(AppError::NotFound)?;
             if d.incarnation != incarnation {
@@ -180,6 +181,7 @@ impl App {
             } else if let BluetoothAction::SetMuted { muted } = action {
                 live.model.set_muted(muted);
             } else {
+            expired=bluetooth_expiry_diagnostic(&live.model,now);
             live.model.expire(now);
             let effect = match action {
                 BluetoothAction::SetVolume { .. } | BluetoothAction::SetMuted { .. } => unreachable!("handled above"),
@@ -200,6 +202,7 @@ impl App {
             state.bluetooth_desired.insert(id.to_owned(), saved);
             Ok(())
         })?;
+        if let Some(detail)=expired {eprintln!("picomado bluetooth_expired incarnation={} {}",incarnation,detail);}
         Ok(self.bluetooth_view(id))
     }
     pub fn take_bluetooth_command(
@@ -214,7 +217,9 @@ impl App {
         if !live.supported {
             return None;
         }
+        let expiry=bluetooth_expiry_diagnostic(&live.model,now);
         if live.model.expire(now) {
+            if let Some(detail)=expiry {eprintln!("picomado bluetooth_expired incarnation={} {}",session.incarnation,detail);}
             live.queued = None;
         }
         // Only a new bind/explicit request should initiate a connection. Do not retry failure endlessly.
@@ -415,5 +420,31 @@ mod bluetooth_integration_tests {
         assert!(app.take_bluetooth_command(&t).is_some());
         next.merge_transient_since(&base, &app).unwrap();
         assert!(next.take_bluetooth_command(&t).is_none());
+    }
+}
+
+fn bluetooth_expiry_diagnostic(model:&crate::bluetooth::BluetoothDevice,now:u64)->Option<String> {
+    let token=model.pending()?;
+    if !token.is_expired(now) {return None;}
+    let reason=if model.observed()==crate::bluetooth::Observed::Idle {"candidate_deadline"}else{"command_deadline"};
+    Some(format!("{} reason={}",token.diagnostic(now),reason))
+}
+
+#[cfg(test)]
+mod bluetooth_expiry_tests {
+    use super::*;
+    #[test]
+    fn bluetooth_expiry_diagnostic_does_not_mutate_and_distinguishes_candidates() {
+        use crate::bluetooth::*;
+        let mut model=BluetoothDevice::new(DesiredBluetooth::default());
+        model.bind(Some(1),true).unwrap();model.set_enabled(true,0).unwrap();
+        model.discover(0).unwrap();
+        assert!(bluetooth_expiry_diagnostic(&model,COMMAND_TTL_MS-1).is_none());
+        assert!(bluetooth_expiry_diagnostic(&model,COMMAND_TTL_MS).unwrap().contains("command_deadline"));
+        assert!(model.pending().is_some());
+        let mut completed=model.clone();completed.complete(completed.pending().unwrap(),1,true).unwrap();
+        assert!(bluetooth_expiry_diagnostic(&completed,COMMAND_TTL_MS).unwrap().contains("candidate_deadline"));
+        assert!(model.expire(COMMAND_TTL_MS));
+        assert!(bluetooth_expiry_diagnostic(&model,COMMAND_TTL_MS).is_none());
     }
 }

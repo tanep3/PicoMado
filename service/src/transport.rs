@@ -57,9 +57,20 @@ fn wire_label(message: &WireMessage) -> &'static str {
 
 #[derive(Default)]
 struct AckDiagnostics {
+    bluetooth_reports: u64,
     ignored: u64,
 }
 impl AckDiagnostics {
+    fn bluetooth_report_admitted(&mut self)->bool {
+        self.bluetooth_reports=self.bluetooth_reports.saturating_add(1);
+        if self.bluetooth_reports==65 {eprintln!("picomado bluetooth_report_log_limit limit=64 suppressed_at_least=1");}
+        self.bluetooth_reports<=64
+    }
+    fn bluetooth_report(&mut self,incarnation:u64,token:crate::bluetooth::CommandToken,now:u64,event:&str,outcome:&str) {
+        if self.bluetooth_report_admitted() {
+            eprintln!("picomado bluetooth_report incarnation={} {} event={} outcome={}",incarnation,token.diagnostic(now),event,outcome);
+        }
+    }
     fn count_ignored(&mut self) -> bool {
         self.ignored = self.ignored.saturating_add(1);
         self.ignored <= 4 || self.ignored.is_power_of_two()
@@ -209,18 +220,33 @@ fn process_inner(
         }));
     }
     let token = current.as_ref().ok_or("hello_required")?;
+    let bluetooth_received_at=matches!(&message,WireMessage::BluetoothReport{report,..} if bluetooth_terminal_event(report).is_some()).then(std::time::Instant::now);
     let waiting = std::time::Instant::now();
     let mut guard = crate::diagnostics::input_lock(&app,token,&message,crate::diagnostics::Domain::Reader).map_err(|_| "unavailable")?;
     *lock_wait = waiting.elapsed();
+    let bluetooth_received_ms=bluetooth_received_at.map(|received| {
+        let now=guard.bluetooth_now();
+        now.saturating_sub(received.elapsed().as_millis().min(u64::MAX as u128) as u64)
+    });
     if !guard.session_is_current(token) {
+        if let WireMessage::BluetoothReport{incarnation,token:command,report,..}=&message {
+            if let Some(event)=bluetooth_terminal_event(report) {diagnostics.bluetooth_report(*incarnation,*command,bluetooth_received_ms.unwrap_or_else(||guard.bluetooth_now()),event,"stale_session");}
+        }
         return Err("stale_session");
     }
     let totals = guard.operation_totals();
     guard.observation_source().record_context(crate::observation::Component::Api,crate::observation::Phase::Dispatched,0,api_operation,0,message.kind() as u64,0,cause);
     let result = guard.with_observation_cause(&token.device_id,cause,|guard| match message {
         WireMessage::BluetoothReport { incarnation, session_epoch, token: command, report } => {
-            if incarnation != token.incarnation || session_epoch != token.session_epoch {return Err("stale_session");}
-            match guard.apply_bluetooth_report(token, command, report) {
+            let event=bluetooth_terminal_event(&report);
+            let now=bluetooth_received_ms.unwrap_or_else(||guard.bluetooth_now());
+            if incarnation != token.incarnation || session_epoch != token.session_epoch {
+                if let Some(event)=event {diagnostics.bluetooth_report(incarnation,command,now,event,"stale_session");}
+                return Err("stale_session");
+            }
+            let applied=guard.apply_bluetooth_report(token, command, report);
+            if let Some(event)=event {diagnostics.bluetooth_report(incarnation,command,now,event,match &applied {Ok(_)=>"ok",Err(AppError::Conflict("stale Bluetooth operation"))=>"stale",Err(AppError::Conflict("Bluetooth operation expired"))=>"expired",_=>"invalid"});}
+            match applied {
                 Ok(())|Err(AppError::Conflict("stale Bluetooth operation"))|Err(AppError::Conflict("Bluetooth operation expired"))=>Ok(None),
                 Err(_)=>Err("invalid_bluetooth_report"),
             }
@@ -928,9 +954,15 @@ async fn writer_loop_with_progress<S>(
                     }
                 }else{None};
                 if let Some(command) = bluetooth {
-                    if write_observed_wire(&mut sink,WireMessage::BluetoothCommand {
+                    let bt=command.command_token();
+                    let now=app.read().map_err(|_|()).ok().map(|a|a.bluetooth_now());
+                    let started=std::time::Instant::now();
+                    if let Some(now)=now {eprintln!("picomado bluetooth_write_start incarnation={} {}",token.incarnation,bt.diagnostic(now));}
+                    let result=write_observed_wire(&mut sink,WireMessage::BluetoothCommand {
                         incarnation:token.incarnation,session_epoch:token.session_epoch,command
-                    },None).await.is_err() {break "bluetooth_write_failed";}
+                    },None).await;
+                    if let Some(now)=now {eprintln!("picomado bluetooth_write_end incarnation={} {} elapsed_ms={} outcome={}",token.incarnation,bt.diagnostic(now.saturating_add(started.elapsed().as_millis().min(u64::MAX as u128) as u64)),started.elapsed().as_millis(),if result.is_ok(){"ok"}else{"failed"});}
+                    if result.is_err() {break "bluetooth_write_failed";}
                 }
                 match enqueue_outbox(&app,token,&mut queue,&mut next_packet_id,&mut plans) {
                     Ok(true)=>break "close_session_effect",
@@ -4614,3 +4646,21 @@ mod bluetooth_transport_tests;
 #[cfg(test)]
 #[path = "media_input_contract_tests.rs"]
 mod media_input_contract_tests;
+
+fn bluetooth_terminal_event(report:&crate::bluetooth::Report)->Option<&'static str> {
+    match report {crate::bluetooth::Report::Complete{success:true}=>Some("complete_success"),crate::bluetooth::Report::Complete{success:false}=>Some("complete_failure"),crate::bluetooth::Report::Disconnected=>Some("disconnected"),_=>None}
+}
+#[cfg(test)]
+mod bluetooth_diagnostic_tests {
+    use super::*;
+    #[test]
+    fn bluetooth_terminal_log_budget_is_finite_and_saturating() {
+        let mut d=AckDiagnostics::default();
+        for _ in 0..64 {assert!(d.bluetooth_report_admitted());}
+        for _ in 0..100 {assert!(!d.bluetooth_report_admitted());}
+        d.bluetooth_reports=u64::MAX;assert!(!d.bluetooth_report_admitted());
+        assert_eq!(d.bluetooth_reports,u64::MAX);
+        assert_eq!(bluetooth_terminal_event(&crate::bluetooth::Report::Complete{success:false}),Some("complete_failure"));
+        assert_eq!(bluetooth_terminal_event(&crate::bluetooth::Report::Disconnected),Some("disconnected"));
+    }
+}

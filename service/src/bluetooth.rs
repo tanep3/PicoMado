@@ -143,6 +143,17 @@ pub struct CommandToken {
     command_id: u64,
     expires_ms: u64,
 }
+impl CommandToken {
+    pub(crate) fn is_expired(self,now:u64)->bool {now>=self.expires_ms}
+    pub(crate) fn diagnostic(&self, now:u64)->String {
+        format!("session_epoch={} generation={} command_id={} now_ms={} expires_ms={} remaining_ms={}",self.session,self.generation,self.command_id,now,self.expires_ms,self.expires_ms.saturating_sub(now))
+    }
+}
+impl Effect {
+    pub(crate) fn command_token(&self)->CommandToken {
+        match self {Self::Stop{token}|Self::Discover{token}|Self::Connect{token,..}=>*token}
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Effect {
@@ -282,7 +293,7 @@ impl BluetoothDevice {
         if self.pending != Some(token) {
             return Err(Error::Stale);
         }
-        if now_ms >= token.expires_ms {
+        if token.is_expired(now_ms) {
             return Err(Error::Expired);
         }
         Ok(())
@@ -404,7 +415,7 @@ impl BluetoothDevice {
         Ok(())
     }
     pub fn expire(&mut self, now_ms: u64) -> bool {
-        if self.pending.is_some_and(|t| now_ms >= t.expires_ms) {
+        if self.pending.is_some_and(|t| t.is_expired(now_ms)) {
             self.pending = None;
             self.candidates.clear();
             if self.observed != Observed::Idle {
@@ -615,4 +626,19 @@ pub enum Report {
     Candidate { candidate: Candidate },
     Complete { success: bool },
     Disconnected,
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    #[test]
+    fn bluetooth_deadline_diagnostic_boundary_and_no_target() {
+        let token=CommandToken{session:1,generation:2,command_id:3,expires_ms:30};
+        assert!(token.diagnostic(29).contains("remaining_ms=1"));
+        assert!(token.diagnostic(30).contains("remaining_ms=0"));
+        assert!(token.diagnostic(u64::MAX).contains("remaining_ms=0"));
+        let effect=Effect::Connect{token,target:BluetoothAddress::try_from("AA:BB:CC:DD:EE:FF".to_string()).unwrap(),pair:false};
+        assert_eq!(effect.command_token(),token);
+        assert!(!effect.command_token().diagnostic(0).contains("AA:BB"));
+    }
 }
