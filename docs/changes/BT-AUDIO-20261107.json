@@ -25,11 +25,20 @@
   "stages": {
     "design": {
       "state": "in_progress",
-      "evidence": []
+      "evidence": [
+        "6cfbd8f"
+      ]
     },
     "implementation": {
-      "state": "not_started",
-      "evidence": []
+      "state": "in_progress",
+      "evidence": [
+        "firmware/tests/bluetooth_audio_test.c",
+        "firmware/tests/bluetooth_input_test.c",
+        "service/src/audio_transport.rs",
+        "service/src/application_bluetooth.rs",
+        "docs/evidence/BT-AUDIO-20261107-host.md",
+        "All-features tests: 367 passed, 2 ignored; final library rerun: 361 passed, 1 ignored"
+      ]
     },
     "independent_verification": {
       "state": "not_started",

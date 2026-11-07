@@ -126,6 +126,9 @@ pub trait ContentPlugin: Send + Sync {
     ) -> Result<Option<PluginWorkPlan>, ContentError> {
         Ok(None)
     }
+    fn audio_playback(&self, _ctx: &PluginContext) -> Option<crate::plugin_jobs::AudioPlaybackSpec> {
+        None
+    }
     fn playback(&self, _ctx: &PluginContext) -> Option<PlaybackSpec> {
         None
     }
@@ -161,6 +164,7 @@ pub trait ContentPlugin: Send + Sync {
     /// Snapshot host time before producing both LCD and native E-ink pixels.
     /// This is transient display state and must not read a clock or perform IO.
     fn observe_time(&mut self, _ctx: &PluginContext, _now_unix: i64) {}
+    fn observe_monotonic_time(&mut self, _now_mono_ms: u64) {}
     fn current_frame(&self, _ctx: &PluginContext) -> Option<Vec<u8>> {
         None
     }

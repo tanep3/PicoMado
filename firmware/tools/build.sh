@@ -32,7 +32,9 @@ if [[ $board != pico_w ]]; then echo 'MCU board implementation unavailable: only
 target=picomado_lcd
 if grep -Eq '^[[:space:]]*#define[[:space:]]+PM_DISPLAY_TYPE[[:space:]]+PM_DISPLAY_EINK\b' "$root/profiles/$profile.h"; then target=picomado_eink; fi
 options=()
-for flag in PM_ACK_PATH_PROBE PM_USB_BUTTON_SIM PM_TX_LINK_PROBE PM_CYW43_INNER_PROBE PM_CYW43_SPI_REAL_SIZE PM_EVENT_STREAM PM_STREAM_DIAGNOSTICS; do
+# Opt-in until hardware audio acceptance; never inherit a cached ON silently.
+PM_BLUETOOTH_AUDIO=${PM_BLUETOOTH_AUDIO:-OFF}
+for flag in PM_BLUETOOTH_AUDIO PM_ACK_PATH_PROBE PM_USB_BUTTON_SIM PM_TX_LINK_PROBE PM_CYW43_INNER_PROBE PM_CYW43_SPI_REAL_SIZE PM_EVENT_STREAM PM_STREAM_DIAGNOSTICS; do
   if [[ -v $flag ]]; then
     value=${!flag}
     [[ $value == ON || $value == OFF ]] || { echo "$flag must be ON or OFF" >&2; exit 2; }

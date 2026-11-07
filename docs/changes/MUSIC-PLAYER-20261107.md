@@ -10,7 +10,7 @@ Web UIから音源をアップロードし、選択したPicoMado端末のBlueto
 - 音源プラグインは純粋な再生意図AudioPlaybackSpecを返す。取得/デコード/読取りはexecutor、Bluetooth wire配送はBT-AUDIO共通層。ネットラジオは別プラグインとして追加可能な契約を保つ。
 - PCMはbounded chunkで読み、ストリーム世代とstart_frameを持つ。古いread結果を配送側が破棄。画像latest置換と混同しない。実音声配送未接続の間は端末出音を完成扱いしない。
 - アップロードはストリーミング上限・名前/path検証・非上書き・一時ファイルcleanup。ffmpegはネットワーク入力を禁止しprivate work内コピーを使用、期限/cancel/dropで子プロセスを終了。出力サイズも上限検査。
-- 変換済み音源は内容hashで再利用。削除は確認付きで原本・変換済み・参照を整理。同一内容別名の参照を保護。symlinkは拒否する。
+- 変換済み音源はファイル名+内容hashで再利用。同一内容別名は別キャッシュとし削除の干渉を避ける。削除は確認付きで当該名の原本・変換済み・参照を整理。symlinkは拒否する。
 - restart時は自動再生しない。端末incarnation変更・削除では旧再生状態を再利用しない。
 
 ## 検証
@@ -18,3 +18,15 @@ Web UIから音源をアップロードし、選択したPicoMado端末のBlueto
 
 ## 段階
 仕様を先にcommit。実装・独立検証・本番適用・効果確認を分離する。push、サービス再起動、実機書込みは未実施。親が独立検証と最終クローズを所有する。
+
+## Implementation record
+
+- 仕様コミット `0d7b6d7` の後に実装。`local_music.rs` は端末別再生意図と有限音源の状態のみを保持、executorがffmpeg・ファイル操作を担当する。WebUIアップロードはbounded streamingと非上書きpublishを使用する。
+- `AudioPlaybackSpec` は将来のネットラジオ用に frame_count を Option とし、現段階のローカル曲は必ず有限。Appはsession/display tokenと選択プラグイン付きのofferを返し、配送側が非同期read後に再検証する。
+- 入力をprivate作業ディレクトリにコピーし、ffmpegのprotocol/formatを制限。子processのdrop/cancel/期限で終了を保証し、PCMは最大4800 sample framesずつ読み取る。変換上限・サイズ検証・symlink拒否を実装。
+- ユーザー操作の再生要求と実際の出音を混同しないUI。再起動時autoplayなし。削除要求時に参照端末の再生を止める。AVRCPなどのボタン時刻用にmonotonic observation hookを追加。
+- `cargo test --manifest-path service/Cargo.toml --lib local_music --no-default-features`: 初回6 tests passed（2026-11-07）。端末独立/再起動、名前検証、PCM境界/破損、symlink/取消cleanup、uploadサイズ/非上書き、実ffmpeg WAVデコード/再利用を確認。取消後完了の古いjobを拒否する追加試験も用意。
+- WebUI JavaScript: `node --check` 合格。wire identity modelは更新済み。全feature試験367 passed / 2 ignored、最終差分後lib361 passed / 1 ignored。既存gateのflash.sh契約不整合1件は変更前HEADで再現し未解消。実機確認・独立検証は未完了。
+- 実装commitはBT-AUDIO-20261107との共通変更を含むため担当間で統合する。push・本番反映・ファーム書込みは実施していない。
+
+統合ホスト検証: [BT-AUDIO-20261107-host.md](../evidence/BT-AUDIO-20261107-host.md)。

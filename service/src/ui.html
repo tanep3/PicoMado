@@ -75,7 +75,7 @@
   <div class="shell">
     <header class="topbar">
       <a class="brand" href="/" aria-label="PicoMado ホーム"><span class="brand-mark" aria-hidden="true">▦</span>PicoMado</a>
-      <nav aria-label="メインナビゲーション"><a href="/">ホーム</a><a href="/plugins/youtube">YouTube</a><a href="/plugins/local-video">ローカル動画</a><a href="/plugins/local-image">ローカル画像</a><a href="/plugins/caricature">風刺画</a><a href="/plugins/weather">天気</a><a href="/plugins/rain-radar">雨雲</a><a href="/plugins/clock">時計</a></nav>
+      <nav aria-label="メインナビゲーション"><a href="/">ホーム</a><a href="/plugins/youtube">YouTube</a><a href="/plugins/local-video">ローカル動画</a><a href="/plugins/local-music">ローカル音楽</a><a href="/plugins/local-image">ローカル画像</a><a href="/plugins/caricature">風刺画</a><a href="/plugins/weather">天気</a><a href="/plugins/rain-radar">雨雲</a><a href="/plugins/clock">時計</a></nav>
     </header>
     <div class="hero"><p class="eyebrow">Device &amp; content control</p><h1 id="page-title">PicoMado</h1><p class="lead" id="page-lead">端末とプラグインの状態を確認し、設定を管理します。</p></div>
     <p id="notice" role="status" aria-live="polite"></p>
@@ -90,7 +90,7 @@
     </div>
   </dialog>
   <script>
-    const labels={youtube:'YouTube','local-video':'ローカル動画','local-image':'ローカル画像',caricature:'風刺画',weather:'天気','rain-radar':'雨雲',clock:'時計','my-words':'好きな言葉'};
+    const labels={youtube:'YouTube','local-video':'ローカル動画','local-image':'ローカル画像','local-music':'ローカル音楽',caricature:'風刺画',weather:'天気','rain-radar':'雨雲',clock:'時計','my-words':'好きな言葉'};
     const deviceFields=[
       ['wifi_timeout_seconds','Wi-Fi 試行 (秒)'],['app_timeout_seconds','Pi セッション試行 (秒)'],
       ['retry_initial_seconds','再試行開始 (秒)'],['retry_max_seconds','再試行上限 (秒)'],
@@ -177,10 +177,31 @@
         const ok=await run(()=>api(`/api/devices/${encodeURIComponent(d.id)}/settings`,'PUT',{incarnation:d.incarnation,expected_revision:d.desired_revision,settings:value}),'端末設定を保存しました');if(!ok)save.disabled=false;
       };
       card.append(settings);
+      renderBluetooth(card,d);
       const danger=el('details',undefined,'danger-zone');danger.append(el('summary','端末の管理・削除'));
       danger.append(el('p','端末の登録情報を削除します。再接続すると新しい端末として登録されます。'));
       const remove=button(`${d.id} を削除`,'danger');remove.type='button';remove.onclick=()=>openDelete(d);danger.append(remove);card.append(danger);
       list.append(card);
+    }
+    function renderBluetooth(card,d){
+      const b=d.bluetooth;if(!b)return;
+      const area=el('details',undefined,'subsection');area.dataset.bluetooth=d.id;area.append(el('summary','Bluetoothスピーカー'));
+      const names={offline:'端末オフライン',unsupported:'対応ファームが必要',disabled:'OFF',idle:'待機中',discovering:'探索中',pairing:'ペアリング中',connecting:'接続中',connected:'接続済み',stopping:'停止中',failed:'接続・操作失敗'};
+      area.append(el('p',names[b.observed]||b.observed,'plugin-note'));
+      const path=`/api/devices/${encodeURIComponent(d.id)}/bluetooth`;
+      const send=command=>run(()=>api(path,'POST',{incarnation:d.incarnation,expected_revision:b.revision,command}),'Bluetooth設定を更新しました');
+      const label=el('label',undefined,'toggle'),enabled=el('input');enabled.type='checkbox';enabled.checked=b.desired.enabled;
+      enabled.onchange=()=>{enabled.disabled=true;send({action:'set_enabled',enabled:enabled.checked})};
+      label.append(enabled,el('span','Bluetoothを使用'));area.append(label);
+      if(b.desired.target)area.append(el('p',`接続先: ${b.desired.target}`,'plugin-note'));
+      const scan=button('周辺のスピーカーを探す');scan.type='button';scan.disabled=!d.online||!b.desired.enabled||b.observed==='unsupported'||b.observed==='stopping';
+      scan.onclick=()=>{scan.disabled=true;send({action:'discover'})};area.append(scan);
+      for(const c of b.candidates||[]){
+        const row=el('div',undefined,'row');row.append(el('span',`${c.name||'名称未取得'} (${c.address})`));
+        const pair=button('この端末に接続');pair.type='button';pair.disabled=c.a2dp===false||!b.pending||!d.online;
+        pair.onclick=()=>{pair.disabled=true;send({action:'pair',discovery:b.pending,target:c.address})};row.append(pair);area.append(row);
+      }
+      area.append(el('p','探索はこのPicoMado端末の周辺で行います。スピーカーをペアリング待ちにしてから選んでください。','plugin-note'));card.append(area);
     }
     function openDelete(d){
       if(busy)return;deleteTarget={id:d.id,incarnation:d.incarnation};
@@ -222,7 +243,7 @@
       document.getElementById('page-lead').textContent='このプラグインの共通設定を管理します。';
       if(id==='clock'){renderClock();return}
       if(id==='my-words'){renderWords();return}
-      if(['youtube','local-video','local-image','caricature'].includes(id)){renderManaged(id);return}
+      if(['youtube','local-video','local-image','local-music','caricature'].includes(id)){renderManaged(id);return}
       const s=section('プラグイン設定','設定の変更は次のジョブから反映します。','plugin-card');
       const breadcrumb=el('div',undefined,'plugin-breadcrumb'),home=el('a','← ホームへ戻る');home.href='/';breadcrumb.append(home);s.prepend(breadcrumb);
       const form=el('form'),fields=el('div',undefined,'field-grid');let inputs=[];
@@ -289,7 +310,7 @@
     }
     async function loadManaged(){
       const id=location.pathname.split('/')[2];
-      if(['youtube','local-video','local-image','caricature','my-words'].includes(id))managedViews[id]=await api(`/api/plugins/${id}`);
+      if(['youtube','local-video','local-image','local-music','caricature','my-words'].includes(id))managedViews[id]=await api(`/api/plugins/${id}`);
       if(id==='caricature')protectionView=await api('/api/plugins/caricature/protections');
     }
     async function saveCaricatureProtections(protect){
@@ -462,6 +483,19 @@
       }
       if(!data.videos?.length)history.append(el('p','変換済み動画はまだありません。','empty'));
     }
+    function renderLocalMusic(data){
+      const panel=section('ローカル音楽','音源をアップロード・変換し、端末ごとに再生します。Bluetoothの接続はホームの端末設定で行います。','plugin-card');
+      jobsPanel('local-music',panel);if(data.error)panel.append(el('p',data.error,'error'));
+      const form=el('form'),file=el('input');file.type='file';file.accept='.mp3,.wav,.flac,.ogg,.m4a,.aac';file.required=true;
+      const upload=button('アップロード','primary');upload.type='submit';form.append(el('p','音源（256 MiB 以下、2時間以内）'),file,upload);
+      form.onsubmit=async e=>{e.preventDefault();const f=file.files?.[0];if(!f)return;if(f.size>256*1024*1024){say('音源は256 MiB以下にしてください',true);return}upload.disabled=true;try{const r=await fetch(`/api/plugins/local-music/uploads/${encodeURIComponent(f.name)}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:f});if(!r.ok){const v=await r.json().catch(()=>({}));throw Error(v.error||'アップロード失敗')}await managedCommand('local-music',{kind:'scan'},'アップロードしました')}catch(e){say(e.message,true);upload.disabled=false}};panel.append(form);
+      const scan=button('一覧更新');scan.onclick=()=>managedCommand('local-music',{kind:'scan'});panel.append(scan);
+      const cancel=button('変換を取消す');cancel.onclick=()=>managedCommand('local-music',{kind:'cancel'});panel.append(cancel);
+      const names=[...new Set([...(data.imports||[]),...(data.tracks||[]).map(t=>t.name)])];
+      for(const name of names){const row=el('div',undefined,'location-row');row.append(el('strong',name));const prepare=button('再生用に変換');prepare.disabled=data.pending||!(data.imports||[]).includes(name);prepare.onclick=()=>managedCommand('local-music',{kind:'prepare',name});const del=button('音源と履歴を削除','danger');del.onclick=()=>{if(confirm(`「${name}」の原本・変換済み音源・再生選択を削除しますか？`))managedCommand('local-music',{kind:'delete',name,confirmation:name})};row.append(prepare,del);panel.append(row)}
+      const devices=section('端末ごとの再生','ローカル音楽チャンネルを選択した端末へ配信します。以下は再生要求の状態です。実際の接続はホームで確認できます。','plugin-card');
+      for(const d of current.devices){const row=el('div',undefined,'location-row'),select=el('select');row.append(el('strong',d.id));for(const t of data.tracks||[]){const o=el('option',`${t.name} (${Math.round(t.frames/48000)}秒)`);o.value=t.key;select.append(o)}const state=data.devices?.[d.id];if(state)select.value=state.key;row.append(select);for(const [kind,label] of [['play','再生'],['pause','一時停止'],['stop','停止']]){const b=button(label);b.disabled=kind==='play'?!data.tracks?.length:!state;b.onclick=()=>managedCommand('local-music',{kind,device_id:d.id,key:select.value});row.append(b)}row.append(el('small',state?`${state.playing?'再生要求中':'停止中'} · ${(state.position_ms/1000).toFixed(0)}秒`:'未選択'));devices.append(row)}
+    }
     function renderLocalImage(data){
       const panel=section('ローカル画像','中心で画面比率に切り抜きます。端の文字や被写体は欠ける場合があります。','plugin-card');
       jobsPanel('local-image',panel);if(data.error){panel.append(el('p',data.error,'error'));if(data.error.includes('pic2gray4px')){const guide=el('a','pic2gray4px の公開リポジトリと導入方法');guide.href='https://github.com/tanep3/pic2gray4px';guide.target='_blank';guide.rel='noopener noreferrer';panel.append(guide)}}
@@ -495,6 +529,7 @@
     function renderManaged(id){
       const view=managedViews[id];if(!view)return;const data=view.data||{};
       if(id==='local-video'){renderLocalVideo(data);return}
+      if(id==='local-music'){renderLocalMusic(data);return}
       if(id==='local-image'){renderLocalImage(data);return}
       if(id==='caricature'){if(location.pathname==='/plugins/caricature/prompts')renderCaricaturePrompts(data);else renderCaricature(data);return}
       const panel=section(id==='youtube'?'共有動画と再生':'作画と共有設定','この内容はプラグインを表示中の端末で共有します。端末別設定はホームで管理します。','plugin-card');
@@ -621,9 +656,11 @@
     }
 
     function render(){
+      const openBluetooth=new Set([...main.querySelectorAll('details[data-bluetooth][open]')].map(e=>e.dataset.bluetooth));
       main.replaceChildren();const id=location.pathname.startsWith('/plugins/')?location.pathname.split('/')[2]:null;
       document.querySelectorAll('nav a').forEach(a=>{if(a.pathname===location.pathname)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
       if(id)renderPlugin(id);else renderHome();
+      for(const e of main.querySelectorAll('details[data-bluetooth]'))e.open=openBluetooth.has(e.dataset.bluetooth);
     }
     Promise.all([api('/api/state'),api('/api/plugins/weather/options')]).then(([state,options])=>{current=state;weatherOptions=options;loadManaged().then(render).catch(error=>say(error.message,true))}).catch(error=>say(error.message||'読み込みに失敗しました',true));
     function managedRefreshBlocked(){return busy||deleteDialog.open||document.querySelector('dialog[open]')||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)}

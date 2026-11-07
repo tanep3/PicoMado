@@ -5,6 +5,8 @@ pub mod ack_probe;
 pub mod diagnostics;
 pub mod observation;
 pub mod application;
+pub mod bluetooth;
+pub mod audio_transport;
 pub mod caricature;
 pub mod clock;
 pub mod content;
@@ -37,6 +39,7 @@ pub mod workers;
 pub mod youtube;
 pub mod local_video;
 pub mod local_image;
+pub mod local_music;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};

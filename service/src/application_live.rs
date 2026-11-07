@@ -30,6 +30,10 @@ impl App {
         message: &crate::protocol::WireMessage,
     ) -> Option<Self> {
         use crate::protocol::WireMessage as W;
+        // Link observations carry no durable intent and must not queue behind SQLite.
+        if matches!(message,W::BluetoothReport{..}) {
+            return Some(self.transient_snapshot());
+        }
         if let Some(snapshot) = self.transient_input_snapshot(message) {
             return Some(snapshot);
         }
@@ -125,6 +129,23 @@ impl App {
         base: &Self,
         current: &Self,
     ) -> Result<(), AppError> {
+        // Preserve concurrent Bluetooth reports and consumed commands only when this
+        // durable operation did not change that device's Bluetooth intent or session.
+        for (id, live) in &current.runtime.bluetooth_live {
+            let same_session = self.runtime.world.devices.get(id).zip(current.runtime.world.devices.get(id))
+                .is_some_and(|(a,b)| a.incarnation == b.incarnation && a.session_epoch == b.session_epoch && a.online == b.online);
+            if same_session
+                && self.runtime.bluetooth_desired.get(id) == base.runtime.bluetooth_desired.get(id)
+                && self.runtime.bluetooth_live.get(id) == base.runtime.bluetooth_live.get(id) {
+                self.runtime.bluetooth_live.insert(id.clone(), live.clone());
+            } else if same_session && self.runtime.bluetooth_desired.get(id) == base.runtime.bluetooth_desired.get(id) {
+                if let (Some(ours), Some(before)) = (self.runtime.bluetooth_live.get_mut(id), base.runtime.bluetooth_live.get(id)) {
+                    if ours.queued == before.queued && live.queued != before.queued {
+                        ours.queued = live.queued.clone();
+                    }
+                }
+            }
+        }
         let live_changed = current.runtime.world.devices != base.runtime.world.devices
             || current.runtime.outbox != base.runtime.outbox;
         let mut accepted = BTreeSet::new();

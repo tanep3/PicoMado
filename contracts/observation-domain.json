@@ -176,7 +176,13 @@
       "Next",
       "Power",
       "EnterSub",
-      "Heartbeat"
+      "Heartbeat",
+      "BluetoothCommand",
+      "BluetoothReport",
+      "AudioStart",
+      "AudioStop",
+      "AudioStatus",
+      "AudioFinish"
     ],
     "sessionless": [
       "Hello",

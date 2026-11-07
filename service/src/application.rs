@@ -60,6 +60,8 @@ struct Runtime {
     plugin_states: BTreeMap<String, Arc<serde_json::Value>>,
     jobs: crate::plugin_jobs::JobState,
     managed_revisions: BTreeMap<String, u64>,
+    bluetooth_desired: BTreeMap<String, BluetoothSaved>,
+    bluetooth_live: BTreeMap<String, BluetoothLive>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -75,6 +77,8 @@ struct StoredState {
     jobs: crate::plugin_jobs::JobState,
     #[serde(default)]
     managed_revisions: BTreeMap<String, u64>,
+    #[serde(default)]
+    bluetooth_desired: BTreeMap<String, BluetoothSaved>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -144,6 +148,7 @@ impl From<&Runtime> for StoredState {
             plugin_states: state.plugin_states.iter().map(|(k,v)|(k.clone(),v.as_ref().clone())).collect(),
             jobs: state.jobs.clone(),
             managed_revisions: state.managed_revisions.clone(),
+            bluetooth_desired: state.bluetooth_desired.clone(),
         }
     }
 }
@@ -202,6 +207,8 @@ impl Runtime {
             plugin_states: stored.plugin_states.into_iter().map(|(k,v)|(k,Arc::new(v))).collect(),
             jobs: stored.jobs,
             managed_revisions: stored.managed_revisions,
+            bluetooth_desired: stored.bluetooth_desired,
+            bluetooth_live: BTreeMap::new(),
         };
         // Schema-2 installations before the clock plugin have exactly these
         // four IDs, in any saved order. Append only; preserve all selections,
@@ -266,12 +273,22 @@ impl Runtime {
         // Append local images to a complete prior catalog without changing
         // saved order, selections or enablement. Older migrations above run first.
         let before_image: BTreeSet<_> = catalog.iter().map(String::as_str)
-            .filter(|id| *id != "local-image").collect();
+            .filter(|id| *id != "local-image" && *id != "local-music").collect();
         if catalog.iter().any(|id| id == "local-image")
             && state.world.plugin_order.len() == before_image.len()
             && state.world.plugin_order.iter().map(String::as_str).collect::<BTreeSet<_>>() == before_image
         {
             state.world.plugin_order.push("local-image".into());
+            state.order_revision = state.order_revision.checked_add(1)
+                .ok_or(AppError::Conflict("order revision exhausted"))?;
+        }
+        let before_music: BTreeSet<_> = catalog.iter().map(String::as_str)
+            .filter(|id| *id != "local-music").collect();
+        if catalog.iter().any(|id| id == "local-music")
+            && state.world.plugin_order.len() == before_music.len()
+            && state.world.plugin_order.iter().map(String::as_str).collect::<BTreeSet<_>>() == before_music
+        {
+            state.world.plugin_order.push("local-music".into());
             state.order_revision = state.order_revision.checked_add(1)
                 .ok_or(AppError::Conflict("order revision exhausted"))?;
         }
@@ -335,6 +352,8 @@ impl Runtime {
     }
 
     fn prune_stale_effects(&mut self) {
+        self.bluetooth_desired.retain(|id, r| self.world.devices.get(id).is_some_and(|d| d.incarnation == r.incarnation));
+        self.bluetooth_live.retain(|id, r| self.world.devices.get(id).is_some_and(|d| d.incarnation == r.incarnation));
         self.outbox
             .retain(|_, effect| effect_current(&self.world, &self.settings, effect));
     }
@@ -342,7 +361,7 @@ impl Runtime {
 
 fn same_durable_projection(a:&Runtime,b:&Runtime)->bool {
     a.world.next_incarnation==b.world.next_incarnation && a.world.plugin_order==b.world.plugin_order
-        && a.order_revision==b.order_revision && a.settings==b.settings
+        && a.bluetooth_desired==b.bluetooth_desired && a.order_revision==b.order_revision && a.settings==b.settings
         && a.plugin_states.len()==b.plugin_states.len() && a.plugin_states.iter().all(|(k,v)|b.plugin_states.get(k).is_some_and(|w|Arc::ptr_eq(v,w)||v.as_ref()==w.as_ref())) && a.jobs==b.jobs && a.managed_revisions==b.managed_revisions
         && a.world.devices.len()==b.world.devices.len()
         && a.world.devices.iter().all(|(id,x)|b.world.devices.get(id).is_some_and(|y|
@@ -545,6 +564,8 @@ impl App {
                 plugin_states: BTreeMap::new(),
                 jobs: crate::plugin_jobs::JobState::default(),
                 managed_revisions: BTreeMap::new(),
+                bluetooth_desired: BTreeMap::new(),
+                bluetooth_live: BTreeMap::new(),
             };
             Self::persist(&mut connection, &runtime)?;
             runtime
@@ -1488,6 +1509,7 @@ impl App {
             .ok_or(AppError::Conflict("plugin input unavailable"))?
             .clone();
         let preparing = std::time::Instant::now();
+        plugin.observe_monotonic_time(self.monotonic_millis());
         let plan = plugin.plan(&ctx, action);
         self.image_preparation_us = self
             .image_preparation_us
@@ -1998,6 +2020,8 @@ impl App {
                 .map_err(|_| AppError::Conflict("device deletion rejected"))?;
             state.accept(decision)?;
             state.settings.devices.remove(id);
+            state.bluetooth_desired.remove(id);
+            state.bluetooth_live.remove(id);
             Ok(())
         })?;
         for plugin in self.contents.values_mut() {
@@ -2355,6 +2379,7 @@ impl App {
                     let record = self.runtime.settings.devices.get(id)?;
                     Some(DeviceView {
                         id: id.clone(),
+                        bluetooth: self.bluetooth_view(id),
                         incarnation: device.incarnation,
                         online: device.online,
                         selected: device.selected.clone(),
@@ -2386,6 +2411,7 @@ impl App {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct DeviceView {
+    pub bluetooth: BluetoothView,
     pub id: String,
     pub incarnation: u64,
     pub online: bool,
@@ -2427,12 +2453,12 @@ mod tests {
         let body:String=conn.query_row("SELECT body FROM app_state WHERE id=1",[],|row|row.get(0)).unwrap();
         let mut value:serde_json::Value=serde_json::from_str(&body).unwrap();
         let order=value["world"]["plugin_order"].as_array_mut().unwrap();
-        order.retain(|id|id.as_str()!=Some("local-video")&&id.as_str()!=Some("local-image"));
+        order.retain(|id|id.as_str()!=Some("local-video")&&id.as_str()!=Some("local-image")&&id.as_str()!=Some("local-music"));
         conn.execute("UPDATE app_state SET body=?1 WHERE id=1",[value.to_string()]).unwrap();
         drop(conn);
         let reopened=App::open(&path).unwrap();
-        assert_eq!(reopened.view().order.last().map(String::as_str),Some("local-image"));
-        assert_eq!(reopened.view().order_revision,prior+2);
+        assert_eq!(reopened.view().order.last().map(String::as_str),Some("local-music"));
+        assert_eq!(reopened.view().order_revision,prior+3);
     }
 
     fn current_delivery(app: &App, id: &str) -> (FrameToken, Arc<Vec<u8>>) {
@@ -2543,7 +2569,7 @@ mod tests {
                 "2026-10-12",
             )
             .unwrap();
-            for id in ["youtube", "caricature", "rain-radar", "clock", "local-video", "local-image"] {
+            for id in ["youtube", "caricature", "rain-radar", "clock", "local-video", "local-image", "local-music"] {
                 web_enabled(&mut app, "desk", id, false);
             }
             #[cfg(feature = "word-tutorial")]
@@ -2729,7 +2755,7 @@ mod tests {
         .unwrap();
         app.set_order(
             1,
-            ["weather", "rain-radar", "youtube", "caricature", "clock", "local-video", "local-image"]
+            ["weather", "rain-radar", "youtube", "caricature", "clock", "local-video", "local-image", "local-music"]
                 .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
                 .map(str::to_owned).collect(),
         )
@@ -2876,7 +2902,7 @@ mod tests {
             );
             app.set_order(
                 1,
-                ["weather", "youtube", "caricature", "rain-radar", "clock", "local-video", "local-image"]
+                ["weather", "youtube", "caricature", "rain-radar", "clock", "local-video", "local-image", "local-music"]
                     .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
                     .map(str::to_owned).collect(),
             )
@@ -2934,6 +2960,9 @@ mod tests {
         let mut after = serde_json::to_value(reopened.view()).unwrap();
         // A process restart intentionally clears the transient online bit.
         after["devices"][0]["online"] = before["devices"][0]["online"].clone();
+        // Bluetooth link observation is transient too; desired state stays equal.
+        assert_eq!(after["devices"][0]["bluetooth"]["observed"], "offline");
+        after["devices"][0]["bluetooth"]["observed"] = before["devices"][0]["bluetooth"]["observed"].clone();
         assert_eq!(before, after);
     }
 
@@ -3404,7 +3433,7 @@ mod clock_tests {
         let mut app = App::open(&path).unwrap();
         let expected = ["rain-radar", "weather", "youtube", "caricature", "clock", "local-video"]
             .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
-            .chain(["local-image"])
+            .chain(["local-image", "local-music"])
             .collect::<Vec<_>>();
         assert_eq!(app.view().order, expected);
         assert_eq!(app.runtime.world.devices["old"].selected, selection);
@@ -3643,3 +3672,5 @@ mod contract_tests;
 
 include!("application_live.rs");
 include!("application_maintenance.rs");
+
+include!("application_bluetooth.rs");

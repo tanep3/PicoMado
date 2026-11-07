@@ -1,4 +1,5 @@
 //! Pico WebSocket adapter with bounded control and LCD frame dispatch.
+use crate::application::AppError;
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -31,6 +32,8 @@ fn session_identity(current: &Option<SessionToken>) -> (&str, u64, u64) {
 
 fn wire_label(message: &WireMessage) -> &'static str {
     match message {
+        WireMessage::BluetoothCommand { .. } => "bluetooth_command",
+        WireMessage::BluetoothReport { .. } => "bluetooth_report",
         WireMessage::Hello { .. } => "hello",
         WireMessage::Welcome { .. } => "welcome",
         WireMessage::Heartbeat { .. } => "heartbeat",
@@ -212,6 +215,13 @@ fn process_inner(
     let totals = guard.operation_totals();
     guard.observation_source().record_context(crate::observation::Component::Api,crate::observation::Phase::Dispatched,0,api_operation,0,message.kind() as u64,0,cause);
     let result = guard.with_observation_cause(&token.device_id,cause,|guard| match message {
+        WireMessage::BluetoothReport { incarnation, session_epoch, token: command, report } => {
+            if incarnation != token.incarnation || session_epoch != token.session_epoch {return Err("stale_session");}
+            match guard.apply_bluetooth_report(token, command, report) {
+                Ok(())|Err(AppError::Conflict("stale Bluetooth operation"))|Err(AppError::Conflict("Bluetooth operation expired"))=>Ok(None),
+                Err(_)=>Err("invalid_bluetooth_report"),
+            }
+        }
         WireMessage::SettingsStored {
             incarnation,
             revision,
@@ -426,7 +436,9 @@ struct QueuedReply {
     #[cfg(feature="stream-diagnostics")]
     enqueued_at: u64,
 }
+include!("transport_audio.rs");
 enum WriterCommand {
+    AudioCredit(crate::audio_transport::StreamIdentity,u64,u64,bool),
     #[cfg(test)]
     Bind(SessionToken),
     BoundReply(SessionToken, QueuedReply),
@@ -807,6 +819,9 @@ async fn writer_loop_with_progress<S>(
     let mut video_active: Option<crate::lcd_stream::VideoTransfer> = None;
     let mut video_pending = false;
     let mut last_video_started: Option<crate::FrameToken> = None;
+    let mut audio: Option<SocketAudio> = None;
+    let mut audio_tick=tokio::time::interval(Duration::from_millis(5));
+    audio_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut refresh = false;
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let end_reason = loop {
@@ -816,10 +831,12 @@ async fn writer_loop_with_progress<S>(
                 #[cfg(test)]
                 Some(WriterCommand::Bind(token))=>{
                     video_rx=crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).ok().and_then(|a|a.published_video_receiver(&token));
+                    audio=Some(SocketAudio::new(&token));
                     current=Some(token);refresh=true;video_pending=true;last_video_started=None;
                 },
                 Some(WriterCommand::BoundReply(token,reply))=>{
                     video_rx=crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).ok().and_then(|a|a.published_video_receiver(&token));
+                    audio=Some(SocketAudio::new(&token));
                     current=Some(token);refresh=true;video_pending=true;last_video_started=None;
                     // This internal reply is ready before every refresh branch,
                     // independent of when the producer next gets scheduled.
@@ -856,6 +873,9 @@ async fn writer_loop_with_progress<S>(
                         eprintln!("picomado input_reply_sent id={} incarnation={} session_epoch={} display_epoch={} mode={} kind={} elapsed_us={}",id,ctx.incarnation,ctx.session_epoch,ctx.display_epoch,ctx.mode,kind,reply_started.elapsed().as_micros());
                     }
                 },
+                Some(WriterCommand::AudioCredit(id,accepted,consumed,failed))=>{
+                    if let Some(a)=&mut audio {a.credit(id,accepted,consumed,failed);}
+                },
                 Some(WriterCommand::Stop)=>break "requested_stop",
                 None=>break "command_channel_closed",
             },
@@ -883,6 +903,19 @@ async fn writer_loop_with_progress<S>(
                 refresh=false;
                 let token=current.as_ref().expect("bound");
                 if !crate::diagnostics::read(&app, crate::diagnostics::Domain::Writer).is_ok_and(|guard|guard.session_is_current(token)) {break "session_not_current";}
+                let supports_bluetooth=app.read().is_ok_and(|a|a.bluetooth_supported(token));
+                let bluetooth = if supports_bluetooth {
+                    match app.try_lock() {
+                        Ok(mut guard)=>guard.take_bluetooth_command(token),
+                        Err(crate::shared::AccessError::Busy)=>None,
+                        Err(_)=>break "application_unavailable",
+                    }
+                }else{None};
+                if let Some(command) = bluetooth {
+                    if write_observed_wire(&mut sink,WireMessage::BluetoothCommand {
+                        incarnation:token.incarnation,session_epoch:token.session_epoch,command
+                    },None).await.is_err() {break "bluetooth_write_failed";}
+                }
                 match enqueue_outbox(&app,token,&mut queue,&mut next_packet_id,&mut plans) {
                     Ok(true)=>break "close_session_effect",
                     Err(())=>break "enqueue_failed",
@@ -1024,6 +1057,11 @@ async fn writer_loop_with_progress<S>(
                     if completed.is_none() {break "effect_completion_failed";}
                 }
             }
+            _=audio_tick.tick(),if current.as_ref().is_some_and(|t|app.read().is_ok_and(|a|a.bluetooth_supported(t)))=>{
+                let token=current.as_ref().expect("bound");
+                if audio.is_none(){audio=Some(SocketAudio::new(token));}
+                if service_audio(&mut sink,&app,token,audio.as_mut().unwrap(),&mut rx,&mut pending_command).await.is_err(){break "audio_write_failed";}
+            },
         }
     };
     if let Some(token) = &current {
@@ -1167,6 +1205,15 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
             let (message,cause,invalid_cause)=(received.message,received.cause,received.invalid_cause);
             #[cfg(not(feature="boundary-observation"))]
             let (message,cause,invalid_cause)=(received,None,false);
+            if let WireMessage::AudioStatus{incarnation,session_epoch,display_epoch,stream_id,accepted,consumed,failed:audio_failed}=message {
+                if let Some(t)=current.as_ref().filter(|t|t.incarnation==incarnation&&t.session_epoch==session_epoch) {
+                    if app.read().is_ok_and(|a|a.session_is_current(t)) {
+                        let id=crate::audio_transport::StreamIdentity{incarnation,session_epoch,display_epoch,stream_id};
+                        if tokio::time::timeout(SEND_TIMEOUT,tx.send(WriterCommand::AudioCredit(id,accepted,consumed,audio_failed))).await.is_err(){failed=true;break;}
+                    }
+                }
+                continue;
+            }
             let cause=if matches!(message,WireMessage::Next{..}|WireMessage::Up{..}|WireMessage::Down{..}|WireMessage::Power{..}|WireMessage::EnterSub{..}){cause}else{None};
             let api_operation=observations.as_ref().map_or(0,|source|{
                 let operation=source.record_context(crate::observation::Component::Api,crate::observation::Phase::Received,0,decode_operation,0,message.kind() as u64,0,cause);
@@ -1588,7 +1635,7 @@ mod tests {
                 )
                 .unwrap();
             let client = reqwest::Client::new();
-            for plugin in ["caricature", "rain-radar", "clock", "local-video", "local-image"].into_iter()
+            for plugin in ["caricature", "rain-radar", "clock", "local-video", "local-image", "local-music"].into_iter()
                 .chain(crate::plugins::DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
                 .chain(["youtube", "weather"]) {
                 let d = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer).unwrap().view().devices.remove(0);
@@ -1597,7 +1644,7 @@ mod tests {
                 assert!(response.status().is_success());
                 let view: serde_json::Value =
                     serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
-                if plugin == "caricature" || plugin == "rain-radar" || plugin == "clock" || plugin == "local-video" || plugin == "local-image" || plugin == "my-words" {
+                if plugin == "caricature" || plugin == "rain-radar" || plugin == "clock" || plugin == "local-video" || plugin == "local-image" || plugin == "local-music" || plugin == "my-words" {
                     assert_eq!(view["devices"][0]["selected"], "youtube");
                     continue;
                 }
@@ -2482,7 +2529,7 @@ mod tests {
             .unwrap()
             .set_order(
                 1,
-                ["weather", "rain-radar", "youtube", "caricature", "clock", "local-video", "local-image"]
+                ["weather", "rain-radar", "youtube", "caricature", "clock", "local-video", "local-image", "local-music"]
                     .into_iter().chain(crate::plugins::DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
                     .map(str::to_owned).collect(),
             )
@@ -4553,3 +4600,7 @@ mod tests {
     include!("network_observation_tests.rs");
 
 }
+
+#[cfg(test)]
+#[path="bluetooth_transport_tests.rs"]
+mod bluetooth_transport_tests;

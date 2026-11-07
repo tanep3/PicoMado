@@ -30,6 +30,8 @@ pub fn router(app: SharedApp) -> Router {
         .route("/plugins/caricature/prompts", get(home))
         .route("/api/plugins/{plugin}/options", get(plugin_options))
         .route("/api/plugins/{plugin}", get(plugin_state))
+        .route("/api/plugins/local-music/uploads/{name}",
+            axum::routing::post(upload_local_music).layer(DefaultBodyLimit::disable()))
         .route("/api/plugins/local-image/uploads/{name}",
             axum::routing::post(upload_local_image).layer(DefaultBodyLimit::disable()))
         .route("/api/plugins/local-video/uploads/{name}",
@@ -47,6 +49,7 @@ pub fn router(app: SharedApp) -> Router {
             axum::routing::post(plugin_command),
         )
         .route("/api/plugins/{plugin}/assets/{asset_id}", get(plugin_asset))
+        .route("/api/devices/{id}/bluetooth", axum::routing::post(bluetooth_command))
         .route("/api/state", get(state))
         .route("/api/order", axum::routing::put(update_order))
         .route(
@@ -317,6 +320,58 @@ async fn upload_local_image(
     tokio::fs::hard_link(&temp,&target).await.map_err(|e|{
         if e.kind()==std::io::ErrorKind::AlreadyExists {
             ApiError(AppError::Conflict("image filename already exists"))
+        }else{ApiError(AppError::Conflict("upload publish failed"))}
+    })?;
+    drop(guard);
+    Ok(Json(json!({"name":name,"bytes":bytes})))
+}
+
+async fn upload_local_music(
+    State(app): State<SharedApp>,
+    Path(name): Path<String>,
+    request: Request,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !crate::local_music::good_name(&name) {
+        return Err(ApiError(AppError::Invalid("invalid audio filename")));
+    }
+    if request.headers().get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|v|v.to_str().ok())
+        .and_then(|v|v.parse::<u64>().ok())
+        .is_some_and(|n|n>crate::local_music::MAX_SOURCE)
+    {
+        return Err(ApiError(AppError::Invalid("audio exceeds 256 MiB")));
+    }
+    let paths=with_read_app(&app,|app|app.plugin_paths("local-music").ok_or(AppError::NotFound))?;
+    let folder=paths.data.join("imports");
+    tokio::fs::create_dir_all(&folder).await.map_err(|_|ApiError(AppError::Conflict("upload directory unavailable")))?;
+    if tokio::fs::symlink_metadata(&folder).await.map_err(|_|ApiError(AppError::Conflict("upload directory unavailable")))?
+        .file_type().is_symlink() {
+        return Err(ApiError(AppError::Invalid("invalid upload directory")));
+    }
+    let target=folder.join(&name);
+    let id=NEXT_UPLOAD.fetch_add(1,Ordering::Relaxed);
+    let temp=folder.join(format!(".upload-{}-{id}.partial",std::process::id()));
+    let guard=PartialUpload(temp.clone());
+    let mut output=tokio::fs::OpenOptions::new().write(true).create_new(true).open(&temp).await
+        .map_err(|_|ApiError(AppError::Conflict("upload unavailable")))?;
+    let mut stream=request.into_body().into_data_stream();
+    let mut bytes=0u64;
+    while let Some(chunk)=stream.next().await {
+        let chunk=chunk.map_err(|_|ApiError(AppError::Invalid("upload interrupted")))?;
+        bytes=bytes.checked_add(chunk.len() as u64)
+            .filter(|n|*n<=crate::local_music::MAX_SOURCE)
+            .ok_or(ApiError(AppError::Invalid("audio exceeds 256 MiB")))?;
+        output.write_all(&chunk).await.map_err(|_|ApiError(AppError::Conflict("upload write failed")))?;
+    }
+    if bytes==0 { return Err(ApiError(AppError::Invalid("empty audio"))); }
+    output.flush().await.map_err(|_|ApiError(AppError::Conflict("upload write failed")))?;
+    output.sync_all().await.map_err(|_|ApiError(AppError::Conflict("upload write failed")))?;
+    drop(output);
+    // hard_link creates the final name only if absent, then the temporary
+    // name is removed. Existing user uploads are never overwritten.
+    tokio::fs::hard_link(&temp,&target).await.map_err(|e|{
+        if e.kind()==std::io::ErrorKind::AlreadyExists {
+            ApiError(AppError::Conflict("audio filename already exists"))
         }else{ApiError(AppError::Conflict("upload publish failed"))}
     })?;
     drop(guard);
@@ -661,6 +716,33 @@ mod tests {
         let status = response.status();
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
         (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn local_music_upload_is_bounded_and_does_not_overwrite_or_leave_partial_files() {
+        let temp=tempfile::tempdir().unwrap();
+        let app=App::open_with_plugin_root(&temp.path().join("state.db"),&temp.path().join("plugins")).unwrap();
+        let router=super::router(Arc::new(crate::shared::Application::new(app)));
+        let route="/api/plugins/local-music/uploads/clip.wav";
+        let post=|path:&str,body:&'static [u8]|Request::builder().method(Method::POST).uri(path)
+            .body(Body::from(body)).unwrap();
+        let response=router.clone().oneshot(post(route,b"image bytes")).await.unwrap();
+        assert_eq!(response.status(),StatusCode::OK);
+        let imports=temp.path().join("plugins/local-music/data/imports");
+        assert_eq!(std::fs::read(imports.join("clip.wav")).unwrap(),b"image bytes");
+        assert_eq!(router.clone().oneshot(post(route,b"other")).await.unwrap().status(),StatusCode::CONFLICT);
+        assert_eq!(std::fs::read(imports.join("clip.wav")).unwrap(),b"image bytes");
+        let invalid=router.clone().oneshot(post("/api/plugins/local-music/uploads/.hidden",b"x")).await.unwrap();
+        assert_eq!(invalid.status(),StatusCode::BAD_REQUEST);
+        let too_large=Request::builder().method(Method::POST).uri("/api/plugins/local-music/uploads/big.wav")
+            .header("content-length",(crate::local_music::MAX_SOURCE+1).to_string())
+            .body(Body::from("x")).unwrap();
+        assert_eq!(router.clone().oneshot(too_large).await.unwrap().status(),StatusCode::BAD_REQUEST);
+        let medium=Request::builder().method(Method::POST).uri("/api/plugins/local-music/uploads/medium.wav")
+            .body(Body::from(vec![1u8;32*1024])).unwrap();
+        assert_eq!(router.clone().oneshot(medium).await.unwrap().status(),StatusCode::OK);
+        assert_eq!(std::fs::metadata(imports.join("medium.wav")).unwrap().len(),32*1024);
+        assert_eq!(std::fs::read_dir(imports).unwrap().count(),2);
     }
 
     #[tokio::test]
@@ -1160,11 +1242,11 @@ mod tests {
         let (status, view) = call(&router, Method::PUT, "/api/plugin-settings", json!({"expected_revision":1,"settings":{"weather_fetch":{"timeout_seconds":30,"retries":2},"radar_fetch":{"timeout_seconds":20,"retries":2},"youtube_default_fps":12}})).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(view["plugins"]["youtube_default_fps"], 12);
-        let order = ["weather", "youtube", "caricature", "rain-radar", "clock", "local-video", "local-image"]
+        let order = ["weather", "youtube", "caricature", "rain-radar", "clock", "local-video", "local-image", "local-music"]
             .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
             .collect::<Vec<_>>();
         assert_eq!(call(&router, Method::PUT, "/api/order", json!({"expected_revision":1,"order":order})).await.0, StatusCode::OK);
-        let stale_order = ["youtube", "caricature", "weather", "rain-radar", "clock", "local-video", "local-image"]
+        let stale_order = ["youtube", "caricature", "weather", "rain-radar", "clock", "local-video", "local-image", "local-music"]
             .into_iter().chain(DEFAULT_ORDER.iter().copied().filter(|id| *id == "my-words"))
             .collect::<Vec<_>>();
         assert_eq!(call(&router, Method::PUT, "/api/order", json!({"expected_revision":1,"order":stale_order})).await.0, StatusCode::CONFLICT);
@@ -1172,5 +1254,36 @@ mod tests {
         let reopened = App::open(&path).unwrap();
         assert_eq!(reopened.view().plugins.youtube_default_fps, 12);
         assert_eq!(reopened.view().order[0], "weather");
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BluetoothChange {
+    incarnation: u64,
+    expected_revision: u64,
+    command: crate::application::BluetoothAction,
+}
+async fn bluetooth_command(
+    State(app): State<SharedApp>, Path(id): Path<String>, Json(body): Json<BluetoothChange>,
+) -> Result<Json<AppView>, ApiError> {
+    with_app(&app, |app| {
+        app.bluetooth_command(&id, body.incarnation, body.expected_revision, body.command)?;
+        Ok(Json(app.view()))
+    })
+}
+
+#[cfg(test)]
+mod bluetooth_web_tests {
+    use super::*;
+    #[test]
+    fn bluetooth_dto_rejects_unknown_and_accepts_actions() {
+        let good=r#"{"incarnation":1,"expected_revision":1,"command":{"action":"discover"}}"#;
+        assert!(serde_json::from_str::<BluetoothChange>(good).is_ok());
+        let enabled=r#"{"incarnation":1,"expected_revision":1,"command":{"action":"set_enabled","enabled":true}}"#;
+        assert!(serde_json::from_str::<BluetoothChange>(enabled).is_ok());
+        for bad in [r#"{"incarnation":1,"expected_revision":1,"command":{"action":"discover","extra":1}}"#,r#"{"incarnation":1,"expected_revision":1,"command":{"action":"discover"},"extra":1}"#] {
+            assert!(serde_json::from_str::<BluetoothChange>(bad).is_err());
+        }
     }
 }

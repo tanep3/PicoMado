@@ -201,6 +201,22 @@ if(PM_APP_TARGET STREQUAL "picomado_lcd")
   target_compile_definitions(${PM_APP_TARGET} PRIVATE PM_TRACE_STATS=1 PM_TRACE_VERBOSE=0)
 endif()
 target_link_libraries(${PM_APP_TARGET} pico_stdlib pico_rand hardware_spi hardware_flash pico_cyw43_arch_lwip_threadsafe_background picomado_core)
+# Experimental until Wi-Fi coexistence and real-speaker acceptance are recorded.
+option(PM_BLUETOOTH_AUDIO "Build per-device A2DP/AVRCP support" OFF)
+if(PM_BLUETOOTH_AUDIO)
+  target_sources(${PM_APP_TARGET} PRIVATE src/bluetooth_runtime.c)
+  target_include_directories(${PM_APP_TARGET} PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
+  target_link_libraries(${PM_APP_TARGET} pico_btstack_classic pico_btstack_cyw43 pico_btstack_sbc_encoder)
+  # SDK sources are INTERFACE sources compiled by this target. Keep the final
+  # sector reserved for PicoMado settings; Bluetooth owns the preceding 8 KiB.
+  target_compile_definitions(${PM_APP_TARGET} PRIVATE
+    PM_BLUETOOTH_AUDIO=1
+    "PICO_FLASH_BANK_STORAGE_OFFSET=(PICO_FLASH_SIZE_BYTES-4096u-8192u)"
+    PICO_FLASH_BANK_TOTAL_SIZE=8192u)
+else()
+  target_compile_definitions(${PM_APP_TARGET} PRIVATE PM_BLUETOOTH_AUDIO=0)
+endif()
+
 pico_enable_stdio_usb(${PM_APP_TARGET} 1)
 pico_enable_stdio_uart(${PM_APP_TARGET} 0)
 pico_add_extra_outputs(${PM_APP_TARGET})

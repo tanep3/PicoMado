@@ -217,6 +217,26 @@ impl PlaybackSpec {
     }
 }
 
+/// Audio sample frames count all channels at one instant (not video frames).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioPlaybackSpec {
+    pub asset_id: String,
+    pub generation: u64,
+    pub sample_rate: u32,
+    pub channels: u8,
+    pub frame_count: Option<u64>,
+    pub start_frame: u64,
+    pub started_mono_ms: u64,
+    pub source: Value,
+}
+impl AudioPlaybackSpec {
+    pub fn valid(&self) -> bool {
+        !self.asset_id.is_empty() && self.asset_id.len() <= 256 && self.generation > 0
+            && self.sample_rate == 48_000 && self.channels == 2
+            && self.frame_count.is_none_or(|n| n > 0 && self.start_frame < n)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AssetArea {
     Data,
@@ -241,6 +261,12 @@ pub trait PluginJobExecutor: Send + Sync {
         payload: Value,
         context: JobExecutionContext,
     ) -> BoxFuture<'static, JobOutcome>;
+    /// Bounded interleaved signed 16-bit LE PCM. Empty means finite EOF.
+    fn read_audio(&self, _spec: AudioPlaybackSpec, _offset_frames: u64,
+        _max_frames: u32, _paths: PluginPaths)
+        -> BoxFuture<'static, Result<Vec<u8>, JobFailure>> {
+        Box::pin(async { Err(JobFailure::unsupported()) })
+    }
     fn read_frame(
         &self,
         _spec: PlaybackSpec,

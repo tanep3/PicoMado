@@ -80,6 +80,16 @@ impl App {
         })
     }
 
+    /// Pure, current-session audio offer. Recheck this tuple after async IO.
+    pub fn audio_playback_for(&self, session: &SessionToken) -> Option<(crate::DisplayToken, String, crate::plugin_jobs::AudioPlaybackSpec, PluginPaths)> {
+        let d = self.runtime.world.devices.get(&session.device_id)?;
+        if !session_current(d, session) || !d.online || d.owner != Owner::Remote || d.mode != Mode::Normal { return None; }
+        let plugin = d.selected.as_ref()?;
+        let ctx = PluginContext { token: session.clone(), settings_revision: d.settings_revision, mode: d.mode.clone() };
+        let spec = self.contents.get(plugin)?.audio_playback(&ctx).filter(|s|s.valid())?;
+        Some((crate::display_token(&session.device_id, d), plugin.clone(), spec, self.plugin_paths(plugin)?))
+    }
+
     pub fn plugin_paths(&self, plugin: &str) -> Option<PluginPaths> {
         self.contents.contains_key(plugin).then(|| PluginPaths {
             data: self.plugin_root.join(plugin).join("data"),

@@ -1,3 +1,6 @@
+#ifndef PM_BLUETOOTH_AUDIO
+#define PM_BLUETOOTH_AUDIO 0
+#endif
 #include "trace.h"
 #include "ack_probe.h"
 #include "net.h"
@@ -35,8 +38,12 @@ static pm_rx_flow rx_flow;
 #define rx_used rx_flow.used
 // A legacy numeric-array chunk is <18KiB. Stream a WS body through this
 // bounded application workspace; never require a whole concatenated WS body.
+#if PM_BLUETOOTH_AUDIO
+#define APP_CAP 4614u
+#else
 #define APP_CAP 18006u
 _Static_assert(APP_CAP>4096u*4u+1024u,"legacy chunk workspace");
+#endif
 static uint8_t app_rx[APP_CAP];
 static size_t ws_remaining;
 static size_t app_used,last_payload_length;
@@ -633,7 +640,7 @@ again:
         }
         if(app_used>=n+4) {
             if(app_rx[4]!=1 || n-2>=cap){stage=PM_NET_FAILED;return false;}
-            if(app_rx[5]<1 || app_rx[5]>18){stage=PM_NET_FAILED;return false;}
+            if(app_rx[5]<1 || app_rx[5]>(PM_BLUETOOTH_AUDIO?26:18)){stage=PM_NET_FAILED;return false;}
             last_payload_length=n-2;*kind=app_rx[5];memcpy(json,app_rx+6,n-2);json[n-2]=0;
 #if PM_EVENT_STREAM
             uint32_t first=0,end=0;uint64_t parent=0;

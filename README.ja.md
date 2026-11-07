@@ -80,3 +80,7 @@ Web 操作 ──> Linux サーバ：プラグイン、表示内容、設定、�
 詳しくは [ファームウェア](firmware/README.md)、[サーバ](service/README.md)、[文書案内](docs/README.md)を参照してください。
 
 コードは [MIT License](LICENSE)、著作権者は Tane Channel Technology です。フォントなど第三者の素材には[個別の権利表示](service/assets/NOTO-COPYRIGHT)が適用されます。
+
+### ローカル音楽（開発中）
+
+WebUIから手持ちの音源をアップロードし、「再生用に変換」して端末ごとに曲を選べます。Bluetooth接続はホームの各端末設定で管理します。[対応形式と使い方](docs/requirements/plugins/local-music.md)をご覧ください。実機の音声再生は検証中です。[Bluetooth設定と検証用ビルド](docs/requirements/bluetooth-audio.md)。

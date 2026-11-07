@@ -80,3 +80,7 @@ Note: When needed, the first-setup `service/deploy/install-server.sh` automatica
 For deeper detail, see the [firmware](firmware/README.md), [server](service/README.md) and [documentation index](docs/README.md).
 
 Code is licensed under [MIT](LICENSE), copyright Tane Channel Technology. Fonts and other third-party assets have [separate notices](service/assets/NOTO-COPYRIGHT).
+
+### Local music (in development)
+
+Upload your music in the Web UI, prepare it for playback, and choose a track per device. Manage each device's Bluetooth connection on Home. See the [music guide (Japanese)](docs/requirements/plugins/local-music.md) for formats and limits. Hardware audio playback is still under validation. See [Bluetooth setup and opt-in builds (Japanese)](docs/requirements/bluetooth-audio.md).

@@ -7,9 +7,9 @@ use crate::content::ContentPlugin;
 use crate::{Engine, Registry};
 
 #[cfg(not(feature = "word-tutorial"))]
-pub const DEFAULT_ORDER: [&str; 7] = ["youtube", "caricature", "weather", "rain-radar", "clock", "local-video", "local-image"];
+pub const DEFAULT_ORDER: [&str; 8] = ["youtube", "caricature", "weather", "rain-radar", "clock", "local-video", "local-image", "local-music"];
 #[cfg(feature = "word-tutorial")]
-pub const DEFAULT_ORDER: [&str; 8] = ["youtube", "caricature", "weather", "rain-radar", "clock", "local-video", "local-image", "my-words"];
+pub const DEFAULT_ORDER: [&str; 9] = ["youtube", "caricature", "weather", "rain-radar", "clock", "local-video", "local-image", "local-music", "my-words"];
 
 /// One registration owns matching rules and content. The application does not
 /// add an ID branch when another plugin is registered.
@@ -52,6 +52,7 @@ pub fn builtins() -> PluginSet {
     set.register(Box::new(crate::clock::ClockPlugin), Box::new(crate::clock::ClockContent::default())).expect("unique plugin");
     set.register(Box::new(crate::local_video::LocalVideoPlugin), Box::new(crate::local_video::LocalVideoContent::default())).expect("unique plugin");
     set.register(Box::new(crate::local_image::LocalImagePlugin), Box::new(crate::local_image::LocalImageContent::default())).expect("unique plugin");
+    set.register(Box::new(crate::local_music::LocalMusicPlugin), Box::new(crate::local_music::LocalMusicContent::default())).expect("unique plugin");
     #[cfg(feature = "word-tutorial")]
     set.register(Box::new(crate::word::WordRules), Box::new(crate::word::WordContent::default())).expect("unique plugin");
     debug_assert_eq!(set.order, DEFAULT_ORDER);
@@ -89,6 +90,7 @@ pub fn executors() -> crate::workers::Executors {
         ..Default::default()
     };
     BTreeMap::from([
+        ("local-music".into(), std::sync::Arc::new(crate::local_music::LocalMusicExecutor) as std::sync::Arc<dyn crate::plugin_jobs::PluginJobExecutor>),
         (
             "youtube".into(),
             std::sync::Arc::new(crate::plugin_adapters::YoutubeExecutor)
@@ -164,4 +166,10 @@ fn caricature_content() -> crate::caricature::CaricatureContent {
         .set_catalog(catalog.topics, catalog.styles)
         .expect("validated bundled catalog");
     content
+}
+
+/// Invoke outside the application lock; caller owns stream/session fencing.
+pub async fn read_audio_chunk(plugin: &str, spec: crate::plugin_jobs::AudioPlaybackSpec, offset: u64, max: u32, paths: crate::plugin_jobs::PluginPaths) -> Result<Vec<u8>, crate::plugin_jobs::JobFailure> {
+    let executor = executors().remove(plugin).ok_or_else(|| crate::plugin_jobs::JobFailure::new("unsupported", "audio executor unavailable"))?;
+    executor.read_audio(spec, offset, max, paths).await
 }

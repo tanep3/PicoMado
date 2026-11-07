@@ -16,6 +16,7 @@ pub const IMAGE_FRAGMENT_BYTES: usize = 4096;
 pub const LCD_FRAME_BYTES: usize = 160 * 80 * 2;
 pub const FRAME_BYTES_CAPABILITY: &str = "frame-bytes-v1";
 pub const FRAME_BYTES_KIND: u8 = 18;
+pub const BLUETOOTH_AUDIO_CAPABILITY: &str = "bluetooth-audio-v1";
 pub const LCD_PUSH_CAPABILITY: &str = "lcd-push-v1";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +63,21 @@ pub const EINK_VIDEO_CAPABILITY: &str = "eink-video-partial-v1";
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum WireMessage {
+    AudioFinish { incarnation:u64, session_epoch:u64, display_epoch:u64, stream_id:u64, final_frame:u64 },
+    AudioStart { incarnation:u64, session_epoch:u64, display_epoch:u64, stream_id:u64, first_frame:u64, rate:u32 },
+    AudioStop { incarnation:u64, session_epoch:u64, display_epoch:u64, stream_id:u64 },
+    AudioStatus { incarnation:u64, session_epoch:u64, display_epoch:u64, stream_id:u64, accepted:u64, consumed:u64, failed:bool },
+    BluetoothCommand {
+        incarnation: u64,
+        session_epoch: u64,
+        command: crate::bluetooth::Effect,
+    },
+    BluetoothReport {
+        incarnation: u64,
+        session_epoch: u64,
+        token: crate::bluetooth::CommandToken,
+        report: crate::bluetooth::Report,
+    },
     Hello {
         device_id: String,
         capabilities: Vec<String>,
@@ -161,6 +177,12 @@ pub enum WireMessage {
 impl WireMessage {
     pub(crate) fn kind(&self) -> u8 {
         match self {
+            Self::AudioFinish { .. } => 26,
+            Self::AudioStart { .. } => 22,
+            Self::AudioStop { .. } => 23,
+            Self::AudioStatus { .. } => 25,
+            Self::BluetoothCommand { .. } => 20,
+            Self::BluetoothReport { .. } => 21,
             Self::Hello { .. } => 1,
             Self::Welcome { .. } => 2,
             Self::Settings { .. } => 3,
@@ -476,7 +498,7 @@ impl Decoder {
                 self.buffer.clear();
                 return Err(ProtocolError::UnsupportedVersion);
             }
-            if !(1..=19).contains(&frame[1]) {
+            if !matches!(frame[1],1..=23|25..=26) {
                 self.buffer.clear();
                 return Err(ProtocolError::UnknownKind);
             }

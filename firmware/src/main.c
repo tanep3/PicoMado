@@ -2,6 +2,10 @@
 #include "ack_probe.h"
 #include "usb_control.h"
 #include "device_api.h"
+#if PM_BLUETOOTH_AUDIO
+#include "bluetooth_runtime.h"
+#include "bluetooth_input.h"
+#endif
 #include "input_rules.h"
 #include "switch_feedback.h"
 #include "observation.h"
@@ -117,8 +121,14 @@ static void reset_assembly(void){
     pm_eink_pending_reset(&pending_frame);
 #endif
 }
+#if PM_BLUETOOTH_AUDIO
+/* Bluetooth builds negotiate frame-bytes-v1; avoid two obsolete 18KB JSON
+ * numeric-array workspaces alongside the BT stack. Binary frame max <4.2KB. */
+static char json[4608];
+#else
 static char json[18000];
 _Static_assert(sizeof json>4u*PM_FRAGMENT_BYTES+1024u,"legacy JSON chunk capacity");
+#endif
 #if PM_DISPLAY_TYPE == PM_DISPLAY_LCD
 static pm_video video;
 static bool receiving_stream;
@@ -686,8 +696,13 @@ static void poll_video(void){}
 static bool send_hello(void){
     int n=snprintf(outbound_json,sizeof outbound_json,
         "{\"type\":\"hello\",\"data\":{\"device_id\":\"%s\","
-        "\"capabilities\":[\"%s\",\"buttons%u\",\"frame-bytes-v1\"%s],\"screen_owner_epoch\":%llu}}",
+        "\"capabilities\":[\"%s\",\"buttons%u\",\"frame-bytes-v1\"%s%s],\"screen_owner_epoch\":%llu}}",
         PM_DEVICE_ID,pm_display_capability(),PM_BUTTON_COUNT,
+#if PM_BLUETOOTH_AUDIO
+        ",\"bluetooth-audio-v1\"",
+#else
+        "",
+#endif
         PM_DISPLAY_TYPE==PM_DISPLAY_LCD?",\"lcd-push-v1\"":",\"eink-clock-v1\",\"eink-video-partial-v1\"",(unsigned long long)owner_epoch);
     return n>0 && (size_t)n<sizeof outbound_json && pm_net_send(1,outbound_json);
 }
@@ -1028,7 +1043,15 @@ static pm_api_result api_frame(uint8_t kind,const char *j){
     if(number(j,"offset",&offset) && parse_bytes(j,&count))return receive_chunk(t,offset,fragment,count);
     return PM_API_REJECTED;
 }
+#include "bluetooth_control.inc"
+#if PM_BLUETOOTH_AUDIO
+#include "bluetooth_media.inc"
+#endif
 static const pm_device_api device_apis[]={
+#if PM_BLUETOOTH_AUDIO
+    {20,"bluetooth_command",api_bluetooth},
+    {22,"audio_start",api_audio},{23,"audio_stop",api_audio},{26,"audio_finish",api_audio},
+#endif
     {2,"welcome",api_welcome},{3,"settings",api_settings},
     {10,"input_accepted",api_input_result},{11,"error",api_error},
     {12,"frame_start",api_frame},{13,"frame_chunk",api_frame},
@@ -1259,6 +1282,10 @@ int main(void){
             finish_loop(loop_started);sleep_ms(5);continue;
         }
 #endif
+        poll_bluetooth();
+#if PM_BLUETOOTH_AUDIO
+        poll_audio();
+#endif
         poll_local_inputs(now,true);
         log_usb_snapshot();
 #if PM_AWAY_EEX1
@@ -1323,6 +1350,9 @@ int main(void){
                 if(recover_transport_failure())break;
                 uint64_t process_started=pm_stats_clock();
                 if(kind==18)process_frame_bytes((const uint8_t *)json,pm_net_payload_length());
+#if PM_BLUETOOTH_AUDIO
+                else if(kind==24)process_audio_bytes((const uint8_t *)json,pm_net_payload_length());
+#endif
                 else process(kind,json);
                 pm_stats_note(PM_STAT_PROCESS,process_started);
 #if PM_EVENT_STREAM

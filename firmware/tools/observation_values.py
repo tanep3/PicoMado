@@ -1,4 +1,4 @@
-# Generated; edit contracts/observation-domain.json. 77898d6071d480b36086ae67c327c7b12e59d5e7870cdbfe733a32bec5296284
+# Generated; edit contracts/observation-domain.json. 474db353e570e1857a3ca92964cf51fb22d00a2e01f37a0bc9e7580969355323
 from dataclasses import dataclass
 from enum import Enum
 @dataclass(frozen=True, slots=True)
