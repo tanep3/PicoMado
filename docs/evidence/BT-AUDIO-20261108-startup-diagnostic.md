@@ -273,3 +273,36 @@ Artifacts, manifests and A/B/OFF logs are privately retained at
 `/home/tane/picomado-staging/20261108-eink1-bt-startup-comparison/`. This is
 not an independent acceptance or closure. No new packet capture, network
 setting change, SSH or push was performed during these comparisons.
+
+## Read-only host path follow-up
+
+The real host has eth0 .120/24 and wlan0 .121/24. Its connected LAN route
+uses eth0 metric 100 before wlan0 metric 600; route lookups to the observed
+Pico addresses use eth0. The opposite default-route preference does not
+select the path to these same-subnet destinations. all/eth0/wlan0 rp_filter
+are 2 (loose), proxy_arp is 0, and ARP filter/ignore/announce are 0.
+Thus strict reverse-path filtering is inconsistent with the current settings.
+ARP flux and a different ingress interface remain possible, but are not
+sufficient explanations of packet loss under Linux's weak-host model.
+The host wlan0 MAC is distinct from the router MAC that actually replied
+for the server address. Router neighbor state and per-interface filtering
+are not established. `nft list ruleset` required root and was not retried
+with sudo; no firewall or conntrack policy conclusion is claimed.
+
+The earlier LCD header record at
+`/tmp/picomado-power-observe-20261108-092316/tcp-headers.log` gives a more
+precise boundary for connection 58400. Its final FIN has seq1871/ack39886,
+while subsequent host output and the response to seq1872 RST still ACK824.
+Therefore it is not enough to say the eth0 capture missed data that arrived
+normally into host TCP through wlan0: the host's cumulative receive position
+itself did not advance. This does not prove every byte in [824,1871) was
+absent; a missing prefix and out-of-order later bytes remain possible.
+It also does not locate the drop. Downstream receipt had reached39886.
+
+Current sockets with empty Send-Q/Recv-Q show only a recovered sample.
+The existing server journal identifies E-ink_1 sessions but does not expose
+a direct mapping to the sampled TCP peer, so a particular peer address must
+not be asserted solely from order or timing. A next packet comparison needs
+that mapping and bounded observations of both host interfaces. No new
+capture, probe, network change, SSH or playback was performed for these
+read-only checks.
