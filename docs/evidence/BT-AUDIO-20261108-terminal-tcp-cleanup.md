@@ -116,3 +116,31 @@ The reviewer did not execute tests. Its two nonblocking suggestions, optional
 Close sndbuf coverage and abort-before-successor-allocation assertions, were
 added and the affected tests/full host suite rerun successfully.
 Parent independent acceptance, deployment and hardware effectiveness remain open.
+
+## E-ink_1 diagnostic deployment (2026-11-08 JST)
+
+Implementation `412cc83` was built incrementally with the previously validated
+E-ink_1 Bluetooth-enabled configuration, without changing SDK or configuration.
+UF2 SHA256: `ecaad23d53a85ef64b042138ed27c2f7655402c231efaf5d8ff8f17cc4d8516a`.
+The identified device `E6614864D34F8E22` was written with verification 100% OK.
+The previous complete flash backup and previously verified UF2 remain private.
+Settings and uploaded music were not changed; no playback was started.
+
+Before deployment, the user had selected local-music and connected LBS, unlike
+the earlier clock/Bluetooth-disabled trial. The player was stopped with a
+`source_read_timeout` at 156768 ms. This was the deployed legacy PCM path, not
+the new streaming decoder under development. Concurrent host build/I/O load
+is a confounder; neither its cause nor an effect of this firmware is proven.
+
+Passive observation: `/tmp/picomado-eink-update-observe-20261108-134153/`.
+Frame2440211 was rendered and submitted by the device at boot+17.880 s, while
+the server initially retained no Rendered acknowledgement. The TCP peer ARP
+entry first held the router MAC, later the server MAC. At boot+90 s the
+connection still had unacknowledged output and four retransmissions. The
+server eventually showed Rendered2440211 around boot+100 s, without replacing
+connection1. The observed sample had no mandatory-send terminal failure and
+thus did not exercise the new abort cleanup. Initial delay remains unresolved;
+this observation is not live proof of the secondary-resource fix.
+
+Firmware verification and passive observation do not constitute independent
+acceptance or final closure. No network settings, SSH, or push were used.
