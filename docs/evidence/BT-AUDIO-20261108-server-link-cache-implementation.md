@@ -89,6 +89,51 @@ Initial app fixture timing was corrected to poll through the new continuous-idle
 window; sanitizer retained unused audio handlers, so unreachable audio stubs were
 added for linking. Product conditions/assertions were not weakened. The earlier
 Python **two-sector proposal** model is separate and was not counted above.
-Full root aggregate/service acceptance remains parent-owned. ARM artifact/source/
-config/SDK hashes and actual linker overflow refusal will be appended after the
-regular build. USB, live flash, router/network settings and SSH were not touched.
+Full root aggregate/service acceptance remains parent-owned. USB, live flash,
+router/network settings and SSH were not touched.
+
+
+## Regular ARM candidate and source freeze
+
+Built after implementation commit `d67ec643a8099da78e62052b4c2cf5ccb0b9d20d`,
+with the regular E-ink_1 SDK/config/options and `-j1`. The previous ordinary
+build directory and UF2 were preserved. The feature candidate enables CACHE
+and HINT, keeps BT on, BT startup diagnostic 0 and fixed-ARP diagnostic off.
+All tracked firmware input hashes, private config hash, SDK identity and the
+original artifacts were unchanged across the build. Service work is separate.
+
+- Private staging: `/tmp/picomado-server-link-cache-deploy.zjce2qdz/`.
+- `cache-E-ink_1.uf2`: 1,126,400 bytes; SHA256
+  `2b700eddc6e5dfb56aff0b35d84367226b58408f19257f57be30aa505ceee5c4`.
+- ELF text 569,224 bytes, data 0, BSS 167,020; ELF SHA256
+  `e945b2b7839697af755c2cab0938650525b393b43d65ddf24459621d0c1e182e`.
+- `manifest.json` SHA256
+  `bc5c622680b627a81b7aff1ee677840549c4ee64ca9fc27279b1bd36dfda1c8b`.
+  This records each input hash, compile definitions, tool arguments and build log.
+- Private config SHA256
+  `087802528f5037dd2d5301a298e714b79a2936d7a1a337a0817297dbef7ee34f`.
+  No private config values are included here.
+- SDK commit `079c6f39023649b154152db30f1d781e884879bc`; submodule identities
+  are in the manifest. There are no linked core1-launch or RTOS-task symbols.
+
+The generated linker region ends at `0x101fc000` (physical 2 MiB minus 16 KiB).
+An actual ARM linker boundary fixture fits the last permitted byte and rejects
+an overflowing section. An independent compile assertion confirms the physical
+flash-size macro remains 2,097,152. Product UF2 verification passes all 2,200
+blocks: payload end `0x10089800`, below cache start `0x101fc000`. Cache, BT and
+legacy settings therefore are outside the payload. This verifies file/linker
+boundaries, not a live flash tool's behavior; parent acceptance must compare
+pre/post device readback, especially the unchanged final 12 KiB.
+
+Compile commands confirm the static-entry definition reaches SDK `etharp.c`.
+Private feature-OFF recompiles of main/net match the prior ordinary objects'
+ARM instructions and relocations. Original normal UF2 remains SHA256
+`ecaad23d53a85ef64b042138ed27c2f7655402c231efaf5d8ff8f17cc4d8516a`.
+
+`postbuild-checks.txt` records actual ELF placement: flash callback
+`execute_flash_operation` is SRAM `0x200000e0`, SDK erase/program are SRAM
+`0x200004c4`/`0x20000550`. The compiler estimates main 896 bytes, flush 1,032
+and scan 1,304, or 3,232 bytes for that nested path before leaf/IRQ usage in the
+4,096-byte core0 stack. This is not a complete runtime stack high-water proof.
+Cold persistence, warm pre-TCP use, radio behavior during flash blackout, and
+recovery effectiveness still require the separately authorized device trial.
