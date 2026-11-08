@@ -22,7 +22,7 @@ def fields(line):
     return dict(part.split('=', 1) for part in line.split()[1:] if '=' in part)
 
 
-def build_and_run(source, tag, out, real_size):
+def build_and_run(source, tag, out, real_size, inner=True):
     directory = out / tag
     directory.mkdir(parents=True, exist_ok=True)
     start = source.index('// Configure the active level of the host interrupt pin.')
@@ -36,7 +36,7 @@ def build_and_run(source, tag, out, real_size):
     ]
     (directory / 'generated_sdk_functions.inc').write_text('\n\n'.join(chunks))
     cmd = ['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
-           '-DPM_CYW43_INNER_PROBE=1',
+           '-DPM_CYW43_INNER_PROBE=' + ('1' if inner else '0'),
            '-DPM_SPI_LENGTH_EXPECT_REAL=' + ('1' if real_size else '0'),
            '-I' + str(directory), '-I' + str(firmware / 'src'),
            '-I' + str(firmware / 'tests/app_stubs'),
@@ -67,8 +67,23 @@ def main():
     old = 'int pm_result = cyw43_write_bytes(self, WLAN_FUNCTION, 0, CYW43_WRITE_BYTES_PAD(size), buf);'
     new = 'int pm_result = cyw43_write_bytes(self, WLAN_FUNCTION, 0, size, buf);'
     assert baseline.count(old) == 1 and candidate == baseline.replace(old, new)
+    standalone = overlay.generate(source, spi_real_size=True, standalone=True)
+    original_line = 'return cyw43_write_bytes(self, WLAN_FUNCTION, 0, CYW43_WRITE_BYTES_PAD(size), buf);'
+    assert standalone == source.replace(original_line, 'return cyw43_write_bytes(self, WLAN_FUNCTION, 0, size, buf);')
+    assert 'pm_cyw_probe_' not in standalone
+    for bad_source, real in [(source + '\n', True), (source, False)]:
+        try:
+            overlay.generate(bad_source, spi_real_size=real, standalone=True)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('unsafe standalone input accepted')
+    plain = build_and_run(source, 'plain-sdk', args.out, False, inner=False)
+    single = build_and_run(standalone, 'standalone', args.out, True, inner=False)
     left = build_and_run(baseline, 'baseline', args.out, False)
     right = build_and_run(candidate, 'candidate', args.out, True)
+    assert [x for x in single if x.startswith('spi ')] == [x for x in right if x.startswith('spi ')]
+    assert [x for x in plain if x.startswith('spi ')] == [x for x in left if x.startswith('spi ')]
     assert [x for x in left if x.startswith('diagnostic ')] == [x for x in right if x.startswith('diagnostic ')]
     for a, b in zip([x for x in left if x.startswith('wire ')],
                     [x for x in right if x.startswith('wire ')], strict=True):
@@ -88,6 +103,8 @@ def main():
     report = {'passed': True, 'sdk_source_sha256': hashlib.sha256(source.encode()).hexdigest(),
               'private_baseline_sha256': hashlib.sha256(baseline.encode()).hexdigest(),
               'private_candidate_sha256': hashlib.sha256(candidate.encode()).hexdigest(),
+              'standalone_sha256': hashlib.sha256(standalone.encode()).hexdigest(),
+              'standalone_matches_instrumented_spi': True,
               'source_change': [old, new], 'scenarios': len([x for x in left if x.startswith('wire ')]),
               'spi_writes_compared': len(old_spi), 'cases': {
                   key: {'real': value['real'], 'baseline_command': next(x['command'] for x in old_spi if x.get('case') == key),
