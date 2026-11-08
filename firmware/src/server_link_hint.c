@@ -119,7 +119,7 @@ unsigned pm_server_link_prefix(uint32_t mask){
 }
 bool pm_server_link_scope_equal(const pm_server_link_scope *a,const pm_server_link_scope *b){
     return a&&b&&a->connection==b->connection&&a->generation==b->generation&&a->netif_identity==b->netif_identity&&
-        a->local_ipv4==b->local_ipv4&&a->peer_ipv4==b->peer_ipv4&&a->mask==b->mask&&a->profile==b->profile&&
+        a->local_ipv4==b->local_ipv4&&a->peer_ipv4==b->peer_ipv4&&a->mask==b->mask&&a->profile==b->profile&&a->netif_index==b->netif_index&&
         a->ready==b->ready&&a->up==b->up&&a->direct==b->direct;
 }
 static bool unicast(uint32_t ip){unsigned first=ip>>24;return first>0&&first<224&&first!=127;}

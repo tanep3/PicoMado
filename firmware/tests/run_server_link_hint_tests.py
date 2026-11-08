@@ -28,6 +28,8 @@ for variant,san in [('native',[]),('sanitized',['-fsanitize=address,undefined','
 cmake=a.out/'options.cmake';cmake.write_text('include("'+str(f/'cmake/server_link_hint.cmake')+'")\n')
 run('cmake-default',['cmake','-P',cmake]);run('cmake-enabled',['cmake','-DPM_SERVER_LINK_HINT=ON','-P',cmake])
 run('cmake-conflict-rejected',['cmake','-DPM_SERVER_LINK_HINT=ON','-DPM_HOME_STATIC_ARP_DIAGNOSTIC=ON','-P',cmake],True)
+run('cmake-cache-enabled',['cmake','-DPM_SERVER_LINK_HINT=ON','-DPM_SERVER_LINK_CACHE=ON','-P',cmake])
+run('cmake-cache-without-hint-rejected',['cmake','-DPM_SERVER_LINK_CACHE=ON','-P',cmake],True)
 run('c-invalid-option',['cc','-std=gnu11','-DPM_SERVER_LINK_HINT=2','-Isrc','-fsyntax-only','src/server_link_hint.c'],True)
 (a.out/'summary.json').write_text(json.dumps(dict(passed=True,steps=len(results),scope='Actual parser/pure rules/production net owner/main; deterministic adapters only, no network or device operations'),indent=2)+'\n')
 print('PASS server link hint',len(results),'steps')

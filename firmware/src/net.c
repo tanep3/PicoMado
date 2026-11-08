@@ -563,6 +563,9 @@ static void begin_unlocked(const pm_profile *p
 #if PM_HOME_STATIC_ARP_DIAGNOSTIC
     if(!home_arp_prepare(p,profile_id)){stage=PM_NET_FAILED;return;}
 #endif
+#if PM_SERVER_LINK_CACHE
+    if(!server_link_cache_prepare()){stage=PM_NET_FAILED;return;}
+#endif
     tx_attach();
     pcb=tcp_new_ip_type(IPADDR_TYPE_V4);
     if(!pcb){RX_OBSERVE(pm_rx_fault,PM_RX_ALLOC_ERROR,0,);stage=PM_NET_FAILED;return;}

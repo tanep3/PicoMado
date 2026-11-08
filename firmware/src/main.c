@@ -524,6 +524,9 @@ static void start_server(void){
     start_server_now(&profiles[active_profile]);
 }
 static void retry_with_image(bool keep_image){
+#if PM_SERVER_LINK_CACHE
+    pm_net_server_link_connection_failed();
+#endif
 #if PM_AWAY_EEX1
     endpoint_result(PM_EEX_FAIL,PM_EEX_PROTOCOL_ERROR);
 #endif
@@ -767,10 +770,38 @@ static void poll_video(void){
 static bool video_mode(void){return false;}
 static void poll_video(void){}
 #endif
+#if PM_SERVER_LINK_CACHE
+static uint64_t cache_changed_us,cache_attempt_us,cache_saved_us;
+static bool cache_attempted,cache_saved;
+static void cache_remember(const pm_server_link_hint *hint){
+    const pm_profile *p=&profiles[active_profile];size_t length=p->ssid?strlen(p->ssid):0;
+    if(length>PM_SERVER_LINK_CACHE_SSID_MAX)return;
+    pm_server_link_cache_record r={.profile=(pm_profile_id)active_profile,.ssid_length=(uint8_t)length,
+        .server_ipv4=hint->server_ipv4,.prefix_length=hint->prefix_length};
+    memcpy(r.ssid,p->ssid,length);memcpy(r.mac,hint->mac,6);
+    pm_server_link_cache_result result=pm_server_link_cache_remember(&r);
+    if(result==PM_SERVER_LINK_CACHE_CHANGED)cache_changed_us=time_us_64();
+    pm_logf("net server_cache ms=%lu profile=%s event=learn result=%s\n",(unsigned long)now_ms(),
+        profile_name(),pm_server_link_cache_result_name(result));
+}
+
+#endif
 static bool send_hello(void){
+#if PM_SERVER_LINK_CACHE
+    char remembered[160]={0};pm_server_link_cache_record r;
+    if(pm_net_server_link_remembered(&r)){
+        int size=snprintf(remembered,sizeof remembered,
+            ",\"remembered_server_link\":{\"version\":1,\"server_ipv4\":\"%u.%u.%u.%u\",\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\"}",
+            (unsigned)(r.server_ipv4>>24),(unsigned)((r.server_ipv4>>16)&255),(unsigned)((r.server_ipv4>>8)&255),
+            (unsigned)(r.server_ipv4&255),r.mac[0],r.mac[1],r.mac[2],r.mac[3],r.mac[4],r.mac[5]);
+        if(size<0||(size_t)size>=sizeof remembered)return false;
+    }
+#endif
     int n=snprintf(outbound_json,sizeof outbound_json,
         "{\"type\":\"hello\",\"data\":{\"device_id\":\"%s\","
-#if PM_SERVER_LINK_HINT
+#if PM_SERVER_LINK_CACHE
+        "\"capabilities\":[\"%s\",\"buttons%u\",\"frame-bytes-v1\"%s%s%s],\"screen_owner_epoch\":%llu%s}}",
+#elif PM_SERVER_LINK_HINT
         "\"capabilities\":[\"%s\",\"buttons%u\",\"frame-bytes-v1\"%s%s%s],\"screen_owner_epoch\":%llu}}",
 #else
         "\"capabilities\":[\"%s\",\"buttons%u\",\"frame-bytes-v1\"%s%s],\"screen_owner_epoch\":%llu}}",
@@ -782,10 +813,16 @@ static bool send_hello(void){
         "",
 #endif
         PM_DISPLAY_TYPE==PM_DISPLAY_LCD?",\"lcd-push-v1\"":",\"eink-clock-v1\",\"eink-video-partial-v1\"",
-#if PM_SERVER_LINK_HINT
+#if PM_SERVER_LINK_CACHE
+        (active_profile==PM_PROFILE_HOME||active_profile==PM_PROFILE_HOME2)?",\"" PM_SERVER_LINK_CAPABILITY "\",\"" PM_SERVER_LINK_CACHE_CAPABILITY "\"":"",
+#elif PM_SERVER_LINK_HINT
         (active_profile==PM_PROFILE_HOME||active_profile==PM_PROFILE_HOME2)?",\"" PM_SERVER_LINK_CAPABILITY "\"":"",
 #endif
-        (unsigned long long)owner_epoch);
+        (unsigned long long)owner_epoch
+#if PM_SERVER_LINK_CACHE
+        ,remembered
+#endif
+        );
     return n>0 && (size_t)n<sizeof outbound_json && pm_net_send(1,outbound_json);
 }
 static void heartbeat(void){
@@ -989,8 +1026,15 @@ static pm_api_result api_welcome(uint8_t kind,const char *j){
         if(!pm_server_welcome_parse(j,strlen(j),&welcome)){retry();return PM_API_ERROR;}
         pm_server_link_scope query;pm_net_server_link_query(&query);
         pm_logf("net server_link ms=%lu conn=%llu event=welcome hint=%u\n",(unsigned long)now_ms(),(unsigned long long)query.connection,(unsigned)welcome.link);
+#if PM_SERVER_LINK_CACHE
+        bool pinned=welcome.link==PM_SERVER_LINK_VALID&&
+            pm_net_server_link_apply(&query,&welcome.hint,welcome.incarnation,welcome.session_epoch);
+        if(pinned)cache_remember(&welcome.hint);
+        else if(!pm_net_server_link_without_hint()){retry();return PM_API_ERROR;}
+#else
         if(welcome.link==PM_SERVER_LINK_VALID)
             (void)pm_net_server_link_apply(&query,&welcome.hint,welcome.incarnation,welcome.session_epoch);
+#endif
         incarnation=welcome.incarnation;session_epoch=welcome.session_epoch;
 #else
         if(!number(j,"incarnation",&incarnation)||!number(j,"session_epoch",&session_epoch)){
@@ -1320,6 +1364,33 @@ static void poll_local_inputs(uint32_t now,bool allowed){
         pm_usb_control_dispatched(synthetic,session_epoch,state,now_ms());
     }
 }
+#if PM_SERVER_LINK_CACHE
+static uint64_t cache_idle_since_us;
+static void cache_save_when_idle(void){
+    if(!pm_server_link_cache_dirty()){cache_idle_since_us=0;return;}
+    uint64_t now=time_us_64();
+    bool busy=state==WIFI||state==SERVER||state==SESSION||video_mode();
+#if PM_BLUETOOTH_AUDIO
+    busy=busy||bt_media.active||bt_pending||bt_waiting;
+    if(!busy&&bt_initialized){
+        cyw43_arch_lwip_begin();busy=!pm_bt_runtime_ready()||pm_bt_runtime_audio_active();cyw43_arch_lwip_end();
+    }
+#endif
+#if PM_DISPLAY_TYPE == PM_DISPLAY_EINK
+    busy=busy||drawing||panel_standby||pending_frame.phase!=PM_EINK_EMPTY||pm_display_busy();
+#endif
+    if(busy){cache_idle_since_us=0;return;}
+    if(!cache_idle_since_us){cache_idle_since_us=now;return;}
+    if(now-cache_idle_since_us<5000000u||now-cache_changed_us<5000000u||
+       (cache_saved&&now-cache_saved_us<60000000u)||(cache_attempted&&now-cache_attempt_us<60000000u))return;
+    bool erase=pm_server_link_cache_needs_erase();cache_attempted=true;cache_attempt_us=now;
+    pm_server_link_cache_result result=pm_server_link_cache_flush(true,true);
+    uint64_t elapsed=time_us_64()-now;
+    if(result==PM_SERVER_LINK_CACHE_OK){cache_saved=true;cache_saved_us=time_us_64();}
+    pm_logf("net server_cache ms=%lu event=save result=%s erase=%u us=%lu\n",(unsigned long)now_ms(),
+        pm_server_link_cache_result_name(result),erase?1u:0u,(unsigned long)elapsed);
+}
+#endif
 static void finish_loop(uint64_t started){
     pm_trace_flush();
 #if PM_EVENT_STREAM
@@ -1334,6 +1405,10 @@ int main(void){
     pm_ack_probe_init_boot(control_boot);
     pm_usb_control_init(control_boot,input_count());
     pm_usb_control_set_operations(PM_INPUT_OPERATIONS_MASK,usb_operation);
+#if PM_SERVER_LINK_CACHE
+    pm_server_link_cache_result cache_loaded=pm_server_link_cache_load(pm_server_link_cache_flash_io());
+    pm_logf("net server_cache ms=%lu event=load result=%s\n",(unsigned long)now_ms(),pm_server_link_cache_result_name(cache_loaded));
+#endif
     bool net_ok=pm_net_init();
 #if PM_AWAY_EEX1
     pm_endpoint_client_init(&endpoint_client,pm_endpoint_sdk_io());
@@ -1497,6 +1572,9 @@ int main(void){
             }
         }
         poll_switch_feedback();
+#if PM_SERVER_LINK_CACHE
+        cache_save_when_idle();
+#endif
         bool realtime_media=video_mode();
 #if PM_BLUETOOTH_AUDIO
         realtime_media |= bt_media.active;

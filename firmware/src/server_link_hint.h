@@ -20,7 +20,7 @@ typedef struct {
 } pm_server_welcome;
 typedef struct {
     uint64_t connection,generation;uintptr_t netif_identity;
-    uint32_t local_ipv4,peer_ipv4,mask;pm_profile_id profile;
+    uint32_t local_ipv4,peer_ipv4,mask;pm_profile_id profile;uint8_t netif_index;
     bool ready,up,direct;
 } pm_server_link_scope;
 bool pm_server_welcome_parse(const char *json,size_t length,pm_server_welcome *out);

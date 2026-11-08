@@ -6,6 +6,7 @@
 #include "observation.h"
 #include "home_static_arp.h"
 #include "server_link_hint.h"
+#include "server_link_cache.h"
 
 typedef struct {
     const char *ssid, *password;
@@ -24,6 +25,11 @@ void pm_net_begin(const pm_profile *profile);
 void pm_net_begin_profile(const pm_profile *profile,pm_profile_id id);
 void pm_net_server_link_query(pm_server_link_scope *out);
 bool pm_net_server_link_apply(const pm_server_link_scope *query,const pm_server_link_hint *hint,uint64_t incarnation,uint64_t session);
+#endif
+#if PM_SERVER_LINK_CACHE
+void pm_net_server_link_connection_failed(void);
+bool pm_net_server_link_without_hint(void);
+bool pm_net_server_link_remembered(pm_server_link_cache_record *out);
 #endif
 #if PM_HOME_STATIC_ARP_DIAGNOSTIC
 void pm_net_begin_home_static_arp(const pm_profile *profile,pm_profile_id id);

@@ -231,6 +231,30 @@ if(PM_SERVER_LINK_HINT)
   target_compile_definitions(${PM_APP_TARGET} PRIVATE PM_SERVER_LINK_HINT=1 ETHARP_SUPPORT_STATIC_ENTRIES=1)
   target_sources(${PM_APP_TARGET} PRIVATE src/server_link_hint.c)
 endif()
+if(PM_SERVER_LINK_CACHE)
+  target_compile_definitions(${PM_APP_TARGET} PRIVATE PM_SERVER_LINK_CACHE=1)
+  target_sources(${PM_APP_TARGET} PRIVATE src/server_link_cache.c src/server_link_cache_flash.c)
+  target_link_libraries(${PM_APP_TARGET} pico_flash)
+  # Shrink only the code region. The physical size macro still locates legacy
+  # settings and BT data at their unchanged offsets.
+  if(PICO_FLASH_SIZE_BYTES)
+    set(PM_PHYSICAL_FLASH_BYTES "${PICO_FLASH_SIZE_BYTES}")
+  elseif(PICO_DEFAULT_FLASH_SIZE_BYTES)
+    set(PM_PHYSICAL_FLASH_BYTES "${PICO_DEFAULT_FLASH_SIZE_BYTES}")
+  else()
+    message(FATAL_ERROR "A known physical flash size is required for MAC cache")
+  endif()
+  math(EXPR PM_PHYSICAL_FLASH_BYTES "(${PM_PHYSICAL_FLASH_BYTES})")
+  math(EXPR PM_FLASH_STORAGE_START "(${PM_PHYSICAL_FLASH_BYTES}) - 16384")
+  if(PM_FLASH_STORAGE_START LESS 16384)
+    message(FATAL_ERROR "Flash too small for preserved settings/BT/MAC storage")
+  endif()
+  set(PM_STORAGE_LINK_DIR "${CMAKE_CURRENT_BINARY_DIR}/server-link-storage")
+  file(MAKE_DIRECTORY "${PM_STORAGE_LINK_DIR}")
+  file(WRITE "${PM_STORAGE_LINK_DIR}/pico_flash_region.ld"
+    "FLASH(rx) : ORIGIN = 0x10000000, LENGTH = ${PM_FLASH_STORAGE_START}\n")
+  pico_add_linker_script_override_path(${PM_APP_TARGET} "${PM_STORAGE_LINK_DIR}" FILES pico_flash_region.ld)
+endif()
 if(PM_HOME_STATIC_ARP_DIAGNOSTIC)
   target_compile_definitions(${PM_APP_TARGET} PRIVATE PM_HOME_STATIC_ARP_DIAGNOSTIC=1 ETHARP_SUPPORT_STATIC_ENTRIES=1)
 endif()
@@ -263,3 +287,12 @@ pico_add_extra_outputs(${PM_APP_TARGET})
 add_custom_command(TARGET ${PM_APP_TARGET} POST_BUILD
   COMMAND picotool uf2 convert $<TARGET_FILE:${PM_APP_TARGET}> -t elf
     ${CMAKE_CURRENT_BINARY_DIR}/${PM_DEVICE}.uf2 -t uf2)
+
+if(PM_SERVER_LINK_CACHE)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_custom_command(TARGET ${PM_APP_TARGET} POST_BUILD
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_LIST_DIR}/tools/check_uf2_storage.py
+      ${CMAKE_CURRENT_BINARY_DIR}/${PM_DEVICE}.uf2 --flash-bytes ${PM_PHYSICAL_FLASH_BYTES}
+      --reserved-bytes 16384
+    VERBATIM)
+endif()

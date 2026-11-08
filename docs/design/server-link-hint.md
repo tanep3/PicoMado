@@ -384,3 +384,13 @@ and regular serial ARM build. Parent owns finite silent seed→reboot/pre-TCP-us
 change/fallback comparison, original-artifact rollback, reserved-region readback
 and independent acceptance. No storage feature is considered shipped by this
 specification commit or by a model pass.
+
+### Implementation-stage clarification
+
+The implementation uses default-OFF `PM_SERVER_LINK_CACHE` as a separate staged
+opt-in. Saving requires5 seconds continuously free of the known startup, BT
+negotiation/audio and panel work described in the [implementation evidence](../evidence/BT-AUDIO-20261108-server-link-cache-implementation.md); this does not
+prove absence of asynchronous RF traffic during flash IRQ blackout. A second
+different failed seed conservatively blocks bootstrap for that profile this
+boot. Actual one-sector product tests are recorded separately from the earlier
+two-sector model. Hardware acceptance remains pending.
