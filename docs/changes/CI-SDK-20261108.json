@@ -1,0 +1,47 @@
+{
+  "id": "CI-SDK-20261108",
+  "title": "CI の Pico SDK 取得と依存の事前検証",
+  "status": "in_progress",
+  "owner": "user (parent)",
+  "implementer": "Dots worker",
+  "cause": "GitHub run 42474916744 stopped because the CI runner had no Pico SDK/lwIP etharp.c for the standard host tests.",
+  "introduction_cause": "SDK-dependent host tests were added without adding SDK and submodule checkout to CI.",
+  "escape_cause": "Local host tests used a pre-existing sibling SDK, masking the missing clean-runner dependency.",
+  "standard": "development/standard/v1/standard.md",
+  "domain_authority": "docs/changes/CI-SDK-20261108.md",
+  "design_artifacts": [
+    "docs/changes/CI-SDK-20261108.md"
+  ],
+  "design_commit": null,
+  "deliverables": [
+    "Pinned official SDK checkout and explicit PICO_SDK_PATH in the existing push/PR workflow",
+    "Read-only SDK preflight and positive/negative unit tests",
+    "Local validation evidence and scoped commits on canonical main"
+  ],
+  "dependencies": [
+    "Pico SDK 2.3.1 commit 079c6f39023649b154152db30f1d781e884879bc and its recorded submodules",
+    "User push and GitHub workflow re-enablement before hosted verification"
+  ],
+  "stages": {
+    "design": {
+      "state": "in_progress",
+      "evidence": []
+    },
+    "implementation": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}
