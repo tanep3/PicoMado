@@ -32,6 +32,7 @@ for home2 in absent partial configured; do
         -Itests/app_stubs tests/home2_profile_test.c src/core.c src/video.c src/trace.c src/rx_stats.c
     run "home2-$home2"
 done
+bash tests/run_status_font_tests.sh
 build arp-rx tests/arp_rx_probe_test.c
 run arp-rx
 build bluetooth-input tests/bluetooth_input_test.c
