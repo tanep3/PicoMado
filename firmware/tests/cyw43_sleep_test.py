@@ -1,9 +1,14 @@
 from pathlib import Path
-import subprocess,hashlib,sys,tempfile,os
+import subprocess,hashlib,sys,tempfile,os,argparse
 F=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(F/"tools"))
 import prepare_cyw43_inner as overlay
-src=(Path(os.environ.get('PICO_SDK_PATH','/home/tane/dev/PicoW/pico-sdk'))/'lib/cyw43-driver/src/cyw43_ll.c').read_text()
+parser=argparse.ArgumentParser()
+parser.add_argument('--sdk',type=Path,default=Path(os.environ.get('PICO_SDK_PATH',F.parent.parent/'pico-sdk')))
+args=parser.parse_args()
+sdk_source=args.sdk/'lib/cyw43-driver/src/cyw43_ll.c'
+if not sdk_source.is_file():parser.error('SDK source unavailable; set PICO_SDK_PATH or --sdk')
+src=sdk_source.read_text()
 source=src
 def function(signature):
  a=src.index(signature); b=src.index('{',a); n=1;i=b+1
