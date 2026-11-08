@@ -18,6 +18,7 @@ static pm_input_action expected(app_state state,unsigned key){
     return key==2?PM_INPUT_POWER:key==0?PM_INPUT_SUB:key==1?PM_INPUT_UP:PM_INPUT_DOWN;
 }
 int main(void){
+    _Static_assert(PM_INPUT_MENU_ACCEPT==3 && PM_INPUT_UP==8 && PM_INPUT_DOWN==9,"existing observation action IDs");
     unsigned n=0;
     for(unsigned state=0;state<8;state++)for(unsigned mask=0;mask<=PM_OPERATION_MASK;mask++)
     for(unsigned sub=0;sub<2;sub++)for(unsigned key=0;key<6;key++)for(unsigned blocked=0;blocked<2;blocked++){
