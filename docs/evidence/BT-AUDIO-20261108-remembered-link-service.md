@@ -56,8 +56,8 @@ The frozen implementation passed31 focused checks with0 failures:
   made. The Linux lookup implementation is unchanged and its separate live
   test was not rerun as part of this claim-only extension.
 - `git diff --check` passes. The unrelated music changes were not edited or
-  included in this worker's commit. Their owner reused the final test binary
-  for separate music checks.
+  included in this worker's commit. The final test binary was made available
+  to their owner for separate music checks.
 
 Retained log: `/tmp/picomado-remembered-link-focused.log`, SHA256
 `91bfbd746c627d16f36cc1ea67b9dbf3f02597db76207f1c744f41639dc77b22`.
