@@ -6,7 +6,7 @@ static void handle_stream_established(uint16_t c,uint8_t status){
   return;
  }
  if(recovery.phase!=PM_BR_OFF&&(uint32_t)(btstack_run_loop_get_time_ms()-recovery.started)>=25000){
-  retry_cancel();recovery_fail(0xff10);if(!status)a2dp_source_disconnect(c);return;
+  retry_cancel();recovery.reason=PM_BR_REASON_GLOBAL;recovery_fail(0xff10);if(!status)a2dp_source_disconnect(c);return;
  }
  if(status){retry_cancel();recovery_fail(status);return;}
  retry_cancel();recovery_cancel();

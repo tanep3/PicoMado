@@ -8,7 +8,7 @@ static bool wanted;static uint32_t now;static unsigned disconnected,connected,fa
 static bool recovery_releasing(void){return recovery.phase==PM_BR_RELEASE||recovery.phase==PM_BR_COOLDOWN;}
 static void retry_cancel(void){++cancelled;}
 static void recovery_cancel(void){pm_bt_recovery_cancel(&recovery);}
-static void recovery_fail(uint16_t status){assert(status);recovery_cancel();if(!wanted)return;wanted=false;++failed;}
+static void recovery_fail(uint16_t status){assert(status);if(status==0xff10)assert(recovery.reason==PM_BR_REASON_GLOBAL);recovery_cancel();if(!wanted)return;wanted=false;++failed;}
 static uint32_t btstack_run_loop_get_time_ms(void){return now;}
 static uint8_t a2dp_source_disconnect(uint16_t c){assert(c==cid);++disconnected;return 0;}
 static uint8_t avrcp_connect(uint8_t *p,uint16_t *c){assert(p==peer);++remote_calls;*c=8;return 0;}
