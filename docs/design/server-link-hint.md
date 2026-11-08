@@ -394,3 +394,32 @@ prove absence of asynchronous RF traffic during flash IRQ blackout. A second
 different failed seed conservatively blocks bootstrap for that profile this
 boot. Actual one-sector product tests are recorded separately from the earlier
 two-sector model. Hardware acceptance remains pending.
+
+
+### Pre-deployment stack and scratch ownership correction
+
+Parent review withheld the first cache candidate before device deployment:
+compiler main + flush + scan frames totaled 3,232 bytes of the 4,096-byte core0
+stack before leaf calls and interrupts. Large codec/scan/write temporary arrays
+and snapshots must instead use fixed scratch owned by the existing storage
+aggregate. Format, flash layout, persistence scheduling and fallback semantics
+remain unchanged. No heap or extra task is introduced.
+
+Only one main-loop operation may own scratch. A guard independent of the cache
+reset state rejects re-entry before touching pending data, IO bindings, scratch
+or output buffers. Re-entered load/remember/flush return DEFERRED, get returns
+false, needs_erase conservatively returns true, and dirty remains a read-only
+query. This is defensive recursion rejection, not permission to call storage
+from IRQs, another core, or a lwIP callback. Pure record validation/result naming
+need no mutable scratch. IO callback re-entry tests must show the outer operation
+and durable bytes remain intact. ARM stack estimates and RAM cost are reported
+again before selecting the replacement artifact.
+
+For the current single-core runtime, SDK flash admission must be verified from
+its effective compilation, not inferred from an absent override: with multicore
+lockout and FreeRTOS support both disabled, default enter disables local IRQs
+and returns OK, default exit restores IRQs and returns OK, and core-init has no
+lockout-victim work. No new ASSUME_CORE safety override is permitted. A host test
+of those actual SDK branches checks an operation before explicit core-init;
+this proves no missing initialization/lockout wait in that branch, not physical
+flash timing or radio safety during the blackout.
