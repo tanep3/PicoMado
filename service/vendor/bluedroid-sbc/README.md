@@ -17,3 +17,7 @@ project-owned C ABI is outside this directory. Calls are serialized by the Rust
 adapter because the encoder has global joint-stereo scratch arrays.
 
 The source/provenance check is `python3 tests/verify_sbc_vendor.py` from `service`.
+
+The build requests `-fno-strict-aliasing` and `-fwrapv` where supported to make
+the fixed-point encoder's aliasing and wrapping-arithmetic assumptions explicit.
+Vendor source bytes remain unmodified.

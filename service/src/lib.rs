@@ -7,6 +7,7 @@ pub mod observation;
 pub mod application;
 pub mod bluetooth;
 pub mod audio_transport;
+pub mod sbc_encoder;
 pub mod caricature;
 pub mod clock;
 pub mod content;

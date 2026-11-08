@@ -6,7 +6,7 @@ work=$(mktemp -d /tmp/picomado-sbc-tests.XXXXXX)
 trap 'rm -rf -- "$work"' EXIT
 python3 "$root/tests/verify_sbc_vendor.py"
 for source in "$root"/vendor/bluedroid-sbc/srce/*.c "$root/native/sbc_encoder_abi.c"; do
-    "${CC:-cc}" -O2 -std=c11 -I"$root/vendor/bluedroid-sbc/include" \
+    "${CC:-cc}" -O2 -std=c11 -fno-strict-aliasing -fwrapv -I"$root/vendor/bluedroid-sbc/include" \
         -c "$source" -o "$work/$(basename "${source%.c}").o"
 done
 "${AR:-ar}" crs "$work/libpicomado_sbc_encoder.a" "$work"/*.o
