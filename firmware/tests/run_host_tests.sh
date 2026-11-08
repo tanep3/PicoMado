@@ -306,6 +306,9 @@ build stream-diag-identity -DPM_STREAM_DIAGNOSTICS=1 -DPM_TRACE_ENABLE=1 -Itests
 run stream-diag-identity "$work/identity.txt"
 python3 tools/parse_stream_diag.py "$work/identity.txt" --output "$work/identity.json"
 
+build net-terminal-cleanup -Itests/net_stubs -Itests/app_stubs -I. tests/net_terminal_cleanup_test.c src/ws_accept.c
+run net-terminal-cleanup
+
 # Production main+net together: bounded EOF salvage, pacing, hard errors and generations.
 build net-eof-recovery -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 -DPM_TRACE_STATS=1 -DPM_TRACE_VERBOSE=0 -DPM_STREAM_DIAGNOSTICS=1 \
     '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \

@@ -70,7 +70,8 @@
         "Limit16 full UF2 built (2c0ffb25), not flashed; passive TCP interval has no persistent stall; docs/evidence/BT-AUDIO-20261108-followup.md",
         "31fc242: negotiated host SBC sender with bounded credit, cancellation and terminal feedback; qualified regression evidence in docs/evidence/BT-AUDIO-20261108-sbc-sender.md",
         "bacf317: fixed Apache-2.0 host SBC encoder statically integrated; no Pico SDK requirement",
-        "68ebc52: bounded SBC receiver sharing the existing 16KiB audio payload storage"
+        "68ebc52: bounded SBC receiver sharing the existing 16KiB audio payload storage",
+        "Terminal mandatory-send resource cleanup after specification 843c972; actual SDK heap/PCB reproduction and host validation: docs/evidence/BT-AUDIO-20261108-terminal-tcp-cleanup.md; not deployed"
       ]
     },
     "independent_verification": {

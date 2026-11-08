@@ -90,6 +90,9 @@ static size_t ws_remaining;
 static size_t app_used,last_payload_length;
 static bool ws_continuation;
 static bool socket_dead,ws_closed;
+// Required-send failure retires this connection at a main-side locked boundary.
+// Never abort from a TCP callback: its caller still owns the live PCB stack.
+static bool terminal_send_failed;
 static uint64_t eof_started_us;
 static bool proxy_target_connected;
 static pm_net_failure last_failure;
@@ -315,7 +318,7 @@ static pm_net_tx_result send_raw_attempt(const void *p, size_t n, uint8_t kind, 
             kind,(unsigned)n,(unsigned)tcp_sndbuf(pcb),(unsigned)pcb->snd_queuelen,retryable);
         if(retryable)return PM_NET_TX_WAIT;
         pm_ack_probe_net(PM_AP_WRITE_REJECT,ack_probe_flags(),2,(uint32_t)n,tcp_sndbuf(pcb),(uint32_t)stage);
-        pm_logf("%s\n","net send_failed=send_buffer_full");RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,0,);stage=PM_NET_FAILED;return PM_NET_TX_FAILED;
+        pm_logf("%s\n","net send_failed=send_buffer_full");RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,0,);terminal_send_failed=true;stage=PM_NET_FAILED;return PM_NET_TX_FAILED;
     }
     pm_ack_probe_net(PM_AP_WRITE_BEGIN,ack_probe_flags(),
 #if PM_ACK_PATH_PROBE
@@ -343,7 +346,7 @@ static pm_net_tx_result send_raw_attempt(const void *p, size_t n, uint8_t kind, 
         pm_logf("net tcp_write_failed sdk_result=%d kind=%u bytes=%u sndbuf=%u queue=%u retryable=%u\n",
             (int)result,kind,(unsigned)n,pcb?(unsigned)tcp_sndbuf(pcb):0,pcb?(unsigned)pcb->snd_queuelen:0,retryable);
         if(retryable && result==ERR_MEM && !socket_dead && stage!=PM_NET_FAILED)return PM_NET_TX_WAIT;
-        RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,(int)result,);stage=PM_NET_FAILED; return PM_NET_TX_FAILED;
+        RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,(int)result,);terminal_send_failed=true;stage=PM_NET_FAILED; return PM_NET_TX_FAILED;
     }
 #if PM_EVENT_STREAM
     uint64_t copy=observe_copy(copy_first,pcb->snd_lbb);
@@ -507,8 +510,12 @@ static void close_unlocked(void) {
     if(pcb) {
         struct tcp_pcb *old=pcb; pcb=NULL;
         tcp_arg(old,NULL); tcp_recv(old,NULL); tcp_err(old,NULL);
-        if(tcp_close(old)!=ERR_OK)tcp_abort(old);
+        // tcp_close(ERR_OK) may retain unacked data, or even defer FIN on
+        // ERR_MEM. A terminal required-send failure must release it instead.
+        if(terminal_send_failed)tcp_abort(old);
+        else if(tcp_close(old)!=ERR_OK)tcp_abort(old);
     }
+    terminal_send_failed=false;
     stage=PM_NET_DOWN;socks_step=SOCKS_METHOD;
     pm_rx_flow_reset(&rx_flow); app_used=0; last_payload_length=0; ws_continuation=false; ws_remaining=0; socket_dead=false;ws_closed=false;eof_started_us=0;
 }
@@ -582,8 +589,8 @@ static void process_socks(void) {
 }
 static void check_failure_unlocked(void){
     bool eof_expired=(stage==PM_NET_DRAINING || stage==PM_NET_DRAINED) && time_us_64()-eof_started_us>=PM_NET_EOF_DRAIN_US;
-    if(socket_dead || eof_expired){
-        if(!socket_dead && eof_expired)last_failure=PM_NET_FAIL_EOF_TIMEOUT;
+    if(socket_dead || terminal_send_failed || eof_expired){
+        if(!socket_dead && !terminal_send_failed && eof_expired)last_failure=PM_NET_FAIL_EOF_TIMEOUT;
         close_unlocked();stage=PM_NET_FAILED;return;
     }
 }
@@ -812,7 +819,7 @@ void pm_net_send_expired(uint64_t connection){
     cyw43_arch_lwip_begin();
     if(pcb && stage==PM_NET_READY && connection && connection==tcp_status.connection_id){
         pm_logf("%s\n","net send_failed=backpressure_timeout");
-        RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,ERR_MEM,);stage=PM_NET_FAILED;
+        RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,ERR_MEM,);terminal_send_failed=true;stage=PM_NET_FAILED;
     }
     cyw43_arch_lwip_end();
 }

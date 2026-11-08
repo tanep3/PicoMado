@@ -25,6 +25,7 @@ for variant, extra in [('native', []), ('sanitized', ['-fsanitize=address,undefi
     cases = [
         ('sdk', ['-ffunction-sections', '-fdata-sections', '-Itests/nagle_sdk_stubs', '-Itests/app_stubs', '-I.', '-I'+str(lwip/'include'), 'tests/net_backpressure_sdk_test.c'] + [str(x) for x in files[:3]] + ['-Wl,--gc-sections'], []),
         ('net', profile + ['-Itests/net_stubs', '-Itests/app_stubs', '-I.', 'tests/net_nagle_test.c', 'src/ws_accept.c'], [str(a.out / ('net-'+variant+'.flags'))]),
+        ('cleanup', profile + ['-Itests/net_stubs', '-Itests/app_stubs', '-I.', 'tests/net_terminal_cleanup_test.c', 'src/ws_accept.c'], []),
         ('media', profile + ['tests/bluetooth_media_test.c'], []),
     ]
     for name, flags, args in cases:

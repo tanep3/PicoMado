@@ -20,6 +20,8 @@ cyw43_t cyw43_state;
 static struct tcp_pcb socket_instance;
 static tcp_connected_fn on_connect;
 static tcp_recv_fn on_receive;
+static tcp_err_fn on_error;
+static unsigned aborts,callback_depth,expected_aborts_at_create;
 static unsigned lock_depth,connects,creates,outputs,closes;
 static unsigned flags_at_connect;
 static bool fail_alloc,fail_connect;
@@ -43,6 +45,7 @@ void cyw43_arch_lwip_end(void){assert(lock_depth==1);lock_depth=0;}
 int ipaddr_aton(const char *text,ip_addr_t *address){return inet_pton(AF_INET,text,&address->addr)==1;}
 struct tcp_pcb *tcp_new_ip_type(int type){
     assert(lock_depth==1 && type==IPADDR_TYPE_V4);creates++;
+    if(expected_aborts_at_create){assert(aborts==expected_aborts_at_create);expected_aborts_at_create=0;}
     if(fail_alloc)return NULL;
     // Real tcp_alloc zeroes each new PCB. Reuse this address to catch reliance
     // on a previous connection's flag rather than configuring the new PCB.
@@ -50,7 +53,7 @@ struct tcp_pcb *tcp_new_ip_type(int type){
 }
 void tcp_arg(struct tcp_pcb *p,void *arg){assert(lock_depth==1 && p==&socket_instance && !arg);}
 void tcp_recv(struct tcp_pcb *p,tcp_recv_fn cb){assert(lock_depth==1 && p==&socket_instance);on_receive=cb;}
-void tcp_err(struct tcp_pcb *p,tcp_err_fn cb){assert(lock_depth==1 && p==&socket_instance);(void)cb;}
+void tcp_err(struct tcp_pcb *p,tcp_err_fn cb){assert(lock_depth==1 && p==&socket_instance);on_error=cb;}
 err_t tcp_connect(struct tcp_pcb *p,const ip_addr_t *address,uint16_t port,tcp_connected_fn cb){
     assert(lock_depth==1 && p==&socket_instance && address && cb);
     ip_addr_t expected;assert(ipaddr_aton(connecting_profile->socks?connecting_profile->proxy_ip:connecting_profile->server_ip,&expected));
@@ -66,8 +69,11 @@ err_t tcp_write(struct tcp_pcb *p,const void *bytes,size_t length,int flags){
     assert((p->flags&TF_NODELAY)==expected_flags());memcpy(sent,bytes,length);sent_size=length;return ERR_OK;
 }
 err_t tcp_output(struct tcp_pcb *p){assert(lock_depth==1 && p==&socket_instance);outputs++;return output_result;}
-err_t tcp_close(struct tcp_pcb *p){assert(lock_depth==1 && p==&socket_instance);closes++;return ERR_OK;}
-void tcp_abort(struct tcp_pcb *p){assert(lock_depth==1 && p==&socket_instance);}
+err_t tcp_close(struct tcp_pcb *p){assert(lock_depth==1 && p==&socket_instance);assert(!pcb && !on_receive && !on_error);closes++;return ERR_OK;}
+void tcp_abort(struct tcp_pcb *p){
+    assert(lock_depth==1 && p==&socket_instance && !callback_depth);
+    assert(!pcb && !on_receive && !on_error);aborts++;
+}
 void tcp_recved(struct tcp_pcb *p,u16_t size){assert(lock_depth==1 && p==&socket_instance);(void)size;}
 unsigned pbuf_copy_partial(const struct pbuf *p,void *out,unsigned size,unsigned offset){
     assert(offset+size<=p->tot_len);memcpy(out,p->payload+offset,size);return size;
