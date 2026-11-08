@@ -377,3 +377,18 @@ identity, uint16 CID, byte labels and signed endpoint values. Native and
 ASan/UBSan runs passed (LeakSanitizer disabled for this environment); diff check
 passed. This formatting correction is not yet built or deployed and is not a
 Bluetooth reconnect remedy.
+
+### Recovery reason metadata implementation
+
+Spec c4253b5: policy failure records global/teardown/retry-cap reason before
+cancel; actual recovery coordinator copies reason, device elapsed milliseconds,
+and retry count into the existing ff10 terminal event before clearing state.
+Direct retry-callback budget expiry supplies global reason too. No extra event,
+SDK command, deadline or transition is added. Non-ff10 errors keep zero details.
+Elapsed is unsigned-wrap-safe and saturates at INT32_MAX for its signed wire
+field. Native policy/coordinator tests and ASan/UBSan policy/coordinator/control
+runs pass, including all three reasons, simultaneous global/teardown priority,
+new-start/cancel clearing, nonzero received-time origin, once-only terminal, and
+full-queue terminal detail retention. ARM runtime syntax check with pinned SDK
+passes; git diff --check passes. No device operations or deployment performed.
+HOME2 TCP recovery/notification delay remains independent of MCU failure timing.

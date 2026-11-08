@@ -61,4 +61,14 @@ static void test_setup_identity(void){
  start();p=(pm_bt_setup_progress){.phase=2};pm_bt_recovery_progress(&r,&p,0);assert(step(0,4,8,true,true)==PM_BR_NONE);
  p.phase=1;pm_bt_recovery_progress(&r,&p,4999);assert(step(4999,4,8,true,true)==PM_BR_NONE);assert(step(9999,4,8,true,true)==PM_BR_DISCONNECT);
 }
-int main(void){test_setup_identity();test_normal();test_progress_and_owner();test_budget();test_cancel_timeout();test_queue();test_success_at_deadline();puts("Bluetooth recovery: bounded retry, teardown/SDK owner, cancellation, deadline, queue PASS");}
+static void test_reason_lifetime(void){
+ start();stall();assert(step(8000,4,8,true,false)==PM_BR_FAIL);assert(r.reason==PM_BR_REASON_TEARDOWN);
+ pm_bt_recovery_cancel(&r);assert(r.reason==PM_BR_REASON_NONE);
+ start();r.retries=2;assert(step(5000,4,8,true,true)==PM_BR_FAIL);assert(r.reason==PM_BR_REASON_RETRY_CAP);
+ pm_bt_recovery_start(&r,2,other,6000);assert(r.reason==PM_BR_REASON_NONE);
+ start();stall();assert(step(25000,4,8,true,true)==PM_BR_FAIL);assert(r.reason==PM_BR_REASON_GLOBAL);
+ pm_bt_event_queue q={0};for(unsigned i=0;i<8;i++)pm_bt_event_enqueue(&q,(pm_bt_event){.kind=PM_BT_CONNECTED});
+ pm_bt_event_enqueue(&q,(pm_bt_event){.kind=PM_BT_ERROR,.status=0xff10,.generation=99,.detail1=PM_BR_REASON_GLOBAL,.detail2=25000,.detail3=2});
+ pm_bt_event e;while(pm_bt_event_dequeue(&q,&e)){}assert(e.status==0xff10&&e.generation==99&&e.detail1==1&&e.detail2==25000&&e.detail3==2);
+}
+int main(void){test_reason_lifetime();test_setup_identity();test_normal();test_progress_and_owner();test_budget();test_cancel_timeout();test_queue();test_success_at_deadline();puts("Bluetooth recovery: bounded retry, teardown/SDK owner, cancellation, deadline, queue PASS");}

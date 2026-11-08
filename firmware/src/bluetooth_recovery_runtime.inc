@@ -1,3 +1,13 @@
+/* Capture decision metadata before cancel clears the owner. No extra event. */
+static void recovery_fail(uint16_t status){
+ pm_bt_event e={.kind=PM_BT_ERROR,.status=status};
+ if(status==0xff10){
+  uint32_t elapsed=btstack_run_loop_get_time_ms()-recovery.started;
+  e.detail1=recovery.reason;e.detail2=elapsed>INT32_MAX?INT32_MAX:(int32_t)elapsed;
+  e.detail3=(int32_t)recovery.retries;
+ }
+ recovery_cancel();if(!wanted)return;wanted=false;emit(e);
+}
 /* Scalar SDK snapshot shared by diagnostics and no-progress identity. */
 static pm_bt_setup_progress setup_progress(avdtp_connection_t *c){
  pm_bt_setup_progress p={0};if(!c)return p;

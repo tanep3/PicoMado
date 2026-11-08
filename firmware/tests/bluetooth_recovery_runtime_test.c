@@ -24,7 +24,8 @@ static uint8_t disconnect_result,establish_result;
 static bool recovery_releasing(void){return recovery.phase==PM_BR_RELEASE||recovery.phase==PM_BR_COOLDOWN;}
 static void recovery_cancel(void){pm_bt_recovery_cancel(&recovery);}
 static void retry_cancel(void){retry_pending=false;++cancels;}
-static void recovery_fail(uint16_t status){assert(status);recovery_cancel();if(!wanted)return;wanted=false;++failures;}
+static void recovery_fail(uint16_t status);
+static pm_bt_event terminal;
 static void retry_schedule(void){assert(!recovery_releasing());if(pm_bt_recovery_reserve(&recovery))retry_pending=true;else recovery_fail(11);}
 static uint32_t btstack_run_loop_get_time_ms(void){return now;}
 static avdtp_connection_t *avdtp_get_connection_for_bd_addr(uint8_t *p){assert(p==peer);return owner_exists?&owner:NULL;}
@@ -32,7 +33,7 @@ static avdtp_connection_t *avdtp_get_connection_for_avdtp_cid(uint16_t c){assert
 static uint8_t a2dp_source_disconnect(uint16_t c){assert(c==cid);++disconnects;return disconnect_result;}
 static uint8_t avrcp_disconnect(uint16_t c){assert(c==remote_cid);++remote_disconnects;return 0;}
 static uint8_t a2dp_source_establish_stream(uint8_t *p,uint16_t *out){assert(p==peer&&!owner_exists&&!cid&&!remote_cid);++establishes;*out=9;return establish_result;}
-static void emit(pm_bt_event e){if(e.kind==PM_BT_DISCONNECTED||e.kind==PM_BT_STOPPED)++reports;else assert(e.kind==PM_BT_LINK_DIAGNOSTIC);}
+static void emit(pm_bt_event e){if(e.kind==PM_BT_ERROR){terminal=e;++failures;return;}if(e.kind==PM_BT_DISCONNECTED||e.kind==PM_BT_STOPPED)++reports;else assert(e.kind==PM_BT_LINK_DIAGNOSTIC);}
 static void media_stop(void){}
 static void stopped_if_idle(void){}
 static void btstack_run_loop_set_timer(btstack_timer_source_t *t,uint32_t delay){assert(t==&recovery_timer&&delay==250);}
@@ -75,7 +76,16 @@ static void test_configuration(void){
   recovery.since=recovery.release_started=24999;poll(24999);poll(25000);assert(failures==1&&!establishes);poll(25001);assert(failures==1);
  }
 }
-int main(void){
+static void test_terminal_details(void){
+ reset();poll(5000);poll(8000);assert(terminal.status==0xff10&&terminal.detail1==PM_BR_REASON_TEARDOWN&&terminal.detail2==8000&&terminal.detail3==1);
+ reset();recovery.retries=2;poll(5000);assert(terminal.detail1==PM_BR_REASON_RETRY_CAP&&terminal.detail2==5000&&terminal.detail3==2);
+ reset();poll(5000);poll(25000);assert(terminal.detail1==PM_BR_REASON_GLOBAL&&terminal.detail2==25000&&terminal.detail3==1);
+ assert(recovery.reason==PM_BR_REASON_NONE);poll(25001);assert(failures==1);
+ reset();recovery.reason=PM_BR_REASON_GLOBAL;recovery_fail(12);assert(terminal.status==12&&!terminal.detail1&&!terminal.detail2&&!terminal.detail3);
+ reset();now=26000;pm_bt_recovery_start(&recovery,1,peer,1000);recovery_poll(NULL);assert(terminal.detail1==PM_BR_REASON_GLOBAL&&terminal.detail2==25000);
+ reset();recovery.reason=PM_BR_REASON_TEARDOWN;wanted=false;recovery_fail(0xff10);assert(!failures&&recovery.reason==PM_BR_REASON_NONE);
+}
+int main(void){test_terminal_details();
  test_configuration();
  for(unsigned order=0;order<2;order++){
   reset();poll(5000);assert(disconnects==1&&remote_disconnects==1&&!establishes);

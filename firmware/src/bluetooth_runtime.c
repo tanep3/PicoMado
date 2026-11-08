@@ -51,7 +51,7 @@ static btstack_timer_source_t recovery_timer;
 static bool recovery_releasing(void){return recovery.phase==PM_BR_RELEASE||recovery.phase==PM_BR_COOLDOWN;}
 static void recovery_cancel(void){btstack_run_loop_remove_timer(&recovery_timer);pm_bt_recovery_cancel(&recovery);}
 static void recovery_poll(btstack_timer_source_t *t);
-static void recovery_fail(uint16_t status){recovery_cancel();if(!wanted)return;wanted=false;emit((pm_bt_event){.kind=PM_BT_ERROR,.status=status});}
+static void recovery_fail(uint16_t status);
 static bool retry_pending;
 static void retry_cancel(void){btstack_run_loop_remove_timer(&connect_timer);retry_pending=false;}
 static void retry_connect(btstack_timer_source_t *t);
@@ -70,7 +70,7 @@ static void emit(pm_bt_event e){
 static void retry_connect(btstack_timer_source_t *t){
  (void)t;retry_pending=false;
  if(!wanted||stopping||retry_generation!=generation)return;
- if((uint32_t)(btstack_run_loop_get_time_ms()-recovery.started)>=25000){recovery_fail(0xff10);return;}
+ if((uint32_t)(btstack_run_loop_get_time_ms()-recovery.started)>=25000){recovery.reason=PM_BR_REASON_GLOBAL;recovery_fail(0xff10);return;}
  /* Lookup is scoped to the explicitly selected peer, after SDK cleanup. */
  avdtp_connection_t *existing=avdtp_get_connection_for_bd_addr(peer);
  if(existing)cid=existing->avdtp_cid;
