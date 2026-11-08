@@ -62,3 +62,37 @@ Parent approval permits this narrow fixture correction. After implementation,
 run focused host tests and record the result. The parent owns the subsequent
 frozen-source full Cargo regression and release decision; the earlier failed
 run and isolated pass remain separate evidence.
+
+## Implementation and focused verification
+
+The change is confined to `host.rs`'s `#[cfg(test)]` module. A shared fixture
+helper performs the two real fetch/apply cycles, asserts each report is
+planned2/attempts2/applied2/stale0, then sends a completion notification and
+waits for stop. The loopback test requires total fetches4 and confirms the host
+has not exited before stop. A new already-stopped fixture case requires zero
+fetches and no false completion notification. HTTP, successful shutdown join,
+post-stop stable count and listener closure assertions remain.
+
+The production host source prefix before `#[cfg(test)]` is byte-identical to
+the pre-correction source, SHA256
+`7a73d612a4b8a285e298b0539aa220600ba71f26d932326e1cdab7ced41b009a`.
+No product timer, runner or deployment code changed;8s/12s fixture timeouts and
+10s production drain were not increased. The two synchronous fixture cycles
+are still non-preemptible while executing, so the8s Tokio wait is not a hard
+wall-clock limit on native rendering. This correction bounds scheduled work
+and makes stop admission deterministic; it does not claim preemption or improve
+production/RF timing.
+
+Focused command with `PICOMADO_PIC2GRAY4PX=/home/tane/bin/pic2gray4px`:
+`cargo test --manifest-path service/Cargo.toml -j1 --features caricature-retention-delete --lib host::tests -- --test-threads=1 --nocapture`.
+All3 host tests passed in11.68s. The same final feature-specific test binary
+then reran the original exact loopback test three times:3/3 passed in
+11.29s,11.23s and11.38s. No source changed between those runs.
+`git diff --check` passes. These focused results do not replace the parent's
+required final integrated full regression.
+
+Logs:
+- `/tmp/picomado-host-finite-focused.log`, SHA256
+  `8ddf40c87b22b6a12a98670d55f3cba7d5e624b0cbaecdc9c6dee216c598aeb9`.
+- `/tmp/picomado-host-finite-repeats.log`, SHA256
+  `27b0bd6f9d0ade1b0f97056a6a629b2fa312d2b0deee821501ef85b8bef3ac05`.

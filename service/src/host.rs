@@ -185,6 +185,55 @@ mod tests {
         }
     }
 
+    // Test lifecycle requires one initial fetch and one scheduled refresh, not
+    // an unbounded 30ms Burst backlog of synchronous native image preparation.
+    async fn run_fixture_fetches(
+        app: SharedApp,
+        shutdown: watch::Receiver<bool>,
+        count: Arc<AtomicUsize>,
+        ready: tokio::sync::oneshot::Sender<()>,
+    ) -> Result<(), AppError> {
+        let clock = FakeClock(AtomicI64::new(1_000_000));
+        let mut fetcher = FakeFetcher(count);
+        for cycle in 0..2 {
+            if *shutdown.borrow() { return Ok(()); }
+            if cycle == 1 {
+                tokio::select! {
+                    biased;
+                    _ = wait_shutdown(shutdown.clone()) => return Ok(()),
+                    _ = tokio::time::sleep(Duration::from_millis(30)) => {}
+                }
+                clock.0.fetch_add(3600, Ordering::SeqCst);
+            }
+            if *shutdown.borrow() { return Ok(()); }
+            let report = {
+                let mut guard = app.lock().unwrap();
+                run_cycle(&mut guard, &clock, &mut fetcher)?
+            };
+            assert_eq!((report.planned, report.attempts, report.applied, report.stale), (2, 2, 2, 0));
+        }
+        // A fetch-entry counter is not completion. Signal only after both real
+        // cycles applied, then keep the runner alive until its requested stop.
+        let _ = ready.send(());
+        wait_shutdown(shutdown).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn stopped_fixture_does_not_start_a_fetch_cycle() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = Arc::new(crate::shared::Application::new(
+            App::open(&temp.path().join("state.db")).unwrap(),
+        ));
+        app.lock().unwrap().hello("desk", ["lcd".into()].into(), 1).unwrap();
+        let count = Arc::new(AtomicUsize::new(0));
+        let (_stop, shutdown) = watch::channel(true);
+        let (ready, completed) = tokio::sync::oneshot::channel();
+        run_fixture_fetches(app, shutdown, count.clone(), ready).await.unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        assert!(completed.await.is_err(), "stopped cycles must not report completion");
+    }
+
     #[tokio::test]
     async fn loopback_host_runs_initial_and_repeated_fetch_then_stops() {
         let temp = tempfile::tempdir().unwrap();
@@ -200,36 +249,19 @@ mod tests {
         let count = Arc::new(AtomicUsize::new(0));
         let (stop_tx, stop_rx) = watch::channel(false);
         let fake_count = count.clone();
+        let (ready, completed) = tokio::sync::oneshot::channel();
         let task = tokio::spawn(serve_with_runner(
             listener,
             app.clone(),
-            move |app, mut shutdown| async move {
-                let clock = FakeClock(AtomicI64::new(1_000_000));
-                let mut fetcher = FakeFetcher(fake_count);
-                let mut tick = tokio::time::interval(Duration::from_millis(30));
-                loop {
-                    tokio::select! {
-                        _=tick.tick()=>{
-                            {let mut guard=app.lock().unwrap();run_cycle(&mut guard,&clock,&mut fetcher)?;}
-                            clock.0.fetch_add(3600,Ordering::SeqCst);
-                            tokio::task::yield_now().await;
-                        }
-                        changed=shutdown.changed()=>if changed.is_err()||*shutdown.borrow(){return Ok(());}
-                    }
-                }
-            },
+            move |app, shutdown| run_fixture_fetches(app, shutdown, fake_count, ready),
             stop_rx,
         ));
-        tokio::time::timeout(Duration::from_secs(8), async {
-            loop {
-                if count.load(Ordering::SeqCst) >= 4 {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .unwrap();
+        tokio::time::timeout(Duration::from_secs(8), completed)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 4);
+        assert!(!task.is_finished(), "runner must stay alive until host shutdown");
         let response = reqwest::Client::new()
             .get(format!("http://{address}/api/state"))
             .header(reqwest::header::CONNECTION, "close")
