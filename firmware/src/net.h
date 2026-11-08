@@ -70,6 +70,7 @@ bool pm_net_cyw_read(uint64_t boot,uint64_t run,unsigned index,pm_cyw_row *out);
 typedef struct {
     uint64_t connection_id;
     bool valid,unsent,unacked,output_valid;
+    uint8_t arp_status,arp_netif,peer_ipv4[4],next_hop[4],peer_mac[6];
     uint8_t state,nrtx,keep_cnt_sent;
     int16_t rtime,last_output_result;
     uint32_t snd_lbb,snd_nxt,lastack,snd_wnd,cwnd;

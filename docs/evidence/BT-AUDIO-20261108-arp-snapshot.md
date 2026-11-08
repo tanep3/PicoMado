@@ -1,0 +1,9 @@
+# BT-AUDIO-20261107: passive peer ARP snapshot
+
+Specification ff53f40. net.c changes are limited to the existing snapshot and includes. For a live IPv4 PCB, route selection mirrors tcp_out.c: bound netif index first, otherwise ip_route(local,remote). On-link peer/link-local addresses use the peer; off-link uses gateway. No ARP query/request or packet is sent. etharp_find_addr performs stable-cache FIND_ONLY. Snapshot copies peer IPv4, next hop, netif index and MAC without exposing pointers. status0=closed,1=non-IPv4,2=no route,3=unresolved,4=stable cache found. Unknown/closed snapshots do not retain old addresses. The fixed board uses IPv4 single-netif/default gateway routing; no custom gateway hook is configured.
+
+Existing USB periodic status gains two short lines. Cache content is not proof of the actual Ethernet destination used by a particular packet. Unresolved includes absent/pending entries. No age is claimed. MACs are link addressing metadata, not credentials; no packet/audio payload is logged. Existing sleep/credit counters and standard INPUT remain unchanged.
+
+Complete firmware host suite PASS (`/tmp/picomado-arp-host-final.log`). Actual net.c fake tests cover unresolved, both proposed server MAC suffixes f3/f4, transition back to unresolved with no stale MAC, gateway lookup, non-IPv4, no route, close/reconnect, and existing no-snapshot-side-effect assertions. All existing networking/standard-input tests also pass. Build log `/tmp/picomado-arp-build.log` exit0; diff whitespace check passes.
+
+Unapplied LCD candidate: `/tmp/picomado-arp-sleep-lcd/PicoMado-lcd1.uf2`, SHA256 `90625e7977a43ef53c118b09a93c4a65e6a0c2aab63592a4a038da216599afcf`. text557616/data0/BSS236652 bytes. Release/pico_w/PicoMado-lcd1, BT ON, HCI0, CREDIT+SLEEP ON, INNER/SPI_REAL_SIZE OFF. No SDK original, radio, USB, service, host-network setting, playback or deployment was changed by this worker. No cause/effect or independent verification is claimed.

@@ -12,9 +12,9 @@ typedef uint16_t u16_t;
 #define TCP_QUEUE_OOSEQ 1
 #define TF_NODELAY 0x40U
 #define tcp_nagle_disable(pcb) ((pcb)->flags |= TF_NODELAY)
-struct tcp_pcb { uint8_t state,nrtx,keep_cnt_sent;int16_t rtime; unsigned flags,so_options,keep_idle,keep_intvl,keep_cnt,rcv_wnd,rcv_ann_wnd,rcv_nxt;void *ooseq,*unsent,*unacked;unsigned snd_nxt,lastack,cwnd,snd_wnd,snd_queuelen,snd_lbb;
+struct tcp_pcb { ip_addr_t local_ip,remote_ip;uint8_t netif_idx; uint8_t state,nrtx,keep_cnt_sent;int16_t rtime; unsigned flags,so_options,keep_idle,keep_intvl,keep_cnt,rcv_wnd,rcv_ann_wnd,rcv_nxt;void *ooseq,*unsent,*unacked;unsigned snd_nxt,lastack,cwnd,snd_wnd,snd_queuelen,snd_lbb;
 #if PM_TX_LINK_PROBE || PM_EVENT_STREAM
- ip_addr_t local_ip,remote_ip;uint16_t local_port,remote_port;
+ uint16_t local_port,remote_port;
 #endif
 };
 struct pbuf { unsigned tot_len;const uint8_t *payload;

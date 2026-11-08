@@ -109,6 +109,16 @@ static void snapshot_test(void){
     pm_net_tcp_snapshot(&before);assert(!before.valid);
     connecting_profile=&home;pm_net_begin(&home);
     pm_net_tcp_snapshot(&before);assert(before.valid && !before.output_valid && before.write_ok==0);
+    struct netif route={0};fake_route=&route;ipaddr_aton("192.168.0.2",&route.ip);ipaddr_aton("255.255.255.0",&route.mask);ipaddr_aton("192.168.0.1",&route.gw);
+    ipaddr_aton("192.168.0.120",&socket_instance.remote_ip);
+    pm_net_tcp_snapshot(&after);assert(after.arp_status==3 && after.next_hop[3]==120 && after.peer_mac[0]==0);
+    fake_arp_found=true;memcpy(fake_arp_mac.addr,(uint8_t[]){0x2c,0xcf,0x67,0x11,0x72,0xf3},6);
+    pm_net_tcp_snapshot(&after);assert(after.arp_status==4 && after.peer_mac[5]==0xf3);
+    fake_arp_mac.addr[5]=0xf4;pm_net_tcp_snapshot(&after);assert(after.peer_mac[5]==0xf4);
+    fake_arp_found=false;pm_net_tcp_snapshot(&after);assert(after.arp_status==3 && after.peer_mac[5]==0);
+    ipaddr_aton("198.51.100.1",&socket_instance.remote_ip);pm_net_tcp_snapshot(&after);assert(after.next_hop[0]==192 && after.next_hop[3]==1);
+    fake_ipv6=true;pm_net_tcp_snapshot(&after);assert(after.arp_status==1 && after.peer_ipv4[0]==0);fake_ipv6=false;
+    fake_route=NULL;pm_net_tcp_snapshot(&after);assert(after.arp_status==2 && after.peer_mac[5]==0);
     socket_instance.snd_lbb=123;socket_instance.snd_nxt=100;socket_instance.lastack=80;
     socket_instance.unacked=&socket_instance;socket_instance.rtime=-1;
     socket_instance.nrtx=2;socket_instance.keep_cnt_sent=3;socket_instance.state=4;

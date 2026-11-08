@@ -313,6 +313,8 @@ static void log_usb_snapshot(void){
     pm_logf("tcp snapshot conn=%llu valid=%u state=%u lbb=%lu nxt=%lu ack=%lu unsent=%u unacked=%u\n",
         (unsigned long long)tcp.connection_id,tcp.valid,tcp.state,(unsigned long)tcp.snd_lbb,
         (unsigned long)tcp.snd_nxt,(unsigned long)tcp.lastack,tcp.unsent,tcp.unacked);
+    pm_logf("arp conn=%llu status=%u if=%u peer=%u.%u.%u.%u hop=%u.%u.%u.%u\n",(unsigned long long)tcp.connection_id,tcp.arp_status,tcp.arp_netif,tcp.peer_ipv4[0],tcp.peer_ipv4[1],tcp.peer_ipv4[2],tcp.peer_ipv4[3],tcp.next_hop[0],tcp.next_hop[1],tcp.next_hop[2],tcp.next_hop[3]);
+    pm_logf("arp mac conn=%llu status=%u mac=%02x:%02x:%02x:%02x:%02x:%02x\n",(unsigned long long)tcp.connection_id,tcp.arp_status,tcp.peer_mac[0],tcp.peer_mac[1],tcp.peer_mac[2],tcp.peer_mac[3],tcp.peer_mac[4],tcp.peer_mac[5]);
     pm_logf("tcp flow conn=%llu wnd=%lu cwnd=%lu nrtx=%u keep=%u rtime=%d\n",
         (unsigned long long)tcp.connection_id,(unsigned long)tcp.snd_wnd,(unsigned long)tcp.cwnd,tcp.nrtx,tcp.keep_cnt_sent,tcp.rtime);
     pm_logf("tcp output conn=%llu valid=%u last=%d write_ok=%lu write_fail=%lu out_ok=%lu out_fail=%lu\n",

@@ -17,6 +17,8 @@
 #include "pico/cyw43_arch.h"
 #include "lwip/ip_addr.h"
 #include "lwip/tcp.h"
+#include "lwip/ip.h"
+#include "lwip/etharp.h"
 #if PM_TRACE_STATS
 #include "lwip/stats.h"
 #include "lwip/memp.h"
@@ -42,6 +44,22 @@ void pm_net_tcp_snapshot(pm_net_tcp_status *out){
     cyw43_arch_lwip_begin();
     *out=tcp_status;out->valid=pcb!=NULL;
     if(pcb){
+        out->arp_status=1; // non-IPv4
+        if(IP_IS_V4(&pcb->remote_ip)){
+            memcpy(out->peer_ipv4,ip_2_ip4(&pcb->remote_ip),4);
+            struct netif *n=pcb->netif_idx!=NETIF_NO_INDEX?netif_get_by_index(pcb->netif_idx):ip_route(&pcb->local_ip,&pcb->remote_ip);
+            out->arp_status=2; // no route
+            if(n){
+                out->arp_netif=netif_get_index(n);
+                const ip4_addr_t *hop=ip_2_ip4(&pcb->remote_ip);
+                if(!ip4_addr_netcmp(hop,netif_ip4_addr(n),netif_ip4_netmask(n)) && !ip4_addr_islinklocal(hop))hop=netif_ip4_gw(n);
+                if(!ip4_addr_isany_val(*hop)){
+                    memcpy(out->next_hop,hop,4);out->arp_status=3; // unresolved
+                    struct eth_addr *mac;const ip4_addr_t *resolved;
+                    if(etharp_find_addr(n,hop,&mac,&resolved)>=0){memcpy(out->peer_mac,mac->addr,6);out->arp_status=4;}
+                }
+            }
+        }
         out->state=(uint8_t)pcb->state;out->snd_lbb=pcb->snd_lbb;
         out->snd_nxt=pcb->snd_nxt;out->lastack=pcb->lastack;
         out->snd_wnd=pcb->snd_wnd;out->cwnd=pcb->cwnd;
