@@ -29,9 +29,13 @@
       ]
     },
     "implementation": {
-      "state": "in_progress",
+      "state": "verified",
       "evidence": [
-        "docs/evidence/HOME2-PROFILE-20261108-host.md"
+        "ee29031",
+        "5d0a8b0",
+        "5fceee8",
+        "docs/evidence/HOME2-PROFILE-20261108-host.md",
+        "docs/evidence/HOME2-PROFILE-20261108-integrated.md"
       ]
     },
     "independent_verification": {
