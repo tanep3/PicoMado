@@ -135,6 +135,16 @@ pub trait ContentPlugin: Send + Sync {
     fn audio_playback(&self, _ctx: &PluginContext) -> Option<crate::plugin_jobs::AudioPlaybackSpec> {
         None
     }
+    /// Invoked on a clone only after the current audio offer has been revalidated.
+    fn audio_failed(
+        &mut self,
+        _ctx: &PluginContext,
+        _spec: &crate::plugin_jobs::AudioPlaybackSpec,
+        _consumed_frame: u64,
+        _reason: crate::plugin_jobs::AudioPlaybackFailure,
+    ) -> Result<Option<PluginWorkPlan>, ContentError> {
+        Ok(None)
+    }
     fn playback(&self, _ctx: &PluginContext) -> Option<PlaybackSpec> {
         None
     }

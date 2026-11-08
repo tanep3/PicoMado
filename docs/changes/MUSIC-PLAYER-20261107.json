@@ -44,7 +44,8 @@
         "Follow-up implementation commit 5adecfa (safe volume, playback fixes, input regression tests)",
         "b5cfa6c: six-operation negotiated media input and physical Sub cycling; not deployed",
         "400 Cargo tests passed, 0 failed, 2 ignored with PICOMADO_PIC2GRAY4PX configured; /tmp/picomado-media-v2-configured-all-features.log",
-        "Integrated release/UF2 staged, not deployed while sleeping user has connected LBS; docs/evidence/BT-AUDIO-20261108-followup.md"
+        "Integrated release/UF2 staged, not deployed while sleeping user has connected LBS; docs/evidence/BT-AUDIO-20261108-followup.md",
+        "docs/evidence/MUSIC-PLAYER-20261108-failure.md: terminal audio failure feedback; frozen-input all-features 409 passed, 0 failed, 2 ignored; not deployed"
       ]
     },
     "independent_verification": {

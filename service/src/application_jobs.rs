@@ -90,6 +90,35 @@ impl App {
         Some((crate::display_token(&session.device_id, d), plugin.clone(), spec, self.plugin_paths(plugin)?))
     }
 
+    /// Adopt a terminal result only for the exact still-current playback intent.
+    /// The transport owner validates stream identity and absolute consumed credit.
+    pub fn audio_playback_failed(
+        &mut self,
+        session: &SessionToken,
+        display: &crate::DisplayToken,
+        plugin: &str,
+        spec: &crate::plugin_jobs::AudioPlaybackSpec,
+        consumed_frame: u64,
+        reason: crate::plugin_jobs::AudioPlaybackFailure,
+    ) -> Result<bool, AppError> {
+        let Some((current_display, current_plugin, current_spec, _)) = self.audio_playback_for(session) else {
+            return Ok(false);
+        };
+        if &current_display != display || current_plugin != plugin || &current_spec != spec
+            || consumed_frame < spec.start_frame
+        {
+            return Ok(false);
+        }
+        let ctx = self.command_context();
+        let device = ctx.devices.iter().find(|d| d.context.token == *session).ok_or(AppError::NotFound)?;
+        let mut content = self.contents.get(plugin).ok_or(AppError::NotFound)?.clone();
+        let Some(plan) = content.audio_failed(&device.context, spec, consumed_frame, reason).map_err(content_error)? else {
+            return Ok(false);
+        };
+        self.accept_work_plan(plugin, content, plan, &ctx, None)?;
+        Ok(true)
+    }
+
     pub fn plugin_paths(&self, plugin: &str) -> Option<PluginPaths> {
         self.contents.contains_key(plugin).then(|| PluginPaths {
             data: self.plugin_root.join(plugin).join("data"),

@@ -599,3 +599,83 @@ fn media_channel_and_cancel_preserve_weather_sub_navigation() {
     app.media_input(&t, MediaOperation::Cancel).unwrap();
     assert_eq!(app.session_mode(&t), Some("normal"));
 }
+
+#[test]
+fn audio_failure_stops_at_consumed_position_once_and_only_explicit_play_resumes() {
+    use picomado_core::plugin_jobs::AudioPlaybackFailure;
+    let mut f = Fixture::new(SAMPLE_RATE as u64 * 60);
+    let one = f.hello("one"); let two = f.hello("two");
+    f.command("one", "play"); f.command("two", "play");
+    let first = f.app.audio_playback_for(&one).unwrap();
+    let other = f.app.audio_playback_for(&two).unwrap();
+    let before_revision = f.app.plugin_web_view(PLUGIN).unwrap().revision;
+    wait_until(&f.app, first.2.started_mono_ms + 5);
+    assert!(same_offer(&f.app, &one, &first), "elapsed time is not part of the offer fence");
+    assert!(f.app.audio_playback_failed(&one, &first.0, &first.1, &first.2,
+        6912, AudioPlaybackFailure::DeviceFailed).unwrap());
+    let failed = f.state("one");
+    assert_eq!(failed["playing"], false);
+    assert_eq!(failed["position_ms"], 144);
+    assert_eq!(failed["error"]["code"], "device_failed");
+    assert!(failed["error"]["message"].as_str().unwrap().contains("失敗"));
+    assert!(f.app.audio_playback_for(&one).is_none());
+    assert!(same_offer(&f.app, &two, &other));
+    assert_eq!(f.app.plugin_web_view(PLUGIN).unwrap().revision, before_revision + 1);
+    assert!(!f.app.audio_playback_failed(&one, &first.0, &first.1, &first.2,
+        6912, AudioPlaybackFailure::DeviceFailed).unwrap());
+    assert_eq!(f.app.plugin_web_view(PLUGIN).unwrap().revision, before_revision + 1);
+    wait_until(&f.app, f.app.monotonic_millis() + 5);
+    assert_eq!(f.state("one"), failed, "failed position must not advance with time");
+    f.command("one", "play");
+    let resumed = f.app.audio_playback_for(&one).unwrap();
+    assert_eq!(resumed.2.start_frame, 6912);
+    assert!(resumed.2.generation > first.2.generation);
+    assert!(f.state("one")["error"].is_null());
+    assert!(!f.app.audio_playback_failed(&one, &first.0, &first.1, &first.2,
+        8000, AudioPlaybackFailure::DeviceFailed).unwrap());
+    assert!(same_offer(&f.app, &one, &resumed));
+}
+
+#[test]
+fn audio_failure_rejects_other_device_new_track_session_and_display() {
+    use picomado_core::plugin_jobs::AudioPlaybackFailure;
+    let mut f = Fixture::new(SAMPLE_RATE as u64 * 60);
+    let one = f.hello_with_caps("one", &["lcd", "media-input-v1"]);
+    let two = f.hello("two");
+    f.command("one", "play"); f.command("two", "play");
+    let old = f.app.audio_playback_for(&one).unwrap();
+    assert!(!f.app.audio_playback_failed(&two, &old.0, &old.1, &old.2, 128,
+        AudioPlaybackFailure::DeviceFailed).unwrap());
+    let mut bad_display = old.0.clone(); bad_display.display_epoch += 1;
+    assert!(!f.app.audio_playback_failed(&one, &bad_display, &old.1, &old.2, 128,
+        AudioPlaybackFailure::DeviceFailed).unwrap());
+    let mut bad_generation = old.2.clone(); bad_generation.generation += 1;
+    assert!(!f.app.audio_playback_failed(&one, &old.0, &old.1, &bad_generation, 128,
+        AudioPlaybackFailure::DeviceFailed).unwrap());
+    f.sub(&one);
+    let replacement = f.app.audio_playback_for(&one).unwrap();
+    assert_ne!(replacement.2.asset_id, old.2.asset_id);
+    assert!(!f.app.audio_playback_failed(&one, &old.0, &old.1, &old.2, 128,
+        AudioPlaybackFailure::DeviceFailed).unwrap());
+    assert!(same_offer(&f.app, &one, &replacement));
+    let new_session = f.hello("one"); f.command("one", "play");
+    let latest = f.app.audio_playback_for(&new_session).unwrap();
+    assert!(!f.app.audio_playback_failed(&one, &replacement.0, &replacement.1, &replacement.2, 128,
+        AudioPlaybackFailure::DeviceFailed).unwrap());
+    assert!(same_offer(&f.app, &new_session, &latest));
+}
+
+#[test]
+fn failure_clamps_terminal_padding_and_stop_clears_device_error() {
+    use picomado_core::plugin_jobs::AudioPlaybackFailure;
+    let mut f = Fixture::new(1000);
+    let session = f.hello("one"); f.command("one", "play");
+    let offer = f.app.audio_playback_for(&session).unwrap();
+    assert!(f.app.audio_playback_failed(&session, &offer.0, &offer.1, &offer.2, 1024,
+        AudioPlaybackFailure::CreditTimeout).unwrap());
+    assert_eq!(f.state("one")["position_ms"], 1000 * 1000 / SAMPLE_RATE);
+    f.command("one", "stop");
+    assert!(f.state("one")["error"].is_null());
+    assert_eq!(f.state("one")["position_ms"], 0);
+    assert!(f.app.audio_playback_for(&session).is_none());
+}

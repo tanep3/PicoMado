@@ -217,6 +217,17 @@ impl PlaybackSpec {
     }
 }
 
+/// Terminal delivery facts, separate from a plugin's playback intent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioPlaybackFailure {
+    DeviceFailed,
+    InvalidCredit,
+    CreditTimeout,
+    SourceReadFailed,
+    SourceReadTimeout,
+}
+
 /// Audio sample frames count all channels at one instant (not video frames).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AudioPlaybackSpec {

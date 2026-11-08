@@ -50,6 +50,8 @@ struct Selection {
     playing: bool,
     #[serde(skip)]
     started: u64,
+    #[serde(skip)]
+    failure: Option<AudioPlaybackFailure>,
 }
 impl Selection {
     fn position(&self, now: u64, max: u64) -> u64 {
@@ -179,7 +181,7 @@ impl LocalMusicContent {
         };
         let mut next = current.clone().unwrap_or(Selection {
             incarnation: ctx.token.incarnation, key: keys[0].clone(), generation: 0,
-            position: 0, playing: false, started: self.clock,
+            position: 0, playing: false, started: self.clock, failure: None,
         });
         let changed = match operation {
             MusicOperation::Play if playing => false,
@@ -200,6 +202,7 @@ impl LocalMusicContent {
             }
         };
         if changed {
+            next.failure = None;
             next.generation = self.generation()?;
             next.started = self.clock;
             self.devices.insert(ctx.token.device_id.clone(), next);
@@ -292,7 +295,9 @@ impl ContentPlugin for LocalMusicContent {
             .map(|t| t.name.as_str())
             .unwrap_or("NO MUSIC");
         Some(crate::music_text::lcd(
-            if s.is_some_and(|s| s.playing) {
+            if s.is_some_and(|s| s.failure.is_some()) {
+                "MUSIC FAILED"
+            } else if s.is_some_and(|s| s.playing) {
                 "MUSIC REQUESTED"
             } else {
                 "MUSIC STOPPED"
@@ -303,10 +308,26 @@ impl ContentPlugin for LocalMusicContent {
     fn eink_frame_for(&self, ctx: &PluginContext, _: &[u8]) -> Option<Vec<u8>> {
         let selection = self.devices.get(&ctx.token.device_id).filter(|s| s.incarnation == ctx.token.incarnation);
         let name = selection.and_then(|s| self.tracks.get(&s.key)).map(|t| t.name.as_str()).unwrap_or("NO MUSIC");
-        Some(crate::music_text::eink(if selection.is_some_and(|s|s.playing) {"MUSIC REQUESTED"} else {"MUSIC STOPPED"}, name))
+        Some(crate::music_text::eink(if selection.is_some_and(|s|s.failure.is_some()) {"MUSIC FAILED"} else if selection.is_some_and(|s|s.playing) {"MUSIC REQUESTED"} else {"MUSIC STOPPED"}, name))
     }
     fn audio_playback(&self, ctx: &PluginContext) -> Option<AudioPlaybackSpec> {
         self.spec(ctx)
+    }
+    fn audio_failed(&mut self, ctx: &PluginContext, spec: &AudioPlaybackSpec, consumed_frame: u64,
+        reason: AudioPlaybackFailure) -> Result<Option<PluginWorkPlan>, ContentError> {
+        if self.spec(ctx).as_ref() != Some(spec) || consumed_frame < spec.start_frame { return Ok(None); }
+        let generation = self.generation()?;
+        let selection = self.devices.get_mut(&ctx.token.device_id).ok_or(ContentError::Stale)?;
+        selection.position = consumed_frame.min(self.tracks[&selection.key].frames);
+        selection.playing = false;
+        selection.generation = generation;
+        selection.failure = Some(reason);
+        Ok(Some(PluginWorkPlan {
+            refresh: RefreshTargets::Devices(vec![crate::DeviceToken {
+                device_id: ctx.token.device_id.clone(), incarnation: ctx.token.incarnation,
+            }]),
+            ..Default::default()
+        }))
     }
     fn save_state(&self) -> Value {
         json!(self)
@@ -329,7 +350,7 @@ impl ContentPlugin for LocalMusicContent {
         Ok(())
     }
     fn web_state_at(&self, now: u64) -> Value {
-        json!({"imports":self.imports,"tracks":self.tracks.values().collect::<Vec<_>>(),"devices":self.devices.iter().map(|(id,s)|{let max=self.tracks.get(&s.key).map(|t|t.frames).unwrap_or(0);(id,json!({"key":s.key,"incarnation":s.incarnation,"playing":s.playing&&s.position(now,max)<max,"position_ms":s.position(now,max)*1000/SAMPLE_RATE as u64}))}).collect::<BTreeMap<_,_>>(),"pending":self.pending.is_some(),"error":self.error})
+        json!({"imports":self.imports,"tracks":self.tracks.values().collect::<Vec<_>>(),"devices":self.devices.iter().map(|(id,s)|{let max=self.tracks.get(&s.key).map(|t|t.frames).unwrap_or(0);(id,json!({"key":s.key,"incarnation":s.incarnation,"playing":s.playing&&s.position(now,max)<max,"position_ms":s.position(now,max)*1000/SAMPLE_RATE as u64,"error":s.failure.map(|reason|json!({"code":reason,"message":failure_message(reason)}))}))}).collect::<BTreeMap<_,_>>(),"pending":self.pending.is_some(),"error":self.error})
     }
     fn plan_command(
         &mut self,
@@ -395,6 +416,7 @@ impl ContentPlugin for LocalMusicContent {
                                 position: pos,
                                 playing: true,
                                 started: ctx.now_mono_ms,
+                                failure: None,
                             },
                         );
                     }
@@ -411,6 +433,7 @@ impl ContentPlugin for LocalMusicContent {
                         };
                         s.playing = false;
                         s.generation = gen;
+                        s.failure = None;
                     }
                 }
                 p.refresh = RefreshTargets::Selected;
@@ -586,7 +609,7 @@ mod tests {
     fn missing_track_selection_is_safe_and_invalid_restore_is_rejected() {
         let mut c = LocalMusicContent::default();
         let x = ctx();
-        c.devices.insert("a".into(), Selection { incarnation:1, key:"b".repeat(64), generation:1, position:123, playing:true, started:0 });
+        c.devices.insert("a".into(), Selection { incarnation:1, key:"b".repeat(64), generation:1, position:123, playing:true, started:0, failure:None });
         c.next_generation=2;
         assert!(c.plan(&x.devices[0].context, ButtonAction::Sub).is_err());
         c.tracks.insert("a".repeat(64), Track {key:"a".repeat(64),name:"valid.wav".into(),frames:48000});
@@ -609,5 +632,15 @@ mod tests {
                 &json!({"kind":"play","device_id":"unknown","key":"a".repeat(64)})
             )
             .is_err());
+    }
+}
+
+fn failure_message(reason: AudioPlaybackFailure) -> &'static str {
+    match reason {
+        AudioPlaybackFailure::DeviceFailed => "端末が音声再生の失敗を報告しました。",
+        AudioPlaybackFailure::InvalidCredit => "端末の音声消費情報が不正なため停止しました。",
+        AudioPlaybackFailure::CreditTimeout => "端末から音声消費の進捗が届かず停止しました。",
+        AudioPlaybackFailure::SourceReadFailed => "音源データを読み込めず停止しました。",
+        AudioPlaybackFailure::SourceReadTimeout => "音源データの読み込みが時間内に完了しませんでした。",
     }
 }

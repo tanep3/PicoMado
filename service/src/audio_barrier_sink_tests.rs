@@ -258,5 +258,62 @@ async fn ready_audio_tick_waits_for_receipt_then_starts_once_without_render() {
     assert!(pcm.iter().all(|p|p[46..].chunks_exact(2).all(|b|i16::from_le_bytes([b[0],b[1]])==100)));
     assert_eq!(sent.iter().filter(|p|p.get(5)==Some(&22)).count(),1);
     assert_eq!(audio.sender.identity(),Some(identity));
+    drop(sent);
+
+    // A late terminal snapshot must stop the published intent, not just the socket.
+    // Gain/mute changes above did not invalidate the offer or alter source PCM.
+    let end=audio.sender.sent_end().unwrap();
+    let consumed=end-128;
+    let mut stale=identity;stale.stream_id+=1;
+    audio.credit(stale,end,consumed,true);
+    assert!(audio.transfer.as_ref().unwrap().failure.is_none());
+    audio.credit(identity,end,consumed,true);
+    assert_eq!(audio.sender.consumed_end(),Some(consumed));
+    let count=packets.lock().unwrap().len();
+    for _ in 0..4 {
+        service_audio(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending).await.unwrap();
+    }
+    let view=app.read().unwrap().plugin_web_view("local-music").unwrap();
+    let failed=&view.data["devices"]["audio"];
+    assert_eq!(failed["playing"],false);
+    assert_eq!(failed["position_ms"],consumed*1000/48000);
+    assert_eq!(failed["error"]["code"],"device_failed");
+    assert!(app.read().unwrap().audio_playback_for(&session).is_none());
+    let sent=packets.lock().unwrap();
+    assert_eq!(sent[count..].iter().filter(|p|p.get(5)==Some(&23)).count(),1);
+    assert_eq!(sent[count..].iter().filter(|p|p.get(5)==Some(&22)||p.get(5)==Some(&24)).count(),0);
+    assert!(std::fs::read(paths.cache.join("audio").join(format!("{key}.pcm"))).unwrap()
+        .chunks_exact(2).all(|p|i16::from_le_bytes([p[0],p[1]])==10000));
+    drop(sent);
+
+    let explicit_play = || {
+        let mut state=app.lock().unwrap();
+        let revision=state.plugin_web_view("local-music").unwrap().revision;
+        state.plugin_command("local-music",revision,
+            serde_json::json!({"kind":"play","device_id":"audio","key":key})).unwrap();
+        let frame=state.pending_effects().into_iter().find_map(|(_,effect)|match effect {
+            crate::Effect::SendFrame{token,..} if state.frame_is_current(&token)=>Some(token),_=>None
+        }).unwrap();
+        assert!(state.terminal_event(crate::Event::ReceiptAck{token:frame}).unwrap());
+    };
+    explicit_play();
+    service_audio(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending).await.unwrap();
+    assert_eq!(audio.transfer.as_ref().unwrap().spec.start_frame,consumed);
+    assert!(audio.sender.identity().unwrap().stream_id>identity.stream_id);
+    audio.transfer.as_mut().unwrap().last_credit=tokio::time::Instant::now()-Duration::from_secs(4);
+    service_audio(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending).await.unwrap();
+    let view=app.read().unwrap().plugin_web_view("local-music").unwrap();
+    assert_eq!(view.data["devices"]["audio"]["error"]["code"],"credit_timeout");
+    assert_eq!(view.data["devices"]["audio"]["position_ms"],consumed*1000/48000);
+    service_audio(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending).await.unwrap();
+
+    // Missing fake PCM is a source failure, with no implicit retry or position advance.
+    explicit_play();
+    std::fs::remove_file(paths.cache.join("audio").join(format!("{key}.pcm"))).unwrap();
+    service_audio(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending).await.unwrap();
+    let view=app.read().unwrap().plugin_web_view("local-music").unwrap();
+    assert_eq!(view.data["devices"]["audio"]["error"]["code"],"source_read_failed");
+    assert_eq!(view.data["devices"]["audio"]["playing"],false);
+    assert_eq!(view.data["devices"]["audio"]["position_ms"],consumed*1000/48000);
 
 }
