@@ -493,7 +493,12 @@ static void start_wifi(void){
 static void start_server_now(const pm_profile *connection){
     incarnation=0;session_epoch=0;display_epoch=0;
     await_selection=false;sub_mode=false;pending_standby=false;pending_sub_cancel=false;
-    connection_status("SERVER","CONNECTING");pm_net_begin(connection);
+    connection_status("SERVER","CONNECTING");
+#if PM_HOME_STATIC_ARP_DIAGNOSTIC
+    pm_net_begin_home_static_arp(connection,(pm_profile_id)active_profile);
+#else
+    pm_net_begin(connection);
+#endif
     state=SERVER;started_ms=now_ms();
 }
 #if PM_AWAY_EEX1

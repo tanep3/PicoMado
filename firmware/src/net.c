@@ -103,6 +103,9 @@ static uint8_t tx_packet[1040];
 static char upgrade_request[320];
 static uint8_t socks_auth_request[513];
 static ip_addr_t server_addr, proxy_addr;
+#if PM_HOME_STATIC_ARP_DIAGNOSTIC
+#include "home_static_arp.inc"
+#endif
 #if PM_EVENT_STREAM
 #include "observation_transport.h"
 static struct {
@@ -516,11 +519,21 @@ static void close_unlocked(void) {
         else if(tcp_close(old)!=ERR_OK)tcp_abort(old);
     }
     terminal_send_failed=false;
+#if PM_HOME_STATIC_ARP_DIAGNOSTIC
+    home_arp_remove();
+#endif
     stage=PM_NET_DOWN;socks_step=SOCKS_METHOD;
     pm_rx_flow_reset(&rx_flow); app_used=0; last_payload_length=0; ws_continuation=false; ws_remaining=0; socket_dead=false;ws_closed=false;eof_started_us=0;
 }
-static void begin_unlocked(const pm_profile *p) {
+static void begin_unlocked(const pm_profile *p
+#if PM_HOME_STATIC_ARP_DIAGNOSTIC
+        ,pm_profile_id profile_id
+#endif
+        ) {
     close_unlocked();
+#if PM_HOME_STATIC_ARP_DIAGNOSTIC
+    if(home_arp_owned){stage=PM_NET_FAILED;return;}
+#endif
     uint64_t next=tcp_status.connection_id==UINT64_MAX?UINT64_MAX:tcp_status.connection_id+1;
     tcp_status=(pm_net_tcp_status){.connection_id=next};
     profile=p;proxy_target_connected=false;last_failure=PM_NET_FAIL_NONE;
@@ -534,6 +547,9 @@ static void begin_unlocked(const pm_profile *p) {
                     strlen(p->proxy_user)>255 || strlen(p->proxy_password)>255)) {
         stage=PM_NET_FAILED;return;
     }
+#if PM_HOME_STATIC_ARP_DIAGNOSTIC
+    if(!home_arp_prepare(p,profile_id)){stage=PM_NET_FAILED;return;}
+#endif
     tx_attach();
     pcb=tcp_new_ip_type(IPADDR_TYPE_V4);
     if(!pcb){RX_OBSERVE(pm_rx_fault,PM_RX_ALLOC_ERROR,0,);stage=PM_NET_FAILED;return;}
@@ -777,7 +793,15 @@ again:
 // transport buffers under the SDK lock, then release it before rendering.
 void pm_net_close(void){cyw43_arch_lwip_begin();close_unlocked();cyw43_arch_lwip_end();}
 void pm_net_begin(const pm_profile *p){
-    pm_ack_probe_connection();cyw43_arch_lwip_begin();begin_unlocked(p);cyw43_arch_lwip_end();}
+    pm_ack_probe_connection();cyw43_arch_lwip_begin();begin_unlocked(p
+#if PM_HOME_STATIC_ARP_DIAGNOSTIC
+        ,PM_PROFILE_COUNT
+#endif
+        );cyw43_arch_lwip_end();}
+#if PM_HOME_STATIC_ARP_DIAGNOSTIC
+void pm_net_begin_home_static_arp(const pm_profile *p,pm_profile_id id){
+    pm_ack_probe_connection();cyw43_arch_lwip_begin();begin_unlocked(p,id);cyw43_arch_lwip_end();}
+#endif
 void pm_net_poll(void){
     uint64_t started=pm_trace_clock();cyw43_arch_poll();
     uint64_t waiting=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,waiting);

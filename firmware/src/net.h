@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "rx_stats.h"
 #include "observation.h"
+#include "home_static_arp.h"
 
 typedef struct {
     const char *ssid, *password;
@@ -18,6 +19,9 @@ typedef enum { PM_NET_DOWN, PM_NET_TCP, PM_NET_SOCKS, PM_NET_WS, PM_NET_READY, P
 // EOF stages retain only this connection's copied bytes; never wait for more.
 bool pm_net_init(void);
 void pm_net_begin(const pm_profile *profile);
+#if PM_HOME_STATIC_ARP_DIAGNOSTIC
+void pm_net_begin_home_static_arp(const pm_profile *profile,pm_profile_id id);
+#endif
 void pm_net_poll(void);
 // Check latched errors/EOF deadline under the SDK lock, without SDK polling,
 // parsing or application writes. Failed/expired transports are closed.

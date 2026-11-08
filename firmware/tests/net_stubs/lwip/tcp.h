@@ -6,6 +6,9 @@ typedef int err_t;
 typedef uint16_t u16_t;
 #define ERR_OK 0
 #define ERR_MEM -1
+#define ERR_VAL -6
+#define ERR_RTE -4
+#define ERR_ARG -16
 #define SOF_KEEPALIVE 1
 #define TCP_WRITE_FLAG_COPY 1
 #define TCP_WND (16*1460)
