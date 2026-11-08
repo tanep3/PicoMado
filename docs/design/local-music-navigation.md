@@ -28,3 +28,7 @@ ContentPluginに既定no-opの純粋なnavigation_changed(context, active)を加
 ## 無音host受入
 
 停止→進入、pause→進入、EOF→再進入、再生中の重複、未選曲、失敗、離脱、旧状態互換、再起動/Hello、複数端末・incarnation、stale進捗、保存失敗atomicity、音量/mute不変、AVRCP toggle再開を確認する。focused Cargo/実App経路/Node UI/static検査を実行する。全Cargoは親と調整する。本番サービス、原本、USB、実音声は変更しない。独立受入、運用反映、効果確認、変更クローズは親が所有する。
+
+### 境界レビュー補足（実装前）
+
+既知EOFの印は通常のselection保存に含め、EOF→明示pause→保存/再起動→明示PLAYでも先頭から再開する。EOF観測そのものに追加の保存IOは導入しない。明示削除要求で該当曲を停止させる時はPausedとして画面進入の再生対象から除き、削除job完了前に同じ原本を再読込みしない。削除失敗後は明示PLAYで再試行できる。原本・metadataを失敗時に消さない既存契約は維持する。
