@@ -67,7 +67,10 @@
         "Integrated release/UF2 staged, not deployed while sleeping user has connected LBS; docs/evidence/BT-AUDIO-20261108-followup.md",
         "72642fa: opt-in HCI drain comparison, default unchanged; SDK-body host tests and target-TU compile passed",
         "344df92: bounded host deadline diagnostics; final Bluetooth 25 and transport 77 tests passed; not deployed",
-        "Limit16 full UF2 built (2c0ffb25), not flashed; passive TCP interval has no persistent stall; docs/evidence/BT-AUDIO-20261108-followup.md"
+        "Limit16 full UF2 built (2c0ffb25), not flashed; passive TCP interval has no persistent stall; docs/evidence/BT-AUDIO-20261108-followup.md",
+        "31fc242: negotiated host SBC sender with bounded credit, cancellation and terminal feedback; qualified regression evidence in docs/evidence/BT-AUDIO-20261108-sbc-sender.md",
+        "bacf317: fixed Apache-2.0 host SBC encoder statically integrated; no Pico SDK requirement",
+        "68ebc52: bounded SBC receiver sharing the existing 16KiB audio payload storage"
       ]
     },
     "independent_verification": {
@@ -81,7 +84,8 @@
         "docs/changes/BT-AUDIO-20261107.md",
         "New volume defaults to mute and new connection-role comparison are implemented on host only; not deployed or audibly validated.",
         "2026-11-08 user-authorized server0742d7b5 and LCDa053c4cf applied; all volume0/music stopped/hash preserved; initial BT reconnect failed, one saved-target retry connected. See docs/evidence/BT-AUDIO-20261108-followup.md.",
-        "2026-11-08 08:15-08:17 JST authorized server/LCD applied; all devices online; LBS connection failed; docs/evidence/BT-AUDIO-20261108-followup.md"
+        "2026-11-08 08:15-08:17 JST authorized server/LCD applied; all devices online; LBS connection failed; docs/evidence/BT-AUDIO-20261108-followup.md",
+        "2026-11-08: server31fc242 and LCD68ebc52 applied, HOME2 finite30-second SBC playback with no rebuffer/failure and positive user listening feedback; docs/evidence/BT-AUDIO-20261108-sbc-home2-live.md. AWAY not validated in that run; no independent closure."
       ]
     },
     "effectiveness_confirmation": {
