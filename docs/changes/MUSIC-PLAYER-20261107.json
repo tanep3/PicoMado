@@ -48,7 +48,8 @@
         "400 Cargo tests passed, 0 failed, 2 ignored with PICOMADO_PIC2GRAY4PX configured; /tmp/picomado-media-v2-configured-all-features.log",
         "Integrated release/UF2 staged, not deployed while sleeping user has connected LBS; docs/evidence/BT-AUDIO-20261108-followup.md",
         "docs/evidence/MUSIC-PLAYER-20261108-failure.md: terminal audio failure feedback; frozen-input all-features 409 passed, 0 failed, 2 ignored; not deployed",
-        "docs/evidence/MUSIC-PLAYER-20261108-streaming.md: final frozen source 446 passed, 1 existing host shutdown-timeout failure, 2 ignored; same-binary host rerun passed; music21/SBC9/UI15 passed; production deployment pending"
+        "docs/evidence/MUSIC-PLAYER-20261108-streaming.md: final frozen source 446 passed, 1 existing host shutdown-timeout failure, 2 ignored; same-binary host rerun passed; music21/SBC9/UI15 passed; production deployment pending",
+        "94fde75: streaming source/UI implementation; production candidate a8f944282ef96b78c34cc0e0fd548352b8070ebef7eb896d6c4e48eb18807ccd staged, embedded UI15/15 passed; deployment and PCM retirement not performed"
       ]
     },
     "independent_verification": {

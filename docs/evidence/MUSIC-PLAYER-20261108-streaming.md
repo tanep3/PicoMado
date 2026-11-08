@@ -42,6 +42,19 @@ After this correction, the only service input changed from the preceding freeze 
 
 Logs: `/tmp/picomado-stream-position-{compile,music,sbc,all,host-rerun,ui,static}.log`. All169 service input hashes and all six compiled test-binary hashes were verified unchanged after the complete run; binary hashes are in `/tmp/picomado-stream-position-test-binaries.json`. The source retains home UI commit5cc4d4b. Production release is built only after the implementation commit and rechecked against this manifest; its artifact, embedded UI verification and SHA are recorded with the staged candidate.
 
+## Staged release
+
+Implementation is committed on main as `94fde75e383a8e438a2a3f668dedd6c50b21c19e`. The production `--release --locked --features caricature-retention-delete --bin picomado-server -j1` build succeeded. All169 frozen input hashes were unchanged before and after the build. Home UI commit5cc4d4b is an ancestor.
+
+Candidate directory: `/home/tane/picomado-staging/20261108-streaming-94fde75`.
+
+- Binary SHA256: `a8f944282ef96b78c34cc0e0fd548352b8070ebef7eb896d6c4e48eb18807ccd`.
+- Embedded UI SHA256: `705c1c3069a4bd7ff57310949390aae1c732fe8de7603945c47254a4c365bef9`.
+- Full source HTML was found byte-for-byte in the binary and extracted. The extracted HTML passed all15 music/home UI tests, including removed preparation/conversion controls, player-first order and collapsed device settings.
+- `manifest.json`, `source-inputs.json`, `test-binaries.json`, extracted HTML and validation logs are retained beside the binary. The older pre-correction release is not the deployment candidate.
+
+The read-only pre-migration inventory found12 tracks with originals and exact-length PCM caches, totaling684,484,456 PCM bytes. All were still legacy metadata, so none is approved for removal yet. No hash/full-song decode or delete/move was performed. Rollback and later recoverable cleanup follow [the PCM retirement guide](../guides/local-music-pcm-retirement.md): preserve matching old binary, consistent SQLite/config backup and PCM until the new reader is verified. This inventory is not evidence of successful migration or audible playback.
+
 ## Not established
 
 No server install/restart, USB/device action, SSH, push or audio playback was performed by this implementation task. Final independent acceptance, deployment and hardware continuity/performance remain parent-owned. A100ms read timeout still becomes a terminal failure rather than fabricated silence. Loaded-host continuity is not proven; startup waiting is separated from device deadlines, not a relaxation of normal read/credit timing. Long resume offsets decode/discard from the start for sample-exact positioning and can hit the10-second startup limit.
