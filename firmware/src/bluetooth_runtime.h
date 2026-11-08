@@ -47,3 +47,6 @@ void pm_bt_runtime_link_snapshot(pm_bt_link_snapshot *out);
 bool pm_bt_runtime_audio_finish(uint64_t generation,uint64_t final_frame);
 
 uint8_t pm_bt_runtime_connect_at(uint64_t generation,const uint8_t address[6],uint32_t received_ms);
+
+/* Existing same-peer established link only; caller validates session ownership. */
+bool pm_bt_runtime_refresh_connected(uint64_t generation,const uint8_t address[6],uint32_t received_ms);

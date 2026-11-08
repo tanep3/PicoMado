@@ -401,3 +401,33 @@ At10:58 JST the fixed-source5fceee8 integrated LCD candidate was flashed and ver
 HOME=L13 first encountered two Wi-Fi NOIP retries, then acquired an address and maintained TCP ACK progress. Generation48 failed during DISCOVER recovery/teardown, not SET_CONFIGURATION; `/tmp/picomado-power-observe-20261108-105836` records it. At11:00–11:03 standard USB POWER/wake/SUB/DOWN/SUB opened NETWORK, selected and saved HOME2, and connected Aterm directly (`/tmp/picomado-home2-menu-usb.log`). HOME2 again had an initial TCP ACK stall with router-side ARP mapping, then recovered on the same conn2. This validates real profile selection/connection but not network stability. AWAY/tethering was not exercised.
 
 Server journal for session2512 resolves a misleading Bluetooth failure: generation50 command24 was sent11:01:03, expired11:01:34, and complete_success arrived11:02:04 with outcome=stale. The actual Bluetooth connection succeeded, but the server rejected the delayed report after its30-second deadline. After TCP recovered, one normal SetEnabled(true) request at11:03:19 (generation52 command25) failed immediately, status0x006a on USB. Prior SDK snapshot shows generation50/cid4 configured1/source17/media73. This is an actual-state versus timed-out-command-state split, not evidence that radio pairing itself failed. Current-token/target-aware idempotence or fresh status reconciliation is being investigated; stale success must not be blindly accepted. Records: `/tmp/picomado-home2-bt-reconnect-usb.log`, matching JSON and run log. No music was played in these trials.
+
+### Explicit same-peer connection refresh
+
+Spec 468c6e4 implements a fresh new-command result after revalidating current
+runtime ownership rather than reusing an expired success. Control preserves
+same incarnation/session/connect-target eligibility before replacing its token.
+Under the shared lock, the runtime checks its owner and both SDK lookup paths,
+opened signaling/A2DP/endpoint/media, a still-OPEN HCI ACL, configured encoder/rate,
+no pending retry/recovery/stop, and received-time budget. Only then it changes
+command generation and emits CONNECTED; there is no SDK command. Otherwise the
+old stop/connect path remains. This avoids a needless teardown of a healthy
+link, but cannot restore a link whose current ownership no longer satisfies
+these guards. 0x6a denotes pending L2CAP open failure on baseband disconnect;
+its cause in the observed attempt is not proven.
+
+Read-only server audit confirmed the existing fresh pending-token matching
+accepts this response and updates connection identity, so no server change or
+relaxed expiry is needed. Production helper host tests cover missing/mismatched
+SDK owner, missing/closed ACL, configuration/media/encoder absence, transition
+states, deadlines and target changes. The real control adapter tests initial
+connect/discover/session/incarnation/target exclusion, new-token success,
+old-generation disconnect rejection and current-generation disconnect reporting.
+The real signaling-release handler after refresh emits a disconnect with the
+updated runtime generation (test sink mirrors production default-generation
+assignment). Refresh preserves active PCM ring and its independent stream ID,
+accepted/consumed counters, prepared packet, streaming flag, codec and channel;
+control still resets old input press state on the new command. Five focused
+native tests and refresh/control ASan/UBSan runs pass; pinned-SDK ARM runtime
+syntax check and diff check pass. Full integration build and hardware behavior
+remain separate; no USB, radio, playback or service operations were performed.

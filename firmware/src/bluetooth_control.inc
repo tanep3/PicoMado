@@ -15,6 +15,7 @@ static unsigned bt_action;
 static uint8_t bt_target[6];
 static bool bt_initialized,bt_pending,bt_preparing,bt_waiting,bt_timed_out;
 static uint32_t bt_received_ms;
+static bool bt_refresh_allowed;
 static pm_bluetooth_input bt_input;
 static uint32_t bt_input_epoch;
 static bool bt_report(const char *report){
@@ -45,6 +46,7 @@ static pm_api_result api_bluetooth(uint8_t kind,const char *j){
             if(*p++!=(i==5?'"':':'))return PM_API_REJECTED;
         }
     }
+    bt_refresh_allowed=action==3&&bt_action==3&&bt_incarnation==inc&&bt_token.session==session&&!memcmp(bt_target,address,6);
     bt_token=t;bt_incarnation=inc;bt_action=action;memcpy(bt_target,address,6);bt_pending=true;bt_preparing=false;bt_waiting=true;bt_timed_out=false;
     bt_received_ms=to_ms_since_boot(get_absolute_time());
     pm_bluetooth_input_reset(&bt_input,t.generation,false);
@@ -85,7 +87,10 @@ static void poll_bluetooth(void){
     bool ready=bt_initialized&&pm_bt_runtime_ready();
     uint8_t status=0;
     if(bt_pending&&ready){
-        if(bt_action!=1&&!bt_preparing){
+        if(bt_action==3&&!bt_preparing&&bt_refresh_allowed&&
+           pm_bt_runtime_refresh_connected(bt_token.generation,bt_target,bt_received_ms)){
+            bt_pending=false;bt_refresh_allowed=false;
+        }else if(bt_action!=1&&!bt_preparing){
             /* Superseding an operation must release its radio/link before changing
              * runtime generation. Stop is asynchronous; ready() stays false until
              * inquiry and both connection owners have quiesced. */

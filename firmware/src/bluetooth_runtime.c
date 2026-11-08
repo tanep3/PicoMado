@@ -352,6 +352,7 @@ uint8_t pm_bt_runtime_scan(uint64_t gen){
  if(!ready||stopping||scanning||wanted||cid||!gen)return ERROR_CODE_COMMAND_DISALLOWED;
  generation=gen;uint8_t status=gap_inquiry_start(5);scanning=!status;return status;
 }
+#include "bluetooth_refresh.inc"
 uint8_t pm_bt_runtime_connect(uint64_t gen,const uint8_t address[6]){
  return pm_bt_runtime_connect_at(gen,address,btstack_run_loop_get_time_ms());
 }

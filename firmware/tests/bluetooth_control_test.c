@@ -21,7 +21,9 @@ static bool init_result=true,ready_result=true,queued;
 static pm_bt_event event;
 static unsigned init_calls,stop_calls,scan_calls,connect_calls,reports,inputs;
 static uint64_t last_stop,last_scan,last_connect;
-static unsigned locks;
+static unsigned locks,refresh_calls;
+static bool refresh_result;
+bool pm_bt_runtime_refresh_connected(uint64_t gen,const uint8_t address[6],uint32_t received){assert(locks&&address[5]==0x55&&now_ms-received<25000);refresh_calls++;if(refresh_result){assert(!queued);event=(pm_bt_event){.kind=PM_BT_CONNECTED,.generation=gen};queued=true;}return refresh_result;}
 static uint32_t get_absolute_time(void){return now_ms;}
 static uint32_t to_ms_since_boot(uint32_t t){return t;}
 static void cyw43_arch_lwip_begin(void){assert(!locks);locks++;}
@@ -51,6 +53,7 @@ static void pm_logf(const char *fmt,...){
 static void emit(pm_bt_event_kind kind,uint64_t generation){assert(!queued);event=(pm_bt_event){.kind=kind,.generation=generation};queued=true;}
 static pm_api_result command(uint64_t gen,uint64_t id,const char *action){char j[512];snprintf(j,sizeof j,"{\"incarnation\":1,\"session_epoch\":2,\"token\":{\"session\":2,\"generation\":%llu,\"command_id\":%llu,\"expires_ms\":1},\"action\":\"%s\",\"target\":\"00:11:22:33:44:55\"}",(unsigned long long)gen,(unsigned long long)id,action);return api_bluetooth(20,j);}
 static void reset(void){
+    refresh_result=bt_refresh_allowed=false;refresh_calls=0;
     bt_token=(pm_bt_command_token){0};bt_incarnation=0;bt_action=0;
     bt_initialized=bt_pending=bt_preparing=bt_waiting=bt_timed_out=false;
     bt_input=(pm_bluetooth_input){0};bt_input_epoch=0;bt_received_ms=0;
@@ -144,4 +147,18 @@ static void test_snapshot_log_bounds(void){
  complete_config_records=0;poll_bluetooth();assert(complete_config_records==3);
  memset(&fake_snapshot,0,sizeof fake_snapshot);
 }
-int main(void){test_snapshot_log_bounds();test_media_input();test_scan_and_supersede();test_deadline_and_init_failure();test_connect_stop_and_stale_session();puts("Bluetooth control: supersession, asynchronous stop, stale identity, deadline, init failure PASS");}
+static void test_same_peer_refresh(void){
+ reset();command(1,1,"connect");poll_bluetooth();finish_stop(1);
+ emit(PM_BT_CONNECTED,1);poll_bluetooth();assert(bt_input.connected);
+ unsigned stops=stop_calls,connects=connect_calls;refresh_result=true;
+ command(2,2,"connect");poll_bluetooth();assert(refresh_calls==1&&stop_calls==stops&&connect_calls==connects&&bt_input.connected&&strstr(last_report,"true"));
+ unsigned old_reports=reports;emit(PM_BT_DISCONNECTED,1);poll_bluetooth();assert(reports==old_reports&&bt_input.connected);
+ emit(PM_BT_DISCONNECTED,2);poll_bluetooth();assert(reports==old_reports+1&&!bt_input.connected);
+ refresh_result=false;command(3,3,"connect");poll_bluetooth();assert(refresh_calls==2&&stop_calls==stops+1);
+ reset();refresh_result=true;command(1,1,"connect");poll_bluetooth();assert(!refresh_calls&&stop_calls==1);
+ reset();command(1,1,"discover");poll_bluetooth();finish_stop(1);refresh_result=true;command(2,2,"connect");poll_bluetooth();assert(!refresh_calls&&stop_calls==2);
+ reset();command(1,1,"connect");poll_bluetooth();finish_stop(1);refresh_result=true;bt_target[0]=1;command(2,2,"connect");poll_bluetooth();assert(!refresh_calls&&stop_calls==2);
+ reset();command(1,1,"connect");poll_bluetooth();finish_stop(1);refresh_result=true;bt_incarnation=99;command(2,2,"connect");poll_bluetooth();assert(!refresh_calls&&stop_calls==2);
+ reset();command(1,1,"connect");poll_bluetooth();finish_stop(1);refresh_result=true;bt_token.session=99;command(2,2,"connect");poll_bluetooth();assert(!refresh_calls&&stop_calls==2);
+}
+int main(void){test_same_peer_refresh();test_snapshot_log_bounds();test_media_input();test_scan_and_supersede();test_deadline_and_init_failure();test_connect_stop_and_stale_session();puts("Bluetooth control: supersession, asynchronous stop, stale identity, deadline, init failure PASS");}

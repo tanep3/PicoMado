@@ -42,6 +42,8 @@ build bluetooth-audio tests/bluetooth_audio_test.c
 run bluetooth-audio
 build bluetooth-control tests/bluetooth_control_test.c
 run bluetooth-control
+build bluetooth-refresh tests/bluetooth_refresh_test.c
+run bluetooth-refresh
 build bluetooth-media tests/bluetooth_media_test.c
 run bluetooth-media
 build bluetooth-packet-policy tests/bluetooth_packet_policy_test.c
