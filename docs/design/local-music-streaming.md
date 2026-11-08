@@ -1,0 +1,24 @@
+# MUSIC-PLAYER-20261107: 原本からの逐次復号
+
+2026-11-08。既存PCM全曲変換をユーザー操作の前提から外す。原本から48kHz stereo s16leを有限chunkで復号し、既存の端末別音量と交渉済みSBC encoderへ渡す。ネットワーク、SBC交渉、音量曲線、encoder history、端末creditの意味は変更しない。
+
+## 所有と境界
+
+- socketのAudioTransferが唯一のsource readerを所有する。PluginJobExecutorは純粋specからreaderを開くadapterを提供する。共通層にlocal-music ID分岐を追加しない。既存stateless read_audioはPCM互換として残す。
+- readerは同一transferの順次offsetだけを受ける。spec/source generation/start_frame/display/sessionが変われば新しいreader、同曲を複数端末で再生する場合も別readerと別復号器。再readは直前の未採用chunkだけ有界に再利用可能にし、途中でcontrolが割り込んでもPCMを飛ばさない。非連続seekは新しいtransferで開き直す。
+- 開始位置はcanonical sample frame。ffmpegのresample後にatrimのstart_sampleで厳密に切る。非ゼロseekでは先頭から復号して捨てるCPU時間が生じるため、初回読取は最大10秒、以降100ms。初回待機中は既存control/creditを処理し、deadlineを延長しない。起動時だけno-credit watchdogを初回読取完了時へ合わせ、後続は既存3秒を維持。期限超過を成功・無音として隠さない。
+- bounded pipeと最大4800 frameのreadのみ。全曲PCMファイル・全曲メモリ・先読み無制限queueは作らない。復号器が先行できる量はOS pipeと有限codec bufferに制限される。stdout部分readを4byte frameに組み直し、正常終了と破損・異常終了を区別する。子processのstderrはnullとし出力詰まりを作らない。
+- stop/pause/track・display・session変更、socket終了、source失敗、timeoutはreaderを破棄し、このreaderが作成した子processだけをkill/waitする。原本・旧PCM・他streamを消さない。取消し可能なreadはpoll/readによる非blocking IOとし、dropされたfutureで消費済み未採用dataを失わない。
+
+## 資産とmetadata
+
+- Scanが原本のhashとffprobeで音声stream/有限durationを検査し、ユーザーの「準備」操作なしで一覧へ登録する。元の名前+内容hash keyを維持。音声durationから算出したframesはUI目安で、実際の復号frame数を断言しない。新しいmetadataはstreaming印を持ち、旧保存stateに印がなければPCM legacyとして読める。
+- 原本は従来同様256MiB、音声2時間以内、拡張子/形式allowlist、symlink拒否。ffprobe/ffmpegはfile,pipeのみ、限定demuxer、stdin無効、private作業コピーを使う。外部URL参照を含む入力を許可しない。作業コピーはcompressed原本だけでPCMではなく、reader終了時に削除する。probeは期限付き。metadata scanで不正な1曲は他曲を妨げず、曲名付きエラーを返す。
+- Scanは既存PCMだけの曲を保全し、同一keyの再登録は再生中specを変更しない。原本付きlegacyを新経路へ移行する場合は停止中だけとし、現在再生中のsource identityを裏で書き換えない。原本の無断削除や既存PCMの大掃除はしない。明示削除は従来の確認付き契約を維持する。
+- 準備APIは互換入口としてmetadata取得に置換。UIから変換/変換取消ボタンを除き、アップロード後scanで自動登録する。既存の再生UIを曲一覧の上に維持。
+
+## EOFと検証
+
+streaming specのframe_countはNone。実source EOF後にのみAudioFinishし、最後のSBC単位へのpaddingは0..127 frameまで。metadataの推定尺まで無音を捏造しない。最大2時間でreaderを終端または失敗させ、未知長の無限再生を許可しない。legacy Some(frame_count)の破損/早すぎるEOF拒否を維持する。最終chunk後にEOF確認が必要でも、creditを超えて送らない。読取・Finish後に既存identity再検証、音量適用後encodeの順序とhistoryを維持する。
+
+試験は実ffmpegの複数形式、非48k/mono→canonical、非ゼロ開始位置、短い/部分chunk、EOF/異常終了、取消/timeout/Drop子process終了、読取中control割込みと再read、端末独立、legacy PCMのみ、metadata不正・symlink・期限・cleanup、自動登録とUIを対象とする。既存SBC/PCM/音量/identity/credit回帰と設定済みCLIで全Cargo回帰、Node、static gateを実施。SSH/push/サービス/USB/音出しは担当範囲外。実装、独立検証、本番反映、実機効果を分離する。
