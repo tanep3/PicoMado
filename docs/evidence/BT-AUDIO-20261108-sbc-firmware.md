@@ -40,3 +40,29 @@ UF2 SHA-256:
 - E-ink_1 `16b7649af19d6209803c55aa8aa48a3b68798d7660049696b0da8e1f7ab48bb7`
 
 Remaining: parent integrated sender/receiver verification and independent approval; authorized device/server application; finite HOME/AWAY playback and actual listening, shared-radio/control/display behavior, volume latency and repeated recovery effectiveness.341ms queued audio is capacity, not proof of uninterrupted playback.
+
+## Parent deployment and old-server PCM observation (2026-11-08)
+
+The parent implementation worker subsequently applied the LCD artifact above to
+serial E661640843239D21. picotool verification completed at100% with OK and
+returned the device to application mode. Previous LCD artifact and manifest were
+preserved in `/home/tane/picomado-backups/20261108-pre-sbc-firmware`.
+Flash log: `/tmp/picomado-sbc-firmware-flash.log`; passive observation:
+`/tmp/picomado-power-observe-20261108-115245`. The device reported
+`audio-sbc-v1`, online, AWAY EEX1/TCP READY, Bluetooth connected, and matching
+received/rendered frame IDs. The deployed server remained the previous PCM-only
+binary; these observations do not establish an SBC handshake or SBC playback.
+
+A user-started PCM stream at11:54:04 JST failed at11:54:05 with accepted14464,
+consumed13824 and server-sent17920 canonical frames. USB counters show three
+rebuffer episodes,335ms cumulative wait and114ms maximum, followed by exhausted
+budget. A later authorized finite trial at volume30 reproduced accepted14464 /
+consumed13824 and three episodes totaling355ms (maximum126ms). Evidence:
+`/tmp/picomado-sbc-pcm-compat-20261108-115856/{usb.log,state.json}`. The trial was
+explicitly paused afterward and original volume36 restored. The remaining640
+frames cannot fill the normal1152-frame RTP packet. Rebuffer does operate and
+recover temporarily; repeated PCM starvation still exhausts the bounded budget.
+This is not continuous-playback acceptance. Host-side SBC sender integration and
+its actual negotiated end-to-end playback remain pending. Old-server UI still
+shows playing after the terminal device failure; the separate failure-feedback
+change is under regression and is not yet deployed.
