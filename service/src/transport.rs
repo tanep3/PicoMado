@@ -217,6 +217,7 @@ fn process_inner(
             incarnation: token.incarnation,
             session_epoch: token.session_epoch,
             media_input_version,
+            server_link: None,
         }));
     }
     let token = current.as_ref().ok_or("hello_required")?;
@@ -891,7 +892,13 @@ async fn writer_loop_with_progress<S>(
                     }
                     #[cfg(feature="stream-diagnostics")]
                     crate::diagnostics::duration(crate::diagnostics::Kind::ReplyQueue,reply.enqueued_at,current.as_ref().map_or(0,|s|s.session_epoch),0,0);
-                    let message=reply.message;
+                    let mut message=reply.message;
+                    if let Some(token) = &current {
+                        if let Err(reason) = annotate_welcome(&app, token, &mut message,
+                            write_progress.as_ref().and_then(WriteProgress::endpoints), crate::server_link::lookup).await {
+                            break reason;
+                        }
+                    }
                     let kind=wire_label(&message);
                     let reply_context=match &message {
                         WireMessage::InputAccepted{input_context,..}|WireMessage::PluginPosition{input_context,..}=>input_context.clone(),
@@ -1136,6 +1143,21 @@ async fn writer_loop_with_progress<S>(
 pub async fn serve_socket(socket: WebSocket, app: SharedApp) {
     serve_socket_with_progress(socket,app,None).await;
 }
+// Publication adapter: no App guard crosses the lookup await. The same
+// connection's writer retains Welcome-before-output and current-session fencing.
+async fn annotate_welcome<F, Fut>(app: &SharedApp, token: &SessionToken, message: &mut WireMessage,
+    endpoints: Option<crate::server_link::AcceptedEndpoints>, lookup: F) -> Result<(), &'static str>
+where F: FnOnce(crate::server_link::AcceptedEndpoints) -> Fut,
+      Fut: std::future::Future<Output=Option<crate::server_link::FreshHint>> {
+    let WireMessage::Welcome { incarnation, session_epoch, server_link, .. } = message else { return Ok(()); };
+    if *incarnation != token.incarnation || *session_epoch != token.session_epoch { return Err("welcome_binding_mismatch"); }
+    let requested = app.read().is_ok_and(|a| a.server_link_hint_supported(token));
+    let candidate = if requested { if let Some(endpoints) = endpoints { lookup(endpoints).await } else { None } } else { None };
+    if !app.read().is_ok_and(|a| a.session_is_current(token)) { return Err("session_not_current"); }
+    *server_link = candidate.and_then(crate::server_link::FreshHint::into_current);
+    Ok(())
+}
+
 async fn serve_socket_with_progress(socket:WebSocket,app:SharedApp,progress:Option<WriteProgress>){
     let (sink,stream)=socket.split();serve_split_with_progress(sink,stream,app,progress).await;
 }
@@ -2098,6 +2120,48 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn server_link_welcome_negotiation_freshness_and_session_fence() {
+        use crate::server_link::{AcceptedEndpoints, FreshHint, ServerLinkHint, CAPABILITY};
+        let temp = tempfile::tempdir().unwrap();
+        let mut state = crate::test_support::manual_frames_app(&temp.path().join("db")).unwrap();
+        let old = state.hello("old", ["lcd".into()].into(), 1).unwrap();
+        let new = state.hello("new", ["lcd".into(), CAPABILITY.into()].into(), 1).unwrap();
+        let app = Arc::new(crate::shared::Application::new(state));
+        let welcome = |t: &SessionToken| WireMessage::Welcome { incarnation:t.incarnation, session_epoch:t.session_epoch, media_input_version:None, server_link:None };
+        let endpoints = AcceptedEndpoints { local:"192.168.1.120:8888".parse().unwrap(), peer:"192.168.1.44:1234".parse().unwrap() };
+        let hint = ServerLinkHint { version:1, server_ipv4:"192.168.1.120".parse().unwrap(), client_ipv4:"192.168.1.44".parse().unwrap(), prefix_length:24, mac:"02:01:02:03:04:05".into() };
+        let mut reply = welcome(&old);
+        let original = encode(&reply).unwrap();
+        annotate_welcome(&app,&old,&mut reply,Some(endpoints), |_| async { panic!("old peer must not query OS") }).await.unwrap();
+        assert_eq!(encode(&reply).unwrap(),original);
+        let mut reply = welcome(&new);
+        annotate_welcome(&app,&new,&mut reply,None, |_| async { panic!("missing metadata must not query OS") }).await.unwrap();
+        assert_eq!(reply,welcome(&new));
+        annotate_welcome(&app,&new,&mut reply,Some(endpoints), |e| { assert_eq!(e,endpoints); async {
+            // A real App mutation can acquire its owner while this future runs.
+            assert!(app.try_lock().is_ok());
+            Some(FreshHint::for_test(hint.clone(),std::time::Instant::now()+Duration::from_secs(1)))
+        }}).await.unwrap();
+        assert!(matches!(&reply,WireMessage::Welcome{server_link:Some(h),..} if h == &hint));
+        annotate_welcome(&app,&new,&mut reply,Some(endpoints), |_| async {
+            Some(FreshHint::for_test(hint,std::time::Instant::now()-Duration::from_secs(1)))
+        }).await.unwrap();
+        assert_eq!(reply,welcome(&new));
+        annotate_welcome(&app,&new,&mut reply,Some(endpoints), |_| async { None }).await.unwrap();
+        assert_eq!(reply,welcome(&new));
+        let result = annotate_welcome(&app,&new,&mut reply,Some(endpoints), |_| async {
+            // Lookup completes after a newer accepted Hello replaces this session.
+            app.lock().unwrap().hello_from_connection("new",["lcd".into(),CAPABILITY.into()].into(),1,
+                crate::socket_progress::next_accept_order()).unwrap();
+            tokio::task::yield_now().await;
+            None
+        }).await;
+        assert_eq!(result,Err("session_not_current"));
+        let result = annotate_welcome(&app,&old,&mut welcome(&new),Some(endpoints), |_| async { panic!("mismatch") }).await;
+        assert_eq!(result,Err("welcome_binding_mismatch"));
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn bound_welcome_precedes_outbox_without_a_second_producer_command() {
         let temp = tempfile::tempdir().unwrap();
@@ -2120,7 +2184,7 @@ mod tests {
             &tx,
             WireMessage::Welcome {
                 incarnation: token.incarnation,
-                session_epoch: token.session_epoch, media_input_version: None },
+                session_epoch: token.session_epoch, media_input_version: None, server_link: None },
             token.session_epoch,
             None,
             Some(token.clone()),
@@ -2202,7 +2266,7 @@ mod tests {
         slow_tx
             .send(WriterCommand::reply(WireMessage::Welcome {
                 incarnation: 1,
-                session_epoch: 1, media_input_version: None }))
+                session_epoch: 1, media_input_version: None, server_link: None }))
             .await
             .unwrap();
         fast_tx
@@ -2212,7 +2276,7 @@ mod tests {
         fast_tx
             .send(WriterCommand::reply(WireMessage::Welcome {
                 incarnation: fast.incarnation,
-                session_epoch: fast.session_epoch, media_input_version: None }))
+                session_epoch: fast.session_epoch, media_input_version: None, server_link: None }))
             .await
             .unwrap();
         tokio::time::timeout(Duration::from_secs(2), async {
@@ -3353,7 +3417,7 @@ mod tests {
         tx.send(WriterCommand::Bind(session.clone())).await.unwrap();
         tx.send(WriterCommand::reply(WireMessage::Welcome {
             incarnation: 1,
-            session_epoch: 1, media_input_version: None }))
+            session_epoch: 1, media_input_version: None, server_link: None }))
         .await
         .unwrap();
         let old = crate::diagnostics::lock(&app, crate::diagnostics::Domain::Writer)

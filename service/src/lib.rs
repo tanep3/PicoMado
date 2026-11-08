@@ -17,6 +17,7 @@ pub mod eink_video;
 pub mod fetch;
 pub mod host;
 pub mod socket_progress;
+pub mod server_link;
 pub mod lcd_stream;
 pub mod maintenance;
 mod lcd_text;

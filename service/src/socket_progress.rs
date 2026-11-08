@@ -21,6 +21,7 @@ pub(crate) fn next_accept_order() -> NonZeroU64 {
 pub struct WriteProgress {
     bytes: Arc<AtomicU64>,
     accept_order: NonZeroU64,
+    endpoints: Option<crate::server_link::AcceptedEndpoints>,
     #[cfg(feature="boundary-observation")]
     reads: Arc<ReadObservation>,
 }
@@ -32,11 +33,12 @@ struct ReadObservation {
 }
 impl Default for WriteProgress {
     fn default() -> Self {
-        Self { bytes: Arc::default(), accept_order: next_accept_order(),
+        Self { bytes: Arc::default(), accept_order: next_accept_order(), endpoints: None,
             #[cfg(feature="boundary-observation")] reads: Arc::default() }
     }
 }
 impl WriteProgress {
+    pub(crate) fn endpoints(&self) -> Option<crate::server_link::AcceptedEndpoints> { self.endpoints }
     pub fn bytes(&self) -> u64 { self.bytes.load(Ordering::Relaxed) }
     pub(crate) fn accept_order(&self) -> NonZeroU64 { self.accept_order }
     #[cfg(feature="boundary-observation")]
@@ -104,7 +106,14 @@ impl<L:Listener> Listener for TrackedListener<L> {
     type Addr=L::Addr;
     async fn accept(&mut self)->(Self::Io,Self::Addr) {
         let (inner,addr)=self.0.accept().await;
-        (TrackedIo{inner,progress:WriteProgress::default()},addr)
+        let mut progress = WriteProgress::default();
+        // Optional TCP adapter: custom/generic IO retains its existing behavior.
+        // Values belong to this accepted stream, not the wildcard listener/fd.
+        if let Some(tcp) = (&inner as &dyn std::any::Any).downcast_ref::<tokio::net::TcpStream>() {
+            progress.endpoints = tcp.local_addr().ok().zip(tcp.peer_addr().ok())
+                .map(|(local, peer)| crate::server_link::AcceptedEndpoints { local, peer });
+        }
+        (TrackedIo{inner,progress},addr)
     }
     fn local_addr(&self)->io::Result<Self::Addr> { self.0.local_addr() }
 }
@@ -157,6 +166,7 @@ mod tests {
         let (new, _) = listener.accept().await;
         // No HTTP/WS/Hello has been polled: metadata already has the order.
         assert!(old.progress.accept_order() < new.progress.accept_order());
+        assert!(old.progress.endpoints().is_none());
         assert_eq!(old.progress.clone().accept_order(), old.progress.accept_order());
         let previous = new.progress.accept_order();
         drop(listener);
@@ -193,7 +203,7 @@ mod tests {
         let router=Router::new().route("/probe",get(move |ConnectInfo(p):ConnectInfo<WriteProgress>,ws:WebSocketUpgrade| {
             let tx=tx.clone();async move { ws.on_upgrade(move |mut socket|async move {
                 let before=p.bytes();socket.send(Message::Binary(vec![7;100].into())).await.unwrap();
-                tx.send((before,p.bytes())).await.unwrap();
+                tx.send((before,p.bytes(),p.endpoints())).await.unwrap();
             })}
         }));
         let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -201,7 +211,11 @@ mod tests {
         let server=tokio::spawn(async move {axum::serve(TrackedListener(listener),router.into_make_service_with_connect_info::<WriteProgress>()).await.unwrap()});
         let (mut client,_)=tokio_tungstenite::connect_async(format!("ws://{address}/probe")).await.unwrap();
         assert!(client.next().await.unwrap().unwrap().is_binary());
-        let (before,after)=rx.recv().await.unwrap();assert!(before>0&&after>=before+102);
+        let (before,after,endpoints)=rx.recv().await.unwrap();assert!(before>0&&after>=before+102);
+        let endpoints=endpoints.expect("accepted TCP endpoints");
+        assert_eq!(endpoints.local,address);
+        assert_eq!(endpoints.peer.ip(),address.ip());
+        assert_ne!(endpoints.peer.port(),0);
         drop(client);server.abort();let _=server.await;
     }
 }

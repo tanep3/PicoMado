@@ -876,6 +876,11 @@ impl App {
         self.runtime.outbox.contains_key(&id)
     }
 
+    pub fn server_link_hint_supported(&self, token: &SessionToken) -> bool {
+        self.runtime.world.devices.get(&token.device_id).is_some_and(|device|
+            session_current(device, token) && device.capabilities.contains(crate::server_link::CAPABILITY))
+    }
+
     pub fn session_is_current(&self, token: &SessionToken) -> bool {
         self.runtime
             .world

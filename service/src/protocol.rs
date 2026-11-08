@@ -91,6 +91,8 @@ pub enum WireMessage {
         session_epoch: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         media_input_version: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        server_link: Option<crate::server_link::ServerLinkHint>,
     },
     Settings {
         snapshot: DeviceSnapshot,
