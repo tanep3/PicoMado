@@ -61,7 +61,7 @@ No server install/restart, USB/device action, SSH, push or audio playback was pe
 
 ## Authorized production deployment and short hardware trial
 
-The integration worker deployed the staged 94fde75 binary on 2026-11-08 at approximately 14:56 UTC. SHA256 remained `a8f944282ef96b78c34cc0e0fd548352b8070ebef7eb896d6c4e48eb18807ccd`. Consistent SQLite, config and prior-binary backup is `/home/tane/picomado-backups/20261108-pre-streaming-music-server-145620`. All 12 original-backed tracks migrated to streaming. Served HTML no longer contains manual conversion or conversion-cancel controls. Original files and legacy PCM caches were preserved.
+The integration worker deployed the staged 94fde75 binary on 2026-11-08 at approximately 05:56 UTC (14:56 JST). SHA256 remained `a8f944282ef96b78c34cc0e0fd548352b8070ebef7eb896d6c4e48eb18807ccd`. Consistent SQLite, config and prior-binary backup is `/home/tane/picomado-backups/20261108-pre-streaming-music-server-145620`. All 12 original-backed tracks migrated to streaming. Served HTML no longer contains manual conversion or conversion-cancel controls. Original files and legacy PCM caches were preserved.
 
 Following the parent's explicit playback cue, E-ink_1 ran a 20-second HOME-network trial at volume 30. All 20 state samples remained online and playing, without a music error; reported position advanced from 816 to 19920 ms. The actual ffmpeg child read a private original-file copy and wrote 48 kHz stereo s16le to a pipe, rather than reading the old PCM cache. Device logs recorded negotiated 48 kHz SBC, bitpool 32, 845 packets and 973440 audio frames (20.28 seconds). The last packet carried 9 SBC frames, 694 bytes under the 704-byte MTU.
 
