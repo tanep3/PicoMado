@@ -431,3 +431,14 @@ control still resets old input press state on the new command. Five focused
 native tests and refresh/control ASan/UBSan runs pass; pinned-SDK ARM runtime
 syntax check and diff check pass. Full integration build and hardware behavior
 remain separate; no USB, radio, playback or service operations were performed.
+
+
+### Refresh candidate and user-operated AWAY playback
+
+The502b2cb integrated candidate (`0cf3f44299548597e10f0c272260fc015f23f9428b7d57816cba4a55061e56ee`) was flashed and verified at11:12 JST, log `/tmp/picomado-bt-refresh-flash.log`; prior582271 files are preserved separately. Full host/contract/USB regression passed. Source also contains fixed-width split BT configuration diagnostics and explicit ff10 reasons. Server remains unchanged.
+
+Passive record `/tmp/picomado-power-observe-20261108-111245` starts HOME2, reproduces initial TCP stall and subsequent reconnect. The user then selected AWAY and operated playback; this worker did not send playback/button commands in this interval. Follow-up `/tmp/picomado-power-observe-20261108-111558` confirms AWAY ACTIVE with EEX1-verified SOCKS endpoint. This is not accidental HOME/AWAY protocol mixing.
+
+AWAY streams1–3 each stopped at accepted4096/consumed3456; server had already sent7552. Streams4 and5 stopped at accepted11008/9856, consumed10368/9216, with server sent14464/13312. Server `record_sent` means WebSocket sink send completion, not Pico receipt. Every case has sent-consumed4096 and sent-accepted3456, consistent with consumption credit reaching the sender but replenishment not arriving before the endpoint's shortage timeout. No tcp_write_failed/backpressure_timeout appears in those USB traces. Existing source tick waits50ms when it cannot prepare a full9×128-frame SBC packet;640 remaining frames are insufficient for that normal packet. This supports a jitter/window problem, not proof of its exact network layer.
+
+High-precision journal `/tmp/picomado-away-audio-precise.log` gives first PCM send→first credit intervals141.888ms,132.376ms,122.816ms for streams1–3. These include processing and batching and must not be labeled pure network RTT. Current PCM window4096 at48000Hz is85.333ms. Wi-Fi transfer is uncompressed48kHz/16-bit/stereo (1.536Mbps audio only),256frames/1024B per maximum chunk plus46B application header. Only the Pico→LBS segment is SBC-compressed (observed9 SBC frames/694B payload per24ms, bitpool32). Rate/channel/codec transport changes require coordinated protocol and negotiation work; none were silently applied.
