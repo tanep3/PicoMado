@@ -12,28 +12,44 @@
   "design_artifacts": [
     "docs/changes/CI-SDK-20261108.md"
   ],
-  "design_commit": null,
+  "design_commit": "16288aee60a0a9b9bfba81ff9ef1333ff0944bf6",
   "deliverables": [
     "Pinned official SDK checkout and explicit PICO_SDK_PATH in the existing push/PR workflow",
     "Read-only SDK preflight and positive/negative unit tests",
     "Local validation evidence and scoped commits on canonical main"
   ],
   "dependencies": [
-    "Pico SDK 2.3.1 commit 079c6f39023649b154152db30f1d781e884879bc and its recorded submodules",
-    "User push and GitHub workflow re-enablement before hosted verification"
+    "User push of the completed main commits and a successful GitHub Actions run of that new commit"
   ],
   "stages": {
     "design": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "commit",
+          "commit": "16288aee60a0a9b9bfba81ff9ef1333ff0944bf6"
+        }
+      ]
     },
     "implementation": {
-      "state": "not_started",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        {
+          "kind": "check",
+          "path": "docs/changes/CI-SDK-20261108-verification.md",
+          "SHA256": "45e017960f52ab2477e8c2807357da6d6a626e10001f954e0029a86eb0bd4054",
+          "note": "Local CI-equivalent tests passed: Python 22, complete firmware host/USB scripts, server 474 passed and 3 ignored. No hosted CI result yet."
+        }
+      ]
     },
     "independent_verification": {
-      "state": "not_started",
-      "evidence": []
+      "state": "in_progress",
+      "evidence": [
+        {
+          "kind": "review",
+          "note": "2026-11-08 independent read-only review found no required correction; pin/path/recursive checkout/preflight/unchanged test commands verified; 8 unit tests independently passed. Parent acceptance remains pending."
+        }
+      ]
     },
     "operational_application": {
       "state": "not_started",

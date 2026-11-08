@@ -5,12 +5,28 @@ permissions:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    env:
+      # Pico SDK 2.3.1, matching the SDK used for local host-test validation.
+      PICO_SDK_REVISION: 079c6f39023649b154152db30f1d781e884879bc
+      PICO_SDK_PATH: ${{ github.workspace }}/.ci/pico-sdk
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout pinned Pico SDK
+        uses: actions/checkout@v4
+        timeout-minutes: 5
+        with:
+          repository: raspberrypi/pico-sdk
+          ref: ${{ env.PICO_SDK_REVISION }}
+          path: .ci/pico-sdk
+          submodules: recursive
+          persist-credentials: false
+      - name: Verify SDK test dependencies
+        run: python3 tools/check_ci_sdk.py --sdk "$PICO_SDK_PATH" --revision "$PICO_SDK_REVISION"
       - name: Python tests
         run: |
           python3 -m unittest discover -s tests -p 'test_hardware_profile_validation.py'
           python3 -m unittest discover -s tests -p 'test_public_export.py'
+          python3 -m unittest discover -s tests -p 'test_ci_sdk_validation.py'
       - name: Firmware host tests
         run: bash firmware/tests/run_host_tests.sh
       - name: Firmware USB tests
