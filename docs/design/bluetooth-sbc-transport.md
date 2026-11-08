@@ -111,3 +111,28 @@ Hardware evidence remains separate: authorized HOME/AWAY finite playback, observ
 1. **Host codec/transport worker:** vendor/provenance/build/opaque encoder wrapper; pure SBC config/frame codec and mode-aware sender; kind28/29 wire and kind30 codec; writer handshake/encoding/credit/cancel integration. Reuse plugin PCM assets and the current terminal-failure owner. Coordinate `transport_audio.rs` with the concurrent UI/failure worker before editing.
 2. **Firmware worker:** shared pure SBC validation/storage union; kind28/30 ingress and bounded Ready report; pinned config/epoch; pass-through prepare/send and mode-specific prefill. Coordinate `bluetooth_runtime.c` with the concurrent rebuffer worker before editing.
 3. **Integrator:** generated wire identity representations, cross-language fixtures, capability/old-peer matrix, independent review and full regressions. Do not mark independent/operational/effectiveness stages from worker self-tests. Parent owns closure.
+### Host source admission and failure-query responsibility
+
+Keep the existing public `audio_playback_for` query valid-only, so its callers
+retain the canonical-format guarantee. Add one crate-private raw-offer query
+for the socket's format admission and the application's terminal-failure
+matching. Both queries share the same current online session, remote owner,
+normal mode, selected plugin and display identity checks. Raw intent is not
+permission to read or transmit audio.
+
+The socket validates the complete `AudioPlaybackSpec` before AudioStart or
+AudioSbcStart, source IO, EOF or encoding. Invalid input produces one
+UnsupportedFormat terminal result at the unchanged source start. It does not
+resample, silently disappear, send a start, or automatically retry. The public
+valid-only query remains unchanged for other consumers.
+
+Terminal feedback must match the current raw display/plugin/spec exactly.
+For an invalid spec only UnsupportedFormat at `consumed == start_frame` may
+reach the plugin's failure callback; other reasons or progressed positions are
+rejected. A stale identity, source generation or different invalid spec cannot
+fail a newer selection. The content owner retains responsibility for exposing
+and ending its playback intent, just as for existing terminal delivery errors.
+Tests cover rejected stale/different spec feedback, invalid-rate admission
+without start/read/EOF, one terminal callback, and the unchanged valid-only
+public query. This explicitly relocates format admission for the socket rather
+than weakening the old query contract.
