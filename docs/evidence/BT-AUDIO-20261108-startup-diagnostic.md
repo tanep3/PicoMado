@@ -11,7 +11,7 @@ changed.
 `PM_BT_STARTUP_DIAGNOSTIC` accepts 0 (default/off), 1 (observation A), or 2
 (observation and ACK-wait B). `firmware/cmake/bluetooth_startup.cmake` validates the
 cache value. BT-disabled CMake targets do not receive the diagnostic definition.
-The normal mode0 controller path has no new runtime queries/logs/gates.
+The normal mode 0 controller path has no new runtime queries/logs/gates.
 
 The pure rule is in `firmware/src/bluetooth_startup.h`; the main-loop adapter is
 `bluetooth_startup_control.inc`. For a pending first-start command, mode2 samples
@@ -71,10 +71,10 @@ of unmeasured zero timing cost.
    - Exact argv, source hashes and unchanged original-object hashes:
      `/tmp/picomado-bt-startup-arm.e7j6mxft/report.json`.
    - Mode0 text553768 / BSS166608; mode1 text555336 / BSS166660;
-     mode2 text556192 / BSS166688 bytes. Relative to mode0, A adds1568/52 and
+     mode2 text556192 / BSS166688 bytes. Relative to mode 0, A adds1568/52 and
      B adds2424/80 bytes of text/BSS.
    - `arm-none-eabi-objdump -dr` after excluding only the filename heading is
-     identical for mode0 main and Bluetooth runtime versus the existing E-ink_1
+     identical for mode 0 main and Bluetooth runtime versus the existing E-ink_1
      objects. This establishes equal instructions/relocations for those two
      objects, not all debug/data bytes or whole-image identity. net.c separately
      contains the earlier approved terminal-TCP cleanup, so it was not claimed
@@ -183,7 +183,7 @@ USB-open delay. Capture: `/tmp/picomado-eink-update-observe-20261108-141636/`.
 It recorded wifi_start and zero dropped records in the early interval.
 MCU monotonic times: command_received12262ms, hci_on_begin12268ms,
 hci_on_return12568ms, hci_working12705ms, connect_begin12712ms.
-The same connection then retained ACK7177 while output advanced and the peer
+The same connection then retained ACK 7177 while output advanced and the peer
 ARP entry changed from router to server MAC. At about105.9s the connection
 was replaced. This is an observed association, not a causal BT diagnosis.
 
@@ -204,24 +204,24 @@ were USB program/reboot operations, not physical removal of power.
 
 After the user explicitly allowed diagnostic work to interrupt playback,
 preflight found the song stopped. B was written and verified, then recorded
-for150 seconds at `/tmp/picomado-eink-update-observe-20261108-142927/`.
+for 150 seconds at `/tmp/picomado-eink-update-observe-20261108-142927/`.
 The A-complete and B arrival-byte totals match their full USB logs; both have
 dropped=0 and no diagnostic log-limit marker.
 
-B received the command at11505ms, entered the gate at11511ms (ACK6926,
-end7177, queued2, READY), and expired at36506ms, 25.001s after receipt.
+B received the command at 11505ms, entered the gate at 11511ms (ACK 6926,
+end 7177, queued 2, READY), and expired at 36506ms, 25.001s after receipt.
 There were zero HCI_ON, HCI_WORKING, connect_begin and audio events throughout
-this B sample. ACK6926 remained unchanged in snapshots received at
-14:29:42.988 through14:30:58.000 JST. At14:31:13.052 the same connection1
+this B sample. ACK 6926 remained unchanged in snapshots received at
+14:29:42.988 through14:30:58.000 JST. At14:31:13.052 the same connection 1
 had ACK8149/end8149 and no unacknowledged output. Host state sampled at
-14:31:13.140 showed Receipt/Rendered2440227. The initial host Connected view
-belonged to old frame2440226 and is not evidence of a B Bluetooth connection.
+14:31:13.140 showed Receipt/Rendered 2440227. The initial host Connected view
+belonged to old frame 2440226 and is not evidence of a B Bluetooth connection.
 
-For comparison, A's ACK7177 was fixed across USB snapshots from14:16:51.529
-to14:18:21.414 JST. The kind9 ERR_MEM at uptime105.891520s was followed by
-connection2. Its initial silent stall therefore covers about90 seconds in
+For comparison, A's ACK 7177 was fixed across USB snapshots from14:16:51.529
+to14:18:21.414 JST. The kind9 ERR_MEM at uptime 105.891520s was followed by
+connection 2. Its initial silent stall therefore covers about90 seconds in
 those snapshots, not a proven100-second stall. HCI initialization itself took
-300ms. Additional display traffic began after uptime101.38s, and audio after
+300ms. Additional display traffic began after uptime 101.38s, and audio after
 113.020s; those later portions are not identical controlled conditions.
 
 Both samples changed the peer ARP entry from router MAC to actual server MAC
@@ -232,7 +232,44 @@ differences does not settle incidence, amplification or a shared root cause.
 SDK common initialization and BT-enabled WLAN firmware remain separate axes.
 
 After B, the ordinary diagnostic-OFF artifact `ecaad23d53a85ef64b042138ed27c2f7655402c231efaf5d8ff8f17cc4d8516a`
-was restored with100% verification. Passive post-restore capture is
+was restored with 100% verification. Passive post-restore capture is
 `/tmp/picomado-eink-update-observe-20261108-143235/`. No music or tone was
 started by the investigator. Further same-device BT compile-out comparison
 is prepared separately; no network setting was changed.
+
+## Same-device BT compile-out control
+
+The current-source E-ink_1 BT_OFF, diagnostic 0 artifact was verified and
+written: SHA256 `71a109989094514817ad51d6f25a7591f4090a71ea24c57008d22af304b44a28`,
+source `df3045b`. Config, SDK and ordinary ON artifact remained unchanged.
+The comparison changes the whole BT build path and its WLAN firmware choice,
+not just one blob in isolation.
+
+Capture `/tmp/picomado-eink-update-observe-20261108-143813/` contains no
+observer-initiated audio. Arrival byte totals match the USB log and dropped=0.
+Connection1 first reached ACK 7101 with no pending output while ARP held the
+router MAC. Rendered 2440229 was submitted at MCU 17.896689s, but later output
+advanced while ACK 7101 stayed fixed. TCP error -13 and a connection 2 WS retry
+were followed by connection 3, Receipt/Rendered 2440230 and advancing ACKs.
+Therefore BT integration is not a necessary condition for this failure class
+on this same device. Incidence and amplification remain unmeasured.
+
+The ordinary ON artifact `ecaad23d53a85ef64b042138ed27c2f7655402c231efaf5d8ff8f17cc4d8516a`
+was then restored and verified. Capture
+`/tmp/picomado-eink-update-observe-20261108-144114/` shows frame 2440231,
+LBS Connected and connection 1 ACK progress through the end of the 120-second
+observation. Initial router MAC/unacknowledged output was followed by host
+MAC/full ACK progress sooner in this trial. This variability must not be
+misreported as proof that ON is better or that restoring firmware fixed ARP.
+
+The exact observation is that the ACK position for data sent by the device
+does not advance. USB alone cannot distinguish device data not arriving,
+host ACK not being emitted, or returning ACK not arriving. Router MAC is not
+a sufficient failure condition: OFF initially communicated through it, and
+prior finite ICMP controls also succeeded. A/B also remained stalled for a
+while after the MAC became the host MAC. Path and timing need separate proof.
+
+Artifacts, manifests and A/B/OFF logs are privately retained at
+`/home/tane/picomado-staging/20261108-eink1-bt-startup-comparison/`. This is
+not an independent acceptance or closure. No new packet capture, network
+setting change, SSH or push was performed during these comparisons.
