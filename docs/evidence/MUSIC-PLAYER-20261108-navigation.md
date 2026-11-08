@@ -27,3 +27,16 @@ UI: `node --test service/tests/local_music_ui_test.js`, 9 passed, 0 failed. Incl
 `node --check` of the complete embedded script, `git diff --check`, and `python3 tools/project_gate.py static` passed. Static log: `/tmp/picomado-music-nav-static.log`.
 
 The full all-features Cargo regression, independent review/acceptance, operational deployment and physical effect confirmation remain owned by the parent; focused checks do not establish those stages.
+
+## 2026-11-08 production application / E-ink_1 navigation trial
+
+Server source `6ee9602` (includes navigation implementation `0318b5e`) applied after full Cargo regression 440 PASS / 0 FAIL / 3 existing ignored. Binary SHA256 `1da0433b3ad3237a622f62ad1398c807af4894aa343d3f3719acf246dfd8e196`. Deployment retained source files, 12 registered tracks, and device settings. Legacy states migrated conservatively to Paused; no playback on Hello/restart.
+
+With user-announced permission and HOME on E-ink_1, volume temporarily 30:
+
+1. Explicit STOP produced Stopped at position 0. USB UP left music for local-image; DOWN returned. Actual accepted navigation started playback without Web PLAY.
+2. After eight further seconds, API showed playing, position 10,800 ms; firmware emitted 464 SBC packets / 534,528 consumed PCM frames (11.136 seconds including command/stop tail). No audio failure; rebuffer duration zero (one terminal boundary counter increment at stop). Frame 2495716 rendered.
+3. Explicit PAUSE produced Paused at 10,800 ms. UP to local-image and DOWN to music preserved Paused, position and no-play state. Still paused after four further seconds; frame 2495891 rendered.
+4. Finally paused and restored prior volume **38**; mute unchanged. Bluetooth stayed connected and device online. No AWAY traffic/test initiated.
+
+Private evidence: `picomado-staging/20261108-remembered-autoplay-6ee9602/navigation-live/{before.json,results.json,usb.log}`. This verifies accepted device-input and packet/consumption behavior, not independent subjective sound quality or physical AVRCP button reception. Independent verification/closure remains with the parent/user.
