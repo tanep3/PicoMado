@@ -248,3 +248,139 @@ regular E-ink_1 ARM build with source/config/SDK/artifact hashes, then parent-ow
 same-device silent application/comparison/rollback. Native/sanitizer/model passes
 are not physical acceptance. Root-wide Cargo/build validation remains parent-
 coordinated to avoid duplicate heavy jobs. Workers do not flash or use SSH.
+
+## Remembered MAC extension — approved contract, not yet implemented (2026-11-08)
+
+Change ID remains BT-AUDIO-20261107. The user proposed retaining the previous
+IP/MAC and updating that memory when the host detects a mismatch, then explicitly
+approved implementation and E-ink_1 testing of per-HOME/HOME2 persistence,
+pre-TCP reuse, finite ordinary-ARP fallback and correction from the current host.
+This section supersedes the earlier v1 prohibition on Pico persistence only for
+this approved extension. It does not claim implementation, application or repair.
+The host still resolves its current accepted interface independently every time.
+
+The Welcome-only trial180258 installed the expected MAC at25.733s, reached
+ACK=send_end7199, then stalled after later sends. The pre-TCP fixed comparison
+181500 succeeded across retained snapshots despite a Wi-Fi retry/if2; restored
+Welcome trial181756 stalled again. Parent owns the complete hardware evidence.
+These results prioritize pre-TCP reuse; they do not prove a universal cause or
+that remembering a MAC will remedy every connectivity failure.
+
+### Connection and update rules
+
+- Keep separate records for immutable HOME0 and HOME2=2. AWAY1 neither reads,
+  installs nor updates them. The key is exact profile ID, configured SSID bytes
+  (maximum32, no password) and configured server IPv4. Store only that key, the
+  validated prefix1..30 and valid six-byte unicast MAC. Do not store client DHCP
+  address/session as reusable identity; same-subnet client address changes are
+  allowed after checking the new live network. Locally administered MACs remain
+  valid. The key prevents accidental mixing, not attacks or identical-name LANs.
+- Before TCP allocation, query/recheck current UP/link-UP IPv4 interface, direct
+  non-SOCKS route, configured target, same subnet and matching stored prefix.
+  Install/read back a matching remembered value under the existing SDK lock;
+  bind the effect to the new connection/profile/link scope. Never use a gateway
+  mapping as the server. Ineligible/missing/add/readback failure starts ordinary
+  ARP only after safe cleanup. Unexpected removal failure remains fail-closed.
+- A cache-seeded connection is provisional until its first valid Welcome. The
+  existing nonextending SERVER+SESSION app_s deadline covers TCP, WebSocket and
+  Hello/Welcome (default10s, configurable3..120s). A failed cached attempt marks
+  that exact value blocked in RAM for this boot; the next existing retry starts
+  without it. Re-JOIN/profile switching does not reset the block. Terminal
+  failure of the seeded session likewise forces an unseeded next attempt.
+  This bounds cached attempts, not the time until a reachable server succeeds.
+- Current valid Welcome replaces/refreshes the current mapping, even when a
+  provisional cache owner already exists. Revalidate profile/connection/link and
+  endpoint facts before effect. Valid changed data updates RAM immediately and
+  marks a durable update pending. The same value never causes a flash write.
+  Failed/stale/ambiguous/invalid hint never replaces durable memory. Missing or
+  invalid optional hint releases a provisional owner and retains old-server
+  compatible operation. Duplicates/late ACTIVE Welcome remain rejected.
+- Preserve no-TTL healthy-session ownership and existing terminal/close/link
+  cleanup. Do not add ACK-stall resets. A blocked exact old value remains blocked
+  this boot; a different validated value can be used on a later connection.
+  A fresh boot may attempt its durable value once again. Persist no failure
+  counter, last-used time, retry status or other per-connection flash churn.
+- Changed configured server IP/SSID means the old entry is ineligible; learn at
+  the new target. NIC replacement at the same IP can recover through the finite
+  ordinary-ARP attempt. This is not discovery of an unknown changed server IP.
+  Plaintext Welcome/session identity is still not cryptographic authentication.
+
+### Additive Hello contract agreed with the service implementer
+
+HOME/HOME2 advertise both `server-link-hint-v1` and `server-link-cache-v1`.
+Hello data can include optional `remembered_server_link` containing `version:1`,
+`server_ipv4` dotted string and six-byte colon-separated `mac`. It describes only
+valid memory for the current configured profile/key, including a value currently
+blocked from bootstrap, never the other profile. No match means omit the field.
+The server compares this claim with independently acquired current accepted
+local NIC facts and emits at most one bounded matched/mismatch/absent/invalid/
+unavailable diagnostic. The claim must never select its NIC/route/hint value.
+Invalid optional data is ignored without breaking a valid Hello. The existing
+Welcome `server_link` current value is returned unchanged; no new Welcome status
+field is needed. Capability absent/old peer preserves previous behavior. Pico
+performs its own comparison and does not trust a host comparison label.
+
+### Smallest independent storage and image boundary
+
+The approved initial choice is **one4KiB sector at physical FLASH_SIZE-16KiB**.
+The preceding8KiB BT store remains at FLASH_SIZE-12KiB; the final4KiB settings
+store remains at FLASH_SIZE-4KiB. Do not change their offsets, formats, IDs or
+contents. The legacy settings struct is56bytes with CRC at52 (`main.c:395–419`,
+`home2_profile_test.c`); its writer erases its whole sector. Merely extending it
+would let MAC learning erase unrelated profile/timeouts and makes old writers
+remove the extension. BT TLV sharing also couples this feature to BT_OFF and
+link-key storage. An independent cache has a smaller failure scope.
+
+Use a small append-only sector, not a general NVS framework: explicit byte order,
+magic/schema/length, bounded HOME/HOME2 snapshot, sequence and CRC in one256-byte
+page, with a separate256-byte commit-marker page and verified readback. Program
+pages only once, append while erased space exists, erase only this sector when
+full. Interrupted erase can lose the entire cache: this is explicitly allowed
+and falls back to normal ARP. A two-sector journal is unnecessary unless retaining
+an old cache through every erase becomes a requirement. Reject corrupt/unknown
+records without writing defaults. Do not wrap an exhausted sequence.
+
+RAM learning and durable saving are separate effects. Queue/coalesce the newest
+changed snapshot, suppress unchanged writes, and rate-limit commits (minimum60s
+between successful commits). Execute from main outside all network callbacks and
+lwIP locks, after the immediate Welcome/startup work, with no active audio or
+panel operation. Return/log safety-entry, erase/program/readback/commit outcomes;
+retain RAM/pending state on failure. Use finite SDK flash-safe admission with
+verified core/XIP ownership. IRQ blackout and actual erase time are not bounded
+by that admission timeout and need hardware acceptance. Do not assume the old
+settings writer or BT backend's unchecked infinite admission establishes safety.
+
+Reserve final16KiB in the **linker FLASH region** and reject UF2 blocks overlapping
+it, while keeping physical `PICO_FLASH_SIZE_BYTES` unchanged. The installed SDK's
+`pico_override_flash_size` also changes that C macro and would shift old storage,
+so do not use it. Use its target linker-script override path for a reduced
+`pico_flash_region.ld`, plus physical-offset assertions and complete UF2 checks.
+Current hint/original images end at0x10087f00/0x10085c00, below new start0x101fc000
+for this2MiB target. This proves these images have no payload there, not arbitrary
+future/old images. The parent flash helper uses `picotool load -v -f` without a
+whole-chip-erase option, and old runtime writers target only settings/BT. Actual
+reserved-region preservation across deployment still requires readback acceptance;
+no such device read or mutation occurred during this design task.
+
+### Prior pure-model evidence and remaining acceptance
+
+The earlier two-sector **proposal model**, not product code, ran8 Python tests:
+513 append byte cuts,4609 rollover byte cuts,104 corruption locations, schema/
+sequence conflicts, profile/key fences, dedup, replacement and finite fallback.
+All passed. This proves only that model's assertions, not the new one-sector
+implementation, flash safety/endurance or RF recovery. Private retained source:
+`/home/tane/picomado-staging/20261108-server-link-cache-design/` with `design.md`,
+`model_test.py`, `model-test.log`. SHA256 respectively:
+`e47dfb6b86e2df10af1592596cc75d4d7f4049d5f22b7d6bc2f44e9bbc0c1d9d`,
+`6a08a0fcdda9f4a9d9c5720572db827305decfafa91aa63ab9671e6e0c5892cc`,
+`8eaac8876997ca6290b9ee516bbc646ae52eb4074415933ab101214093e99cc7`.
+Its two-sector recommendation is superseded by the explicit one-sector choice
+above; it is retained as design history, not silently relabeled as final testing.
+
+Implementation must add actual codec/storage and owner/app tests, every one-sector
+power-cut boundary and out-of-sector preservation, old settings/BT_OFF regression,
+stale-NIC fallback, old/new Hello compatibility, linker overflow/UF2 negatives,
+and regular serial ARM build. Parent owns finite silent seed→reboot/pre-TCP-use→
+change/fallback comparison, original-artifact rollback, reserved-region readback
+and independent acceptance. No storage feature is considered shipped by this
+specification commit or by a model pass.
