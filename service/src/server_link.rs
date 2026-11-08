@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
+mod remembered;
+pub use remembered::{RememberedServerLink, CACHE_CAPABILITY};
+
 pub const CAPABILITY: &str = "server-link-hint-v1";
 const LOOKUP_BUDGET: Duration = Duration::from_millis(100);
 

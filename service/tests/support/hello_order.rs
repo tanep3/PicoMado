@@ -1,7 +1,7 @@
 // Included inside transport::tests::hello_order; all I/O here is in-memory.
 fn hello(id: &str) -> Message {
     Message::Binary(
-        encode(&WireMessage::Hello {
+        encode(&WireMessage::Hello { remembered_server_link: Default::default(),
             device_id: id.into(),
             screen_owner_epoch: 1,
             capabilities: vec![

@@ -189,6 +189,7 @@ fn process_inner(
         device_id,
         capabilities,
         screen_owner_epoch,
+        remembered_server_link: _,
     } = message
     {
         if current.is_some() {
@@ -474,6 +475,7 @@ impl ReplyObservation {
 }
 struct QueuedReply {
     observation: Option<ReplyObservation>,
+    remembered: Option<crate::server_link::RememberedServerLink>,
     message: WireMessage,
     cause: Option<crate::observation::Cause>,
     #[cfg(feature="stream-diagnostics")]
@@ -494,7 +496,7 @@ impl WriterCommand {
     #[inline(always)]
     fn reply(message:WireMessage)->Self {Self::reply_observed(message,None,None)}
     fn reply_observed(message:WireMessage,cause:Option<crate::observation::Cause>,binding:Option<SessionToken>)->Self {
-        let reply=QueuedReply{message,cause,observation:None,#[cfg(feature="stream-diagnostics")] enqueued_at:crate::diagnostics::mark()};
+        let reply=QueuedReply{message,cause,observation:None,remembered:None,#[cfg(feature="stream-diagnostics")] enqueued_at:crate::diagnostics::mark()};
         match binding {Some(token)=>Self::BoundReply(token,reply),None=>Self::Reply(reply)}
     }
 }
@@ -509,6 +511,9 @@ async fn enqueue_reply_common(tx:&tokio::sync::mpsc::Sender<WriterCommand>,messa
     enqueue_reply_traced(tx,message,_session,cause,binding,None).await
 }
 async fn enqueue_reply_traced(tx:&tokio::sync::mpsc::Sender<WriterCommand>,message:WireMessage,_session:u64,cause:Option<crate::observation::Cause>,binding:Option<SessionToken>,observation:Option<ReplyObservation>)->Result<(),()> {
+    enqueue_reply_with_remembered(tx,message,_session,cause,binding,observation,None).await
+}
+async fn enqueue_reply_with_remembered(tx:&tokio::sync::mpsc::Sender<WriterCommand>,message:WireMessage,_session:u64,cause:Option<crate::observation::Cause>,binding:Option<SessionToken>,observation:Option<ReplyObservation>,remembered:Option<crate::server_link::RememberedServerLink>)->Result<(),()> {
     #[cfg(feature="boundary-observation")]
     let mut observation=observation;
     #[cfg(feature="boundary-observation")]
@@ -516,7 +521,7 @@ async fn enqueue_reply_traced(tx:&tokio::sync::mpsc::Sender<WriterCommand>,messa
         trace.operation=trace.record(crate::observation::NetworkBoundary::ReplyQueue,crate::observation::Phase::Pending);
     }
     let mut command=WriterCommand::reply_observed(message,cause,binding);
-    match &mut command {WriterCommand::Reply(reply)|WriterCommand::BoundReply(_,reply)=>reply.observation=observation.clone(),_=>{}}
+    match &mut command {WriterCommand::Reply(reply)|WriterCommand::BoundReply(_,reply)=>{reply.observation=observation.clone();reply.remembered=remembered;},_=>{}}
     #[cfg(not(feature="stream-diagnostics"))]
     let result=tx.send(command).await.map_err(|_|());
     #[cfg(feature="stream-diagnostics")]
@@ -899,6 +904,12 @@ async fn writer_loop_with_progress<S>(
                             break reason;
                         }
                     }
+                    if let (Some(remembered), WireMessage::Welcome { server_link, .. }, Some(token)) = (reply.remembered, &message, &current) {
+                        // One bounded comparison fact for this accepted Hello.
+                        // This precedes sending; it does not claim Pico flash persistence.
+                        eprintln!("picomado server_link_cache id={} incarnation={} session_epoch={} stage=welcome_prepared remembered={} comparison={}",
+                            token.device_id,token.incarnation,token.session_epoch,remembered.state(),remembered.compare(server_link.as_ref()));
+                    }
                     let kind=wire_label(&message);
                     let reply_context=match &message {
                         WireMessage::InputAccepted{input_context,..}|WireMessage::PluginPosition{input_context,..}=>input_context.clone(),
@@ -1143,6 +1154,14 @@ async fn writer_loop_with_progress<S>(
 pub async fn serve_socket(socket: WebSocket, app: SharedApp) {
     serve_socket_with_progress(socket,app,None).await;
 }
+// The claim stays in this Hello's queued reply, never App/SQLite or a shared cache.
+fn remembered_claim(message: &WireMessage) -> Option<crate::server_link::RememberedServerLink> {
+    match message {
+        WireMessage::Hello { capabilities, remembered_server_link, .. }
+            if capabilities.iter().any(|c| c == crate::server_link::CACHE_CAPABILITY) => Some(*remembered_server_link),
+        _ => None,
+    }
+}
 // Publication adapter: no App guard crosses the lookup await. The same
 // connection's writer retains Welcome-before-output and current-session fencing.
 async fn annotate_welcome<F, Fut>(app: &SharedApp, token: &SessionToken, message: &mut WireMessage,
@@ -1309,6 +1328,7 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
             rx_messages += 1;
             let kind = wire_label(&message);
             let was_unbound = current.is_none();
+            let remembered = if was_unbound { remembered_claim(&message) } else { None };
             #[cfg(feature="ack-path-probe")]
             let probe_identity=crate::ack_probe::identity(&message);
             #[cfg(feature="ack-path-probe")]
@@ -1328,7 +1348,7 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
                         let queued = std::time::Instant::now();
                         #[cfg(feature="ack-path-probe")]
                         crate::ack_probe::record(crate::ack_probe::Event::ReplyQueueBegin,accept_order.get(),rx_messages,probe_identity.0,probe_identity.1,probe_identity.2,tx.capacity()as u64,0);
-                        if enqueue_reply_traced(&tx,reply,current.as_ref().map_or(0,|s|s.session_epoch),cause,binding,observations.as_ref().map(|source|ReplyObservation::new(source.clone(),accept_order.get(),api_operation))).await.is_err() {
+                        if enqueue_reply_with_remembered(&tx,reply,current.as_ref().map_or(0,|s|s.session_epoch),cause,binding,observations.as_ref().map(|source|ReplyObservation::new(source.clone(),accept_order.get(),api_operation)),remembered).await.is_err() {
                             end_reason = "writer_command_closed";
                             failed = true;
                             break;
@@ -1419,7 +1439,7 @@ mod tests {
             .await
             .unwrap();
         ws.send(ClientMessage::Binary(
-            encode(&WireMessage::Hello {
+            encode(&WireMessage::Hello { remembered_server_link: Default::default(),
                 device_id: "push".into(),
                 screen_owner_epoch: 1,
                 capabilities: vec![
@@ -1508,7 +1528,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let server = tokio::spawn({let app=app.clone();async move {axum::serve(listener,web::router(app)).await.unwrap()}});
         let (mut ws,_) = tokio_tungstenite::connect_async(format!("ws://{addr}/device")).await.unwrap();
-        ws.send(ClientMessage::Binary(encode(&WireMessage::Hello{
+        ws.send(ClientMessage::Binary(encode(&WireMessage::Hello{ remembered_server_link: Default::default(),
             device_id:"push-static".into(),screen_owner_epoch:1,
             capabilities:vec!["lcd".into(),crate::protocol::FRAME_BYTES_CAPABILITY.into(),crate::protocol::LCD_PUSH_CAPABILITY.into()],
         }).unwrap().into())).await.unwrap();
@@ -1560,7 +1580,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let server = tokio::spawn({let app=app.clone();async move {axum::serve(listener,web::router(app)).await.unwrap()}});
         let (mut ws,_) = tokio_tungstenite::connect_async(format!("ws://{addr}/device")).await.unwrap();
-        ws.send(ClientMessage::Binary(encode(&WireMessage::Hello{
+        ws.send(ClientMessage::Binary(encode(&WireMessage::Hello{ remembered_server_link: Default::default(),
             device_id:"paper-latest".into(),screen_owner_epoch:1,
             capabilities:vec!["eink".into(),crate::protocol::FRAME_BYTES_CAPABILITY.into(),crate::protocol::EINK_CLOCK_CAPABILITY.into()],
         }).unwrap().into())).await.unwrap();
@@ -1675,7 +1695,7 @@ mod tests {
                 .await
                 .unwrap();
             ws.send(ClientMessage::Binary(
-                encode(&WireMessage::Hello {
+                encode(&WireMessage::Hello { remembered_server_link: Default::default(),
                     device_id: "desk".into(),
                     capabilities: vec![cap.into()],
                     screen_owner_epoch: 1,
@@ -1812,7 +1832,7 @@ mod tests {
             process(
                 &app,
                 &mut current,
-                WireMessage::Hello {
+                WireMessage::Hello { remembered_server_link: Default::default(),
                     device_id: "desk".into(),
                     capabilities: vec![cap.into()],
                     screen_owner_epoch: 1,
@@ -1942,7 +1962,7 @@ mod tests {
                 .await
                 .unwrap();
             ws.send(ClientMessage::Binary(
-                encode(&WireMessage::Hello {
+                encode(&WireMessage::Hello { remembered_server_link: Default::default(),
                     device_id: "desk".into(),
                     capabilities: vec![cap.into(), crate::protocol::FRAME_BYTES_CAPABILITY.into()],
                     screen_owner_epoch: 1,
@@ -2118,6 +2138,40 @@ mod tests {
         ) -> Poll<Result<(), Self::Error>> {
             Poll::Ready(Ok(()))
         }
+    }
+
+    #[tokio::test]
+    async fn server_link_remembered_claim_is_capability_scoped_and_connection_local() {
+        use crate::server_link::{AcceptedEndpoints, FreshHint, ServerLinkHint, CACHE_CAPABILITY};
+        let raw = r#"{"type":"hello","data":{"device_id":"remembered","capabilities":["lcd","server-link-hint-v1","server-link-cache-v1"],"screen_owner_epoch":1,"remembered_server_link":{"version":1,"server_ipv4":"192.168.0.120","mac":"02:03:04:05:06:07"}}}"#;
+        let hello:WireMessage=serde_json::from_str(raw).unwrap();
+        let remembered=remembered_claim(&hello).expect("cache capability");
+        let mut old=hello.clone();
+        if let WireMessage::Hello { capabilities,.. }=&mut old { capabilities.retain(|c|c!=CACHE_CAPABILITY); }
+        assert!(remembered_claim(&old).is_none(),"unnegotiated claim is ignored");
+        let temp=tempfile::tempdir().unwrap();
+        let app=Arc::new(crate::shared::Application::new(crate::test_support::manual_frames_app(&temp.path().join("db")).unwrap()));
+        let mut current=None;
+        let welcome=process(&app,&mut current,hello,&mut AckDiagnostics::default()).unwrap().unwrap();
+        let token=current.unwrap();
+        let (tx,mut rx)=tokio::sync::mpsc::channel(1);
+        enqueue_reply_with_remembered(&tx,welcome,token.session_epoch,None,Some(token.clone()),None,Some(remembered)).await.unwrap();
+        let Some(WriterCommand::BoundReply(binding,mut reply))=rx.recv().await else {panic!("bound Welcome")};
+        assert_eq!(binding,token);assert_eq!(reply.remembered,Some(remembered));
+        let endpoints=AcceptedEndpoints { local:"192.168.0.120:8888".parse().unwrap(),peer:"192.168.0.44:1234".parse().unwrap() };
+        let actual=ServerLinkHint { version:1,server_ipv4:"192.168.0.120".parse().unwrap(),client_ipv4:"192.168.0.44".parse().unwrap(),prefix_length:24,mac:"2c:cf:67:11:72:f3".into() };
+        annotate_welcome(&app,&binding,&mut reply.message,Some(endpoints),|observed| {
+            assert_eq!(observed,endpoints,"lookup accepts only TCP facts, never the claim");
+            let actual=actual.clone();
+            async move { Some(FreshHint::for_test(actual,std::time::Instant::now()+Duration::from_secs(1))) }
+        }).await.unwrap();
+        let WireMessage::Welcome{server_link:Some(sent),..}=reply.message else {panic!("current hint")};
+        assert_eq!(remembered.compare(Some(&sent)),"mismatch");
+        assert_eq!(sent,actual,"mismatched memory cannot replace the current NIC value");
+        let mut invalid:WireMessage=serde_json::from_str(&raw.replace("02:03:04:05:06:07","broken")).unwrap();
+        assert_eq!(remembered_claim(&invalid),Some(crate::server_link::RememberedServerLink::Invalid));
+        if let WireMessage::Hello {capabilities,..}=&mut invalid {capabilities.retain(|c|c!=CACHE_CAPABILITY);}
+        assert!(remembered_claim(&invalid).is_none());
     }
 
     #[tokio::test]
@@ -2509,7 +2563,7 @@ mod tests {
         ));
         for (tx, id) in [(&slow_tx, "slow"), (&fast_tx, "fast")] {
             tx.send(Ok::<_, ()>(Message::Binary(
-                encode(&WireMessage::Hello {
+                encode(&WireMessage::Hello { remembered_server_link: Default::default(),
                     device_id: id.into(),
                     capabilities: vec!["lcd".into()],
                     screen_owner_epoch: 1,
@@ -2670,7 +2724,7 @@ mod tests {
         ));
         slow_tx
             .send(Ok::<_, ()>(Message::Binary(
-                encode(&WireMessage::Hello {
+                encode(&WireMessage::Hello { remembered_server_link: Default::default(),
                     device_id: "slow".into(),
                     capabilities: vec!["lcd".into()],
                     screen_owner_epoch: 1,
@@ -2751,7 +2805,7 @@ mod tests {
         ));
         fast_tx
             .send(Ok::<_, ()>(Message::Binary(
-                encode(&WireMessage::Hello {
+                encode(&WireMessage::Hello { remembered_server_link: Default::default(),
                     device_id: "slow".into(),
                     capabilities: vec!["lcd".into()],
                     screen_owner_epoch: 2,
@@ -2876,7 +2930,7 @@ mod tests {
         process(
             &app,
             &mut bound,
-            WireMessage::Hello {
+            WireMessage::Hello { remembered_server_link: Default::default(),
                 device_id: "desk".into(),
                 capabilities: vec!["lcd".into()],
                 screen_owner_epoch: 1,
@@ -2938,7 +2992,7 @@ mod tests {
         ));
         input
             .send(Ok::<_, ()>(Message::Binary(
-                encode(&WireMessage::Hello {
+                encode(&WireMessage::Hello { remembered_server_link: Default::default(),
                     device_id: "desk".into(),
                     capabilities: vec!["lcd".into()],
                     screen_owner_epoch: 1,
@@ -3246,7 +3300,7 @@ mod tests {
         ));
         input
             .send(Ok::<_, ()>(Message::Binary(
-                encode(&WireMessage::Hello {
+                encode(&WireMessage::Hello { remembered_server_link: Default::default(),
                     device_id: "desk".into(),
                     capabilities: vec!["lcd".into()],
                     screen_owner_epoch: 1,
@@ -3537,7 +3591,7 @@ mod tests {
         ));
         input
             .send(Ok::<_, ()>(Message::Binary(
-                encode(&WireMessage::Hello {
+                encode(&WireMessage::Hello { remembered_server_link: Default::default(),
                     device_id: "desk".into(),
                     capabilities: vec!["lcd".into()],
                     screen_owner_epoch: 1,
@@ -3704,7 +3758,7 @@ mod tests {
                 .unwrap();
         first
             .send(ClientMessage::Binary(
-                encode(&WireMessage::Hello {
+                encode(&WireMessage::Hello { remembered_server_link: Default::default(),
                     device_id: "desk".into(),
                     capabilities: vec!["lcd".into()],
                     screen_owner_epoch: 1,
@@ -3838,7 +3892,7 @@ mod tests {
                 .unwrap();
         second
             .send(ClientMessage::Binary(
-                encode(&WireMessage::Hello {
+                encode(&WireMessage::Hello { remembered_server_link: Default::default(),
                     device_id: "desk".into(),
                     capabilities: vec!["lcd".into()],
                     screen_owner_epoch: 2,
@@ -3899,7 +3953,7 @@ mod tests {
                     .await
                     .unwrap();
             ws.send(ClientMessage::Binary(
-                encode(&WireMessage::Hello {
+                encode(&WireMessage::Hello { remembered_server_link: Default::default(),
                     device_id: id.into(),
                     capabilities: vec!["lcd".into()],
                     screen_owner_epoch: 1,
@@ -4111,7 +4165,7 @@ mod tests {
             .await
             .unwrap();
         ws.send(ClientMessage::Binary(
-            encode(&WireMessage::Hello {
+            encode(&WireMessage::Hello { remembered_server_link: Default::default(),
                 device_id: "desk".into(),
                 capabilities: vec!["lcd".into()],
                 screen_owner_epoch: 1,
@@ -4315,7 +4369,7 @@ mod tests {
             .await
             .unwrap();
         ws.send(ClientMessage::Binary(
-            encode(&WireMessage::Hello {
+            encode(&WireMessage::Hello { remembered_server_link: Default::default(),
                 device_id: "radar-desk".into(),
                 capabilities: vec!["lcd".into()],
                 screen_owner_epoch: 1,

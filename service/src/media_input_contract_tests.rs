@@ -53,7 +53,7 @@ fn hello(app: &SharedApp, id: &str, media: bool) -> Option<SessionToken> {
     let welcome = submit(
         app,
         &mut current,
-        WireMessage::Hello {
+        WireMessage::Hello { remembered_server_link: Default::default(),
             device_id: id.into(),
             capabilities: caps,
             screen_owner_epoch: 1,

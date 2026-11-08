@@ -258,7 +258,7 @@ fn actual_rust_to_c_causal_input_frame_draw_in_lcd_and_button_eink() {
         process_with_observation(
             &app,
             &mut current,
-            WireMessage::Hello {
+            WireMessage::Hello { remembered_server_link: Default::default(),
                 device_id: profile.into(),
                 capabilities: vec![cap.into(), crate::protocol::FRAME_BYTES_CAPABILITY.into()],
                 screen_owner_epoch: 42,

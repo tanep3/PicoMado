@@ -85,6 +85,8 @@ pub enum WireMessage {
         device_id: String,
         capabilities: Vec<String>,
         screen_owner_epoch: u64,
+        #[serde(flatten)]
+        remembered_server_link: crate::server_link::RememberedServerLink,
     },
     Welcome {
         incarnation: u64,
@@ -700,7 +702,7 @@ mod tests {
     use crate::{LocalScreen, ScreenKind};
 
     fn hello() -> WireMessage {
-        WireMessage::Hello {
+        WireMessage::Hello { remembered_server_link: Default::default(),
             device_id: "desk".into(),
             capabilities: vec!["lcd".into()],
             screen_owner_epoch: 1,

@@ -25,7 +25,7 @@ async fn switch_probe_static_socket_for(device_id:&str) -> (
         .await
         .unwrap();
     ws.send(ClientMessage::Binary(
-        encode(&WireMessage::Hello {
+        encode(&WireMessage::Hello { remembered_server_link: Default::default(),
             device_id: device_id.into(),
             screen_owner_epoch: 1,
             capabilities: vec!["lcd".into(), crate::protocol::FRAME_BYTES_CAPABILITY.into()],
@@ -258,7 +258,7 @@ async fn ack_probe_admission_regressions(app:&SharedApp,existing:&tokio_tungsten
  use crate::ack_probe::Event;
  let addr=match existing.get_ref(){tokio_tungstenite::MaybeTlsStream::Plain(socket)=>socket.peer_addr().unwrap(),_=>panic!("localhost plain socket expected")};
  let url=format!("ws://{addr}/device");
- let hello=WireMessage::Hello{device_id:"ack-path-trace-regression".into(),screen_owner_epoch:1,capabilities:vec!["lcd".into(),crate::protocol::FRAME_BYTES_CAPABILITY.into()]};
+ let hello=WireMessage::Hello{ remembered_server_link: Default::default(),device_id:"ack-path-trace-regression".into(),screen_owner_epoch:1,capabilities:vec!["lcd".into(),crate::protocol::FRAME_BYTES_CAPABILITY.into()]};
  let previous_connection=crate::ack_probe::test_records().iter().rev().find(|r|r.event==Event::Bind).unwrap().connection;
  let (mut late,_)=tokio_tungstenite::connect_async(&url).await.unwrap();
  let (mut current,_)=tokio_tungstenite::connect_async(&url).await.unwrap();
@@ -277,7 +277,7 @@ async fn ack_probe_admission_regressions(app:&SharedApp,existing:&tokio_tungsten
  let connection=accepted_connection;
  late.send(ClientMessage::Binary(encode(&hello).unwrap().into())).await.unwrap();assert!(matches!(read_wire(&mut late).await,WireMessage::Error{..}));assert!(crate::ack_probe::active(connection));
  let (mut invalid,_)=tokio_tungstenite::connect_async(&url).await.unwrap();
- invalid.send(ClientMessage::Binary(encode(&WireMessage::Hello{device_id:"ack-path-trace-regression".into(),screen_owner_epoch:1,capabilities:vec![]}).unwrap().into())).await.unwrap();
+ invalid.send(ClientMessage::Binary(encode(&WireMessage::Hello{ remembered_server_link: Default::default(),device_id:"ack-path-trace-regression".into(),screen_owner_epoch:1,capabilities:vec![]}).unwrap().into())).await.unwrap();
  assert!(matches!(read_wire(&mut invalid).await,WireMessage::Error{..}));assert!(crate::ack_probe::active(connection));
  let (mut newest,_)=tokio_tungstenite::connect_async(&url).await.unwrap();
  let (held_tx,held_rx)=tokio::sync::oneshot::channel();let holder=crate::ack_probe::test_hold_state(held_tx);held_rx.await.unwrap();

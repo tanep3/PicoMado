@@ -291,7 +291,7 @@ async fn d02_review_real_reader_duplicate_confirmation_does_not_block_following_
     ));
     input
         .send(Ok::<_, ()>(Message::Binary(
-            encode(&WireMessage::Hello {
+            encode(&WireMessage::Hello { remembered_server_link: Default::default(),
                 device_id: "wire".into(),
                 capabilities: vec!["lcd".into(), crate::protocol::FRAME_BYTES_CAPABILITY.into()],
                 screen_owner_epoch: 1,

@@ -6,7 +6,7 @@ async fn network_ws_decode_api_parent_survives_split_message() {
     let state=crate::test_support::manual_frames_app(&temp.path().join("db")).unwrap();
     let source=state.observation_source();source.enable(true);
     let app=Arc::new(crate::shared::Application::new(state));
-    let hello=crate::protocol::encode(&WireMessage::Hello{device_id:"gap-fixture".into(),capabilities:vec!["lcd".into()],screen_owner_epoch:1}).unwrap();
+    let hello=crate::protocol::encode(&WireMessage::Hello{ remembered_server_link: Default::default(),device_id:"gap-fixture".into(),capabilities:vec!["lcd".into()],screen_owner_epoch:1}).unwrap();
     // A single application envelope crosses two WS binary messages. The trace
     // identifies the completing decode call, not a guessed TCP packet parent.
     let split=hello.len()/2;
