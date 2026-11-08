@@ -24,3 +24,5 @@ Incremental LCD cross-build passed without compiler warning/error lines. Log: `/
 The optional root gate was rerun. It remains rejected on the same one pre-existing route-fixture mismatch: `test_gate_routes.Routes.test_actual_firmware_build_sdk_flags_and_offline_flash`, missing approval fixture expected to fail but current route succeeds. 49 tests ran, one failed; public export and hardware profile checks passed. Log: `/tmp/picomado-bt-refresh-integrated-gate/structural.log`. Do not call this a complete root gate pass.
 
 No USB, flash, service, SSH, push or network-setting operation was performed by this worker. The new candidate's physical same-peer refresh, terminal-reason output and end-to-end effects remain pending parent application and independent verification. The saved HOME2 selection is not changed by this image's payload.
+
+The original 0cf3 UF2 and manifest/checks were subsequently retained, byte/SHA-verified, at `/tmp/picomado-candidate-backup-0cf3-20261108/` before the [font-corrected candidate](HOME2-PROFILE-20261108-font.md) replaced the working build outputs.

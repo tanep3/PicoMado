@@ -25,18 +25,21 @@
     "design": {
       "state": "verified",
       "evidence": [
-        "4ec8f52"
+        "4ec8f52",
+        "3d710c1: missing numeric glyph correction contract"
       ]
     },
     "implementation": {
-      "state": "in_progress",
+      "state": "verified",
       "evidence": [
         "ee29031",
         "5d0a8b0",
         "5fceee8",
         "docs/evidence/HOME2-PROFILE-20261108-host.md",
         "docs/evidence/HOME2-PROFILE-20261108-integrated.md",
-        "User found missing digit2 in actual HOME2 menu; production pixel/font coverage added under the existing HOME2 change."
+        "User found missing digit2 in actual HOME2 menu; production pixel/font coverage added under the existing HOME2 change.",
+        "af0db01: shared local status font with numeric glyphs and production pixel tests",
+        "docs/evidence/HOME2-PROFILE-20261108-font.md"
       ]
     },
     "independent_verification": {
