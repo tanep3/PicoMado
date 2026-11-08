@@ -70,3 +70,25 @@ config tests. No production DB/config was opened or changed to verify this.
 No SSH, USB, firmware flash, service restart, production playback or push was
 performed. The separate release candidate is built after fixing the commit;
 its staging manifest binds the exact commit, input hashes, features and artifact.
+
+## Parent deployment and physical feedback check
+
+2026-11-08 JST: parent applied the fixed6c1598a release candidate, SHA-256
+`9a977184241fd2ed8c1575a2a91bb3fc96f12519b7c70dc4a2d765d0f7977a85`.
+The old binary, config, API snapshots and SQLite backup (integrity_check=ok)
+are together at `/home/tane/picomado-backups/20261108-pre-audio-feedback-120824`.
+Service active and running-binary hash matched. Track catalog was identical
+before/after; selected asset, paused state and volume36 were preserved.
+LCD subsequently reconnected online with Bluetooth connected and matching
+received/rendered frame IDs. No automatic playback was started on deployment.
+
+The user then authorized a finite volume30 trial. With the old PCM transport
+still in use, AWAY starvation reproduced. At the second one-second poll,
+playing became false, position froze at15463ms, and error code device_failed
+with the message「端末が音声再生の失敗を報告しました。」was visible in the plugin API.
+It remained stopped at that position through the15-second observation.
+Evidence: `/tmp/picomado-sbc-pcm-compat-20261108-120938/{usb.log,state.json}`.
+The trial explicitly paused and restored volume36 at its end. This verifies
+physical-failure feedback into UI state, not browser visual inspection or
+continuous audio acceptance. Host SBC transport and AWAY continuity remain
+separate pending work. No push or independent stage closure was performed.
