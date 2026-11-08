@@ -69,10 +69,10 @@ of unmeasured zero timing cost.
    in an isolated output directory with the existing dependency objects.
    - Log: `/tmp/picomado-bt-startup-arm-20261108.log`.
    - Exact argv, source hashes and unchanged original-object hashes:
-     `/tmp/picomado-bt-startup-arm.m_p5rbxx/report.json`.
-   - Mode0 text553768 / BSS166608; mode1 text555328 / BSS166660;
-     mode2 text556264 / BSS166688 bytes. Relative to mode0, A adds1560/52 and
-     B adds2496/80 bytes of text/BSS.
+     `/tmp/picomado-bt-startup-arm.e7j6mxft/report.json`.
+   - Mode0 text553768 / BSS166608; mode1 text555336 / BSS166660;
+     mode2 text556192 / BSS166688 bytes. Relative to mode0, A adds1568/52 and
+     B adds2424/80 bytes of text/BSS.
    - `arm-none-eabi-objdump -dr` after excluding only the filename heading is
      identical for mode0 main and Bluetooth runtime versus the existing E-ink_1
      objects. This establishes equal instructions/relocations for those two
@@ -112,3 +112,22 @@ missing/suppressed records. A gate that simply waits for independently recoverin
 TCP does not establish that delaying BT repaired the earlier stall. One boot per
 mode does not establish failure incidence; repeated controlled starts and
 independent review/effectiveness remain pending.
+
+## Pre-deployment deadline correction
+
+Review after initial implementation8ae8205 found that a shared snapshot/lock
+wait could cross25s after the original timeout check. Mode2 now refreshes time
+after the network query and rechecks under the acquired runtime lock immediately
+before initialization. If the bound was crossed it performs no initialization;
+the next main poll reports the existing expiry. First-start identity is bound
+only after this admission, so an expired attempted wait cannot steal a later
+command's HCI markers. Modes0/1 keep their behavior.
+
+The fixture advances the fake clock24.9s→25.0s inside each wait separately.
+The8ae8205 implementation fails that new assertion, saved at
+`/tmp/picomado-bt-startup-old-deadline.f843zt0u/failure.log`; the corrected implementation
+passes the complete focused suite. All nine ARM TU compiles/three isolated links
+were repeated; the size and report above are the corrected results. Mode0
+instructions/relocations still match the unchanged normal E-ink_1 objects.
+An in-progress A build was stopped with exit130 before source changes; no
+pre-correction deployable pair was released. A/B staging is separate below.

@@ -31,8 +31,9 @@ static bool net_ready=true,ip_ready=true;
 static pm_net_tcp_status startup_tcp;
 static pm_bt_startup_times runtime_times;
 static unsigned startup_reads;
+static uint32_t startup_snapshot_delay,startup_lock_delay;
 static char startup_log[32768];static size_t startup_log_used;
-static void pm_net_tcp_snapshot(pm_net_tcp_status *out){assert(!locks);startup_reads++;*out=startup_tcp;}
+static void pm_net_tcp_snapshot(pm_net_tcp_status *out){assert(!locks);startup_reads++;now_ms+=startup_snapshot_delay;startup_snapshot_delay=0;*out=startup_tcp;}
 static inline int pm_net_state(void){assert(!locks);return net_ready?PM_NET_READY:PM_NET_DOWN;}
 static inline int cyw43_tcpip_link_status(int *s,int itf){assert(!locks&&s==&cyw43_state&&itf==0);return ip_ready?CYW43_LINK_UP:0;}
 void pm_bt_runtime_startup_snapshot(pm_bt_startup_times *out){assert(locks);*out=runtime_times;}
@@ -40,7 +41,11 @@ void pm_bt_runtime_startup_snapshot(pm_bt_startup_times *out){assert(locks);*out
 bool pm_bt_runtime_refresh_connected(uint64_t gen,const uint8_t address[6],uint32_t received){assert(locks&&address[5]==0x55&&now_ms-received<25000);refresh_calls++;if(refresh_result){assert(!queued);event=(pm_bt_event){.kind=PM_BT_CONNECTED,.generation=gen};queued=true;}return refresh_result;}
 static uint32_t get_absolute_time(void){return now_ms;}
 static uint32_t to_ms_since_boot(uint32_t t){return t;}
-static void cyw43_arch_lwip_begin(void){assert(!locks);locks++;}
+static void cyw43_arch_lwip_begin(void){assert(!locks);
+#if PM_BT_STARTUP_DIAGNOSTIC
+now_ms+=startup_lock_delay;startup_lock_delay=0;
+#endif
+locks++;}
 static void cyw43_arch_lwip_end(void){assert(locks==1);locks--;}
 bool pm_bt_runtime_init(void){assert(locks);init_calls++;
 #if PM_BT_STARTUP_DIAGNOSTIC
@@ -74,7 +79,10 @@ static void pm_logf(const char *fmt,...){
 #endif
  if(strncmp(line,"bt config ",10)==0||strncmp(line,"bt endpoint ",12)==0||strncmp(line,"bt transaction ",15)==0)complete_config_records++;
 }
-#include "../src/bluetooth_control.inc"
+#ifndef PM_BT_CONTROL_SOURCE
+#define PM_BT_CONTROL_SOURCE "../src/bluetooth_control.inc"
+#endif
+#include PM_BT_CONTROL_SOURCE
 static void emit(pm_bt_event_kind kind,uint64_t generation){assert(!queued);event=(pm_bt_event){.kind=kind,.generation=generation};queued=true;}
 static pm_api_result command(uint64_t gen,uint64_t id,const char *action){char j[512];snprintf(j,sizeof j,"{\"incarnation\":1,\"session_epoch\":2,\"token\":{\"session\":2,\"generation\":%llu,\"command_id\":%llu,\"expires_ms\":1},\"action\":\"%s\",\"target\":\"00:11:22:33:44:55\"}",(unsigned long long)gen,(unsigned long long)id,action);return api_bluetooth(20,j);}
 static void reset(void){
@@ -89,6 +97,7 @@ static void reset(void){
 #if PM_BT_STARTUP_DIAGNOSTIC
     net_ready=ip_ready=true;startup_tcp=(pm_net_tcp_status){.connection_id=1,.lastack=100,.snd_lbb=100,.valid=true};
     runtime_times=(pm_bt_startup_times){0};startup_reads=0;startup_log_used=0;startup_log[0]=0;
+    startup_snapshot_delay=startup_lock_delay=0;
     bt_startup_gate=(pm_bt_startup_gate){0};bt_startup_sampled_ms=0;
     bt_startup_sampled=bt_startup_tracking=bt_startup_attempted=false;
     bt_startup_command_connection=bt_startup_first_connection=bt_startup_first_generation=0;

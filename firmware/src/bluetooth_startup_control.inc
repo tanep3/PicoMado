@@ -57,6 +57,9 @@ static bool bt_startup_admit(void){
     pm_net_tcp_status s;pm_net_tcp_snapshot(&s);
     bool available=s.valid&&pm_net_state()==PM_NET_READY&&
         cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA)==CYW43_LINK_UP;
+    /* A shared-lock/query wait may cross the non-extending command deadline. */
+    now=to_ms_since_boot(get_absolute_time());bt_startup_sampled_ms=now;
+    if((uint32_t)(now-bt_received_ms)>=25000)return false;
     pm_bt_startup_step step=pm_bt_startup_observe(&bt_startup_gate,(pm_bt_startup_sample){
         .connection=s.connection_id,.ack=s.lastack,.last_byte=s.snd_lbb,
         .available=available,.unsent=s.unsent,.unacked=s.unacked},now);

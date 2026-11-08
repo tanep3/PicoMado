@@ -106,13 +106,22 @@ static void poll_bluetooth(void){
         }
 #endif
         if(!bt_startup_admit())return;
-        bt_startup_first_attempt();
     }
 #endif
 #if PM_BT_STARTUP_DIAGNOSTIC
     bool action_started=false;uint32_t action_ms=0;
 #endif
     cyw43_arch_lwip_begin();
+#if PM_BT_STARTUP_DIAGNOSTIC
+    if(!bt_initialized){
+#if PM_BT_STARTUP_DIAGNOSTIC == 2
+        if((uint32_t)(to_ms_since_boot(get_absolute_time())-bt_received_ms)>=25000){
+            cyw43_arch_lwip_end();return; /* Next main poll reports existing expiry. */
+        }
+#endif
+        bt_startup_first_attempt();
+    }
+#endif
     bool init_failed=false;
     if(!bt_initialized){bt_initialized=pm_bt_runtime_init();init_failed=!bt_initialized;}
     bool ready=bt_initialized&&pm_bt_runtime_ready();

@@ -58,6 +58,12 @@ static void test_expiry(void){
     begin();progress(100);init_result=false;now_ms=5100;poll_bluetooth();
     assert(init_calls==1&&reports==1&&!bt_pending&&bt_timed_out);
     poll_bluetooth();assert(init_calls==1&&reports==1&&strstr(startup_log,"event=init_failed"));
+    for(unsigned query=0;query<2;query++){
+        begin();progress(100);now_ms=24900;
+        if(query)startup_snapshot_delay=100;else startup_lock_delay=100;
+        poll_bluetooth();assert(now_ms==25000&&!init_calls&&!bt_startup_attempted&&!locks);
+        poll_bluetooth();assert(bt_timed_out&&reports==1&&!init_calls);
+    }
 }
 static void test_scope_and_loss(void){
     for(unsigned which=0;which<4;which++){
