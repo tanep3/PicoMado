@@ -168,3 +168,34 @@ flash, restart and capture actions. Parent-reported live observations and any
 A/B causal conclusion remain separate from this build-only evidence. The producer
 did not operate a device or service, and private configuration values were not
 printed or copied into this document.
+
+## Parent live observation A (2026-11-08 JST)
+
+A `998a5a225bce39a06f1434c8542246377a63316e2cd40438d226da6a931a673a`
+was verified and written to identified E-ink_1. A fresh full-flash backup was
+saved privately before these tests. The initial capture at
+`/tmp/picomado-eink-update-observe-20261108-141335/` began late and reported
+32 dropped records. It positively observed HCI_WORKING11906ms and connect
+11916ms, but cannot establish absent earlier events.
+
+The repeated A used one flash-and-observe operation, eliminating the separate
+USB-open delay. Capture: `/tmp/picomado-eink-update-observe-20261108-141636/`.
+It recorded wifi_start and zero dropped records in the early interval.
+MCU monotonic times: command_received12262ms, hci_on_begin12268ms,
+hci_on_return12568ms, hci_working12705ms, connect_begin12712ms.
+The same connection then retained ACK7177 while output advanced and the peer
+ARP entry changed from router to server MAC. At about105.9s the connection
+was replaced. This is an observed association, not a causal BT diagnosis.
+
+The test did not request playback. However, user activity started audio in
+the later portion of A (the capture contains `bt audio begin stream=1`).
+That later playback/backpressure/reconnect interval is not an otherwise
+identical no-audio control. It must not be pooled with the initial silent
+startup interval for timing comparisons.
+
+B was attempted only after A completed. Its preflight observed playing=true
+and stopped before calling picotool. No B write occurred, no playback was
+stopped, and no network settings changed. The device remains on observation
+A, which retains normal startup behavior. B comparison and restoration of
+the ordinary diagnostic-OFF artifact await an idle device. All restarts here
+were USB program/reboot operations, not physical removal of power.
