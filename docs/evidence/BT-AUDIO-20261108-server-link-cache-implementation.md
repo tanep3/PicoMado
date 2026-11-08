@@ -117,8 +117,8 @@ original artifacts were unchanged across the build. Service work is separate.
   are in the manifest. There are no linked core1-launch or RTOS-task symbols.
 
 The generated linker region ends at `0x101fc000` (physical 2 MiB minus 16 KiB).
-An actual ARM linker boundary fixture fits the last permitted byte and rejects
-an overflowing section. An independent compile assertion confirms the physical
+An actual ARM linker fixture accepts a small section and rejects an overflowing
+section; the replacement candidate below additionally tests the full span. An independent compile assertion confirms the physical
 flash-size macro remains 2,097,152. Product UF2 verification passes all 2,200
 blocks: payload end `0x10089800`, below cache start `0x101fc000`. Cache, BT and
 legacy settings therefore are outside the payload. This verifies file/linker
@@ -184,3 +184,43 @@ After this correction, actual owner/main-deadline 56 checks, actual main BT OFF/
 argument to the v1 runner was removed and the full runner then passed.
 Same-flags ARM translation-unit preview reduces scan to 56, flush to 56 and
 encode to 48 bytes; regular source-fixed artifact checks follow separately.
+
+
+### Replacement candidate after scratch correction
+
+Implementation commit `ad20ad321c0fcf524d78a97e64e79c68a83baf7d` is frozen for
+this regular `-j1` build. It supersedes the withheld `2b700edd...` candidate.
+
+- Private staging: `/tmp/picomado-server-link-cache-scratch-deploy.yzn_e9v3/`.
+- `cache-E-ink_1.uf2`: 1,126,400 bytes, SHA256
+  `a30bd867bd3a4b8a8690b9be402e516700b1f45668f372ac3601c60815883e31`.
+- `manifest.json` SHA256
+  `a843029da705764a8fb74e5cb467d03bf2f49ccea322954f06a4d9e0ed298e65`.
+- ELF SHA256 `f4386a902696d45406d5b83d6cfb2b3e01128ccab8e411e303bd42822970dd21`;
+  text 569,320, data 0, BSS 169,148 bytes. Actual linked BSS is 2,128 bytes more
+  than the withheld candidate; the compiler/linker layout is authoritative.
+
+Actual ARM frames now are main 896, flush 56, scan 56 and encode 48 bytes: the
+identified nested codec path is 1,056 bytes instead of 3,232. This leaves much
+more of the 4,096-byte core0 stack for other calls/interrupts, but is still not
+an IRQ-inclusive runtime high-water proof. `stack-usage.json` records the frames.
+Flash callback/erase/program remain in SRAM and the final ELF uses the SDK's
+weak default flash-safety helper, with no core1 launch/RTOS symbols. The actual
+compile-flags preprocessing and installed SDK native/sanitized tests all pass
+again under `sdk-flash-safety/`; their summary hash is in the manifest.
+
+Source/config/SDK/original-artifact hashes are unchanged across the build, and
+feature-OFF main/net instructions and relocations still equal the original
+normal build. The UF2's 2,200 blocks end at `0x10089800`, below reserved
+`0x101fc000`. `linker-boundary/fit-full*` additionally verifies a 2,080,768-byte
+section fits exactly to the permitted FLASH end; one byte more is rejected.
+Physical flash remains 2 MiB. Private config and SDK identities remain those
+listed above. Original normal UF2 and the previous candidate are retained.
+
+The initial metadata writer reused its log-path variable as an open stream after
+ARM compilation/linking completed. Metadata-only resumption corrected this;
+it did not repeat the ARM build or alter product inputs. Both driver/resume logs
+are retained in `/tmp/picomado-server-link-cache-scratch-build-driver.log` and
+`/tmp/picomado-server-link-cache-scratch-resume.log` respectively. No hardware
+was touched. Parent owns selection, cold save/readback, warm pre-TCP use, stored
+BT/settings preservation, radio acceptance and rollback decisions.
