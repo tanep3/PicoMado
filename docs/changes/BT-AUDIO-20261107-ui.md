@@ -19,3 +19,14 @@ Bluetoothスピーカーを常時表示し、端末別の接続・操作設定�
 - 開閉を保存するためにサーバAPIや永続設定を追加しない。Bluetooth操作、音量・ミュート、設定送信、削除確認と対象の内容は変えない。
 - 無音DOM試験で表示順・初期閉鎖・常時表示、繰り返し自動更新、開閉を直接変更した直後の更新、端末独立・incarnation変更、設定保存と削除確認の対象を検証する。旧ソースで自動閉鎖の再現を確認する。
 - 独立レビュー、本番適用、実画面確認、変更全体の終了判断は親が所有する。実音再生とファーム操作は行わない。
+
+
+## 無音UI検証
+
+仕様コミット `767ab65` 後、既存のdetails開閉スナップショットを端末ID・incarnation・領域で
+結ぶ形へ変更した。Bluetoothは通常div、端末設定はその下のdetails、管理・削除も同じ保持対象。
+`ui_device_disclosure.test.cjs` の8試験はPASS。実rendererとrefreshManagedを実行し、
+開閉・3回更新・端末順序変更・別incarnation・BTなし・設定保存・音量とmuteコマンド・
+削除確認への入口を確認した。DOMのopenプロパティを直接変えるため、toggleイベントの非同期発火に依存しない。
+旧UIでは管理detailsが最初のrefreshで閉じる再現を確認した。
+ログ: `/tmp/picomado-device-ui-{frozen,negative}.log`。本番反映と独立確認は別途記録する。

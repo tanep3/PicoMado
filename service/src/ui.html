@@ -43,6 +43,7 @@
     .button{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:9px 16px;border:1px solid transparent;border-radius:9px;font-size:.86rem;font-weight:780;white-space:nowrap}
     .button.primary{background:#68d6c9;color:#082322}.button.primary:hover:not(:disabled){background:#98e9df}.button.secondary{border-color:#4a5d6d;background:#263542;color:#e6f0f5}.button.secondary:hover:not(:disabled){background:#344858}
     .button.danger{border-color:#ab5d64;background:#51292e;color:#ffe2e4}.button.danger:hover:not(:disabled){background:#70363d}
+    .device-settings>summary{cursor:pointer;color:#c6d5e2;font-size:.88rem;font-weight:750}
     .danger-zone{margin-top:34px;padding:18px;border:1px solid #5a3d45;border-radius:11px;background:#241d27}.danger-zone summary{cursor:pointer;color:#ffd3d7;font-size:.85rem;font-weight:750}.danger-zone p{margin:12px 0;color:#c5adb2;font-size:.83rem}
     .empty{padding:24px;border:1px dashed #435567;border-radius:10px;color:#9cabb9;text-align:center}
     .plugin-card{max-width:820px}.plugin-breadcrumb{margin-bottom:15px;color:#8da6b8;font-size:.85rem}.plugin-breadcrumb a{color:#86dfd5}.plugin-breadcrumb a:hover{text-decoration:underline}
@@ -169,23 +170,24 @@
         label.append(check,el('span',labels[id]||id));toggles.append(label);
       });
       pluginArea.append(toggles);card.append(pluginArea);
-      const settings=el('form',undefined,'subsection');settings.append(el('p','端末別の接続・操作設定','section-label'));
+      renderBluetooth(card,d);
+      const settingsArea=el('details',undefined,'subsection device-settings');settingsArea.dataset.deviceDisclosure=JSON.stringify([d.id,d.incarnation,'settings']);settingsArea.append(el('summary','端末別の接続・操作設定'));
+      const settings=el('form');
       const fields=el('div',undefined,'field-grid');const inputs=deviceFields.map(([key,label])=>field(fields,key,label,d.desired[key]));settings.append(fields);
       const save=button('端末設定を保存','primary');save.type='submit';settings.append(save);
       settings.onsubmit=async event=>{event.preventDefault();if(!settings.reportValidity())return;save.disabled=true;
         const value={...d.desired};inputs.forEach(i=>value[i.dataset.key]=Number(i.value));
         const ok=await run(()=>api(`/api/devices/${encodeURIComponent(d.id)}/settings`,'PUT',{incarnation:d.incarnation,expected_revision:d.desired_revision,settings:value}),'端末設定を保存しました');if(!ok)save.disabled=false;
       };
-      card.append(settings);
-      renderBluetooth(card,d);
-      const danger=el('details',undefined,'danger-zone');danger.append(el('summary','端末の管理・削除'));
+      settingsArea.append(settings);card.append(settingsArea);
+      const danger=el('details',undefined,'danger-zone');danger.dataset.deviceDisclosure=JSON.stringify([d.id,d.incarnation,'management']);danger.append(el('summary','端末の管理・削除'));
       danger.append(el('p','端末の登録情報を削除します。再接続すると新しい端末として登録されます。'));
       const remove=button(`${d.id} を削除`,'danger');remove.type='button';remove.onclick=()=>openDelete(d);danger.append(remove);card.append(danger);
       list.append(card);
     }
     function renderBluetooth(card,d){
       const b=d.bluetooth;if(!b)return;
-      const area=el('details',undefined,'subsection');area.dataset.bluetooth=d.id;area.append(el('summary','Bluetoothスピーカー'));
+      const area=el('div',undefined,'subsection');area.dataset.bluetooth=d.id;area.append(el('p','Bluetoothスピーカー','section-label'));
       const names={offline:'端末オフライン',unsupported:'対応ファームが必要',disabled:'OFF',idle:'待機中',discovering:'探索中',pairing:'ペアリング中',connecting:'接続中',connected:'接続済み',stopping:'停止中',failed:'接続・操作失敗'};
       area.append(el('p',names[b.observed]||b.observed,'plugin-note'));
       const path=`/api/devices/${encodeURIComponent(d.id)}/bluetooth`;
@@ -672,11 +674,11 @@
     }
 
     function render(){
-      const openBluetooth=new Set([...main.querySelectorAll('details[data-bluetooth][open]')].map(e=>e.dataset.bluetooth));
+      const openDeviceDisclosures=new Set([...main.querySelectorAll('details[data-device-disclosure][open]')].map(e=>e.dataset.deviceDisclosure));
       main.replaceChildren();const id=location.pathname.startsWith('/plugins/')?location.pathname.split('/')[2]:null;
       document.querySelectorAll('nav a').forEach(a=>{if(a.pathname===location.pathname)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
       if(id)renderPlugin(id);else renderHome();
-      for(const e of main.querySelectorAll('details[data-bluetooth]'))e.open=openBluetooth.has(e.dataset.bluetooth);
+      for(const e of main.querySelectorAll('details[data-device-disclosure]'))e.open=openDeviceDisclosures.has(e.dataset.deviceDisclosure);
     }
     Promise.all([api('/api/state'),api('/api/plugins/weather/options')]).then(([state,options])=>{current=state;weatherOptions=options;loadManaged().then(render).catch(error=>say(error.message,true))}).catch(error=>say(error.message||'読み込みに失敗しました',true));
     function managedRefreshBlocked(){return busy||deleteDialog.open||document.querySelector('dialog[open]')||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)}
