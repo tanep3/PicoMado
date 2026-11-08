@@ -50,6 +50,7 @@ build bluetooth-control tests/bluetooth_control_test.c
 run bluetooth-control
 python3 tests/run_bluetooth_startup_tests.py
 python3 tests/run_home_static_arp_tests.py --sdk "${PICO_SDK_PATH:-$root/../../pico-sdk}" --out "$work/home-static-arp"
+python3 tests/run_server_link_hint_tests.py --out "$work/server-link-hint"
 build bluetooth-refresh tests/bluetooth_refresh_test.c
 run bluetooth-refresh
 build bluetooth-media tests/bluetooth_media_test.c

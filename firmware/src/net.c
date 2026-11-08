@@ -103,6 +103,9 @@ static uint8_t tx_packet[1040];
 static char upgrade_request[320];
 static uint8_t socks_auth_request[513];
 static ip_addr_t server_addr, proxy_addr;
+#if PM_SERVER_LINK_HINT
+#include "server_link_owner.inc"
+#endif
 #if PM_HOME_STATIC_ARP_DIAGNOSTIC
 #include "home_static_arp.inc"
 #endif
@@ -315,6 +318,9 @@ static uint16_t ack_probe_flags(void){
 #endif
 }
 static pm_net_tx_result send_raw_attempt(const void *p, size_t n, uint8_t kind, bool retryable) {
+#if PM_SERVER_LINK_HINT
+    server_link_maintain();
+#endif
     if(!pcb){pm_ack_probe_net(PM_AP_WRITE_REJECT,0,1,(uint32_t)n,0,(uint32_t)stage);pm_logf("%s\n","net send_failed=no_socket");RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,0,);stage=PM_NET_FAILED;return PM_NET_TX_FAILED;}
     if(n>tcp_sndbuf(pcb)){
         pm_logf("net send_buffer_full kind=%u bytes=%u sndbuf=%u queue=%u retryable=%u\n",
@@ -519,6 +525,9 @@ static void close_unlocked(void) {
         else if(tcp_close(old)!=ERR_OK)tcp_abort(old);
     }
     terminal_send_failed=false;
+#if PM_SERVER_LINK_HINT
+    server_link_close();
+#endif
 #if PM_HOME_STATIC_ARP_DIAGNOSTIC
     home_arp_remove();
 #endif
@@ -526,11 +535,15 @@ static void close_unlocked(void) {
     pm_rx_flow_reset(&rx_flow); app_used=0; last_payload_length=0; ws_continuation=false; ws_remaining=0; socket_dead=false;ws_closed=false;eof_started_us=0;
 }
 static void begin_unlocked(const pm_profile *p
-#if PM_HOME_STATIC_ARP_DIAGNOSTIC
+#if PM_HOME_STATIC_ARP_DIAGNOSTIC || PM_SERVER_LINK_HINT
         ,pm_profile_id profile_id
 #endif
         ) {
     close_unlocked();
+#if PM_SERVER_LINK_HINT
+    if(server_link.owned){stage=PM_NET_FAILED;return;}
+    server_link_profile=profile_id;
+#endif
 #if PM_HOME_STATIC_ARP_DIAGNOSTIC
     if(home_arp_owned){stage=PM_NET_FAILED;return;}
 #endif
@@ -611,6 +624,9 @@ static void check_failure_unlocked(void){
     }
 }
 static void poll_unlocked(void) {
+#if PM_SERVER_LINK_HINT
+    server_link_maintain();
+#endif
     check_failure_unlocked();
     if(stage==PM_NET_FAILED)return;
     if(stage==PM_NET_SOCKS && rx_used)process_socks();
@@ -794,10 +810,14 @@ again:
 void pm_net_close(void){cyw43_arch_lwip_begin();close_unlocked();cyw43_arch_lwip_end();}
 void pm_net_begin(const pm_profile *p){
     pm_ack_probe_connection();cyw43_arch_lwip_begin();begin_unlocked(p
-#if PM_HOME_STATIC_ARP_DIAGNOSTIC
+#if PM_HOME_STATIC_ARP_DIAGNOSTIC || PM_SERVER_LINK_HINT
         ,PM_PROFILE_COUNT
 #endif
         );cyw43_arch_lwip_end();}
+#if PM_SERVER_LINK_HINT
+void pm_net_begin_profile(const pm_profile *p,pm_profile_id id){
+    pm_ack_probe_connection();cyw43_arch_lwip_begin();begin_unlocked(p,id);cyw43_arch_lwip_end();}
+#endif
 #if PM_HOME_STATIC_ARP_DIAGNOSTIC
 void pm_net_begin_home_static_arp(const pm_profile *p,pm_profile_id id){
     pm_ack_probe_connection();cyw43_arch_lwip_begin();begin_unlocked(p,id);cyw43_arch_lwip_end();}
@@ -820,7 +840,11 @@ void pm_net_poll(void){
 }
 pm_net_stage pm_net_state(void){cyw43_arch_lwip_begin();pm_net_stage result=state_unlocked();cyw43_arch_lwip_end();return result;}
 pm_net_stage pm_net_checkpoint(void){
-    cyw43_arch_lwip_begin();check_failure_unlocked();pm_net_stage result=stage;cyw43_arch_lwip_end();return result;
+    cyw43_arch_lwip_begin();
+#if PM_SERVER_LINK_HINT
+    server_link_maintain();
+#endif
+    check_failure_unlocked();pm_net_stage result=stage;cyw43_arch_lwip_end();return result;
 }
 bool pm_net_send(uint8_t kind,const char *json){
     pm_ack_probe_before_lock(kind,json);

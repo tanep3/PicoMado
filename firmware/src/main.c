@@ -496,6 +496,8 @@ static void start_server_now(const pm_profile *connection){
     connection_status("SERVER","CONNECTING");
 #if PM_HOME_STATIC_ARP_DIAGNOSTIC
     pm_net_begin_home_static_arp(connection,(pm_profile_id)active_profile);
+#elif PM_SERVER_LINK_HINT
+    pm_net_begin_profile(connection,(pm_profile_id)active_profile);
 #else
     pm_net_begin(connection);
 #endif
@@ -768,14 +770,22 @@ static void poll_video(void){}
 static bool send_hello(void){
     int n=snprintf(outbound_json,sizeof outbound_json,
         "{\"type\":\"hello\",\"data\":{\"device_id\":\"%s\","
+#if PM_SERVER_LINK_HINT
+        "\"capabilities\":[\"%s\",\"buttons%u\",\"frame-bytes-v1\"%s%s%s],\"screen_owner_epoch\":%llu}}",
+#else
         "\"capabilities\":[\"%s\",\"buttons%u\",\"frame-bytes-v1\"%s%s],\"screen_owner_epoch\":%llu}}",
+#endif
         PM_DEVICE_ID,pm_display_capability(),PM_BUTTON_COUNT,
 #if PM_BLUETOOTH_AUDIO
         ",\"bluetooth-audio-v1\",\"audio-buffer-4096-v1\",\"audio-sbc-v1\",\"media-input-v1\"",
 #else
         "",
 #endif
-        PM_DISPLAY_TYPE==PM_DISPLAY_LCD?",\"lcd-push-v1\"":",\"eink-clock-v1\",\"eink-video-partial-v1\"",(unsigned long long)owner_epoch);
+        PM_DISPLAY_TYPE==PM_DISPLAY_LCD?",\"lcd-push-v1\"":",\"eink-clock-v1\",\"eink-video-partial-v1\"",
+#if PM_SERVER_LINK_HINT
+        (active_profile==PM_PROFILE_HOME||active_profile==PM_PROFILE_HOME2)?",\"" PM_SERVER_LINK_CAPABILITY "\"":"",
+#endif
+        (unsigned long long)owner_epoch);
     return n>0 && (size_t)n<sizeof outbound_json && pm_net_send(1,outbound_json);
 }
 static void heartbeat(void){
@@ -974,13 +984,26 @@ static void process_frame_bytes(const uint8_t *p,size_t length){
  * poll_display/poll_video and emits a separate completion fact. */
 static pm_api_result api_welcome(uint8_t kind,const char *j){
     (void)kind;if(state!=SESSION)return PM_API_IGNORED;
-
+#if PM_SERVER_LINK_HINT
+        pm_server_welcome welcome;
+        if(!pm_server_welcome_parse(j,strlen(j),&welcome)){retry();return PM_API_ERROR;}
+        pm_server_link_scope query;pm_net_server_link_query(&query);
+        pm_logf("net server_link ms=%lu conn=%llu event=welcome hint=%u\n",(unsigned long)now_ms(),(unsigned long long)query.connection,(unsigned)welcome.link);
+        if(welcome.link==PM_SERVER_LINK_VALID)
+            (void)pm_net_server_link_apply(&query,&welcome.hint,welcome.incarnation,welcome.session_epoch);
+        incarnation=welcome.incarnation;session_epoch=welcome.session_epoch;
+#else
         if(!number(j,"incarnation",&incarnation)||!number(j,"session_epoch",&session_epoch)){
             retry();return PM_API_ERROR;
         }
+#endif
 #if PM_BLUETOOTH_AUDIO
         uint64_t media_version=0;
+#if PM_SERVER_LINK_HINT
+        media_version=welcome.media_input_version;
+#else
         (void)number(j,"media_input_version",&media_version);
+#endif
         pm_media_input_welcome(&media_input_session,incarnation,session_epoch,media_version);
 #endif
         if(settings.incarnation!=incarnation){
