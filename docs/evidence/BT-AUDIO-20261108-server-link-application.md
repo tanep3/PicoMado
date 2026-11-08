@@ -107,3 +107,31 @@ Received bytes progressed from689 at the initial read to1267 after recovery;
 interval, but does not identify where the missing packet or ACK was lost.
 No packet capture, network configuration change, or sound was introduced.
 The currently applied firmware remains the opt-in Welcome-hint version.
+
+## Repeated before-TCP control and restoration
+
+The previously authorized hardcoded, HOME-only diagnostic was repeated against
+this same new service, then the approved Welcome-hint firmware was restored.
+`20261108-181500` used the original fixed UF2 SHA256
+`d8d78feccb40965e8188e4f21e13921abee43d33a6abaa22cf065bd86a0be204`.
+It reported Wi-Fi FAIL then successful re-JOIN, installed before TCP at25.591s,
+and showed all eight valid snapshots ACK=end, unsent/unacked=0 over150s.
+No TCP error or trace loss occurred. Thus a re-JOIN can also precede success.
+
+Restoration `20261108-181756` reverified the current Welcome UF2 `e06fdfbd…`.
+It installed the correct MAC at11.280s and rendered frame2451898 at17.944792s.
+ACK first reached7199, then7375 but stopped there while send end advanced7681,
+7779 and7877. TCP error -13 occurred at64.970s and cleanup succeeded. The
+100-second observation ended during connection retry. This is another failure
+with correct observed MAC, not a successful reliability acceptance.
+
+A subsequent read-only host check showed the .174 neighbor as the device MAC
+`28:cd:c1:0b:f5:55` on eth0, and source-.120 route lookup was direct eth0.
+The old server socket had bytes_received865 and bytes_acked5036. This does not
+prove the earlier complete packet path, but the host neighbor was not the
+router MAC at this read. Neither the neighbor nor routing settings were changed.
+The result strengthens the case for testing a previously learned mapping before
+TCP establishment; it still does not establish the causal network mechanism.
+The temporary hardcoded image is no longer active. Current firmware is the
+Welcome implementation, and persistent learned-MAC storage is not implemented
+or applied by these trials.
