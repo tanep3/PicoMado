@@ -131,3 +131,40 @@ were repeated; the size and report above are the corrected results. Mode0
 instructions/relocations still match the unchanged normal E-ink_1 objects.
 An in-progress A build was stopped with exit130 before source changes; no
 pre-correction deployable pair was released. A/B staging is separate below.
+
+## Regular deployment artifacts, source88f2301
+
+After the deadline correction, the parent requested regular E-ink_1 A/B UF2
+builds. These completed through ordinary CMake configure/build in separate
+private directories, strictly sequential with `-j1`. The interrupted A directory
+was resumed using normal dependency tracking; the changed main/control source
+was rebuilt. B was configured separately. No manual object substitution was used
+for these deployment artifacts.
+
+Staging: `/tmp/picomado-bt-startup-deploy.y0su76_x/` (directory0700, artifacts0600).
+
+- A: `artifacts/A-observe-E-ink_1.uf2`, diagnostic1,1098752bytes, SHA256
+  `998a5a225bce39a06f1434c8542246377a63316e2cd40438d226da6a931a673a`.
+- B: `artifacts/B-ack-wait-E-ink_1.uf2`, diagnostic2,1100288bytes, SHA256
+  `ac789cb7b47964b69c27c3c4c2216d376f39ee191eaea202f9365fc44374724c`.
+- `manifest.json`, SHA256
+  `69b6c60881f818cd617e2e6093586f4fbb3af4962a280b3057636a7a8d257118`,
+  binds source88f230142061e083b4dbce9fe50c8225a0adaaa8, all tracked firmware input
+  hashes, private config hash (not values), SDK/submodule IDs, exact configure/
+  build argv, ELF/UF2/log/flags hashes and completion checks.
+- Both builds' effective C definitions/includes/flags match the normal E-ink_1
+  build after normalizing build-directory paths and removing only the diagnostic
+  mode definition. A/B use the same source and private configuration.
+- The original `/tmp/picomado-eink-audio-E-ink_1` UF2/cache/flags are hash-verified
+  unchanged; source/config did not change during builds, and SDK/submodules remain
+  unchanged/clean. No ordinary build option or config value was silently reset.
+- Offline UF2 validation in `uf2-validation.json` verifies block magic, RP2040
+  family,256-byte payloads, complete sequential block numbering, unique addresses
+  and no overlap with the final12KiB reserved settings/BT storage. No USB command
+  is part of this validation.
+
+These artifacts and hashes were returned to the parent, which owns all backup,
+flash, restart and capture actions. Parent-reported live observations and any
+A/B causal conclusion remain separate from this build-only evidence. The producer
+did not operate a device or service, and private configuration values were not
+printed or copied into this document.
