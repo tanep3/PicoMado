@@ -41,6 +41,10 @@ build bluetooth-remote-input tests/bluetooth_remote_input_test.c
 run bluetooth-remote-input
 build bluetooth-audio tests/bluetooth_audio_test.c
 run bluetooth-audio
+build bluetooth-rebuffer tests/bluetooth_rebuffer_test.c
+run bluetooth-rebuffer
+build bluetooth-rebuffer-runtime tests/bluetooth_rebuffer_runtime_test.c
+run bluetooth-rebuffer-runtime
 build bluetooth-control tests/bluetooth_control_test.c
 run bluetooth-control
 build bluetooth-refresh tests/bluetooth_refresh_test.c

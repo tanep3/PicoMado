@@ -14,6 +14,7 @@ static void bt_media_log_runtime(void){
     cyw43_arch_lwip_begin();if(bt_initialized){pm_bt_runtime_audio_diagnostics(&d);pm_bt_runtime_link_snapshot(&link);}cyw43_arch_lwip_end();
     pm_logf("bt audio acl handle=%u role=%u mode=%u packet_known=%u packets=0x%04x interval_known=%u interval_slots=%u\n",link.handle,link.role,link.mode,link.packet_types_known,link.packet_types,link.interval_known,link.mode_interval);
     pm_logf("bt audio packets n=%lu frames=%lu last_n=%lu bytes=%lu mtu=%lu bitpool=%lu\n",(unsigned long)d.packets,(unsigned long)d.frames,(unsigned long)d.last_count,(unsigned long)d.last_bytes,(unsigned long)d.mtu,(unsigned long)d.bitpool);
+    pm_logf("bt audio rebuffer count=%lu total_ms=%lu max_ms=%lu failed=%lu active=%u\n",(unsigned long)d.rebuffer_count,(unsigned long)d.rebuffer_total_ms,(unsigned long)d.rebuffer_max_ms,(unsigned long)d.rebuffer_failed,d.rebuffering);
     pm_logf("bt audio timing can_total=%lu can_max=%lu timer_total=%lu timer_max=%lu encode_total=%lu encode_max=%lu\n",(unsigned long)d.can_wait_total_ms,(unsigned long)d.can_wait_max_ms,(unsigned long)d.timer_late_total_ms,(unsigned long)d.timer_late_max_ms,(unsigned long)d.encode_total_ms,(unsigned long)d.encode_max_ms);
 }
 static void bt_media_end(bool failed){

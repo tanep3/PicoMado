@@ -32,6 +32,8 @@ typedef struct {
  uint32_t packets,frames,can_wait_total_ms,can_wait_max_ms;
  uint32_t timer_late_total_ms,timer_late_max_ms,encode_total_ms,encode_max_ms;
  uint32_t last_count,last_bytes,mtu,bitpool;
+ uint32_t rebuffer_count,rebuffer_total_ms,rebuffer_max_ms,rebuffer_failed;
+ bool rebuffering;
 } pm_bt_audio_diagnostics;
 void pm_bt_runtime_audio_diagnostics(pm_bt_audio_diagnostics *out);
 

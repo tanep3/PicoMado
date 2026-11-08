@@ -2,7 +2,9 @@
 Does not simulate hardware timing or prove realtime throughput.
 """
 from pathlib import Path
-s=(Path(__file__).resolve().parents[1]/'src/bluetooth_runtime.c').read_text()
+root=Path(__file__).resolve().parents[1]
+s=(root/'src/bluetooth_audio_runtime.inc').read_text()
+assert '#include "bluetooth_audio_runtime.inc"' in (root/'src/bluetooth_runtime.c').read_text()
 prepare=s.split('static void prepare_audio(void){',1)[1].split('static void send_audio(void){',1)[0]
 send=s.split('static void send_audio(void){',1)[1].split('uint32_t pm_bt_runtime_rate',1)[0]
 tick=s.split('static void tick(btstack_timer_source_t *t){',1)[1].split('static void prepare_audio(void){',1)[0]
