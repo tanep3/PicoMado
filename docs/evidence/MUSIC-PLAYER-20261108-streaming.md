@@ -58,3 +58,13 @@ The read-only pre-migration inventory found12 tracks with originals and exact-le
 ## Not established
 
 No server install/restart, USB/device action, SSH, push or audio playback was performed by this implementation task. Final independent acceptance, deployment and hardware continuity/performance remain parent-owned. A100ms read timeout still becomes a terminal failure rather than fabricated silence. Loaded-host continuity is not proven; startup waiting is separated from device deadlines, not a relaxation of normal read/credit timing. Long resume offsets decode/discard from the start for sample-exact positioning and can hit the10-second startup limit.
+
+## Authorized production deployment and short hardware trial
+
+The integration worker deployed the staged 94fde75 binary on 2026-11-08 at approximately 14:56 UTC. SHA256 remained `a8f944282ef96b78c34cc0e0fd548352b8070ebef7eb896d6c4e48eb18807ccd`. Consistent SQLite, config and prior-binary backup is `/home/tane/picomado-backups/20261108-pre-streaming-music-server-145620`. All 12 original-backed tracks migrated to streaming. Served HTML no longer contains manual conversion or conversion-cancel controls. Original files and legacy PCM caches were preserved.
+
+Following the parent's explicit playback cue, E-ink_1 ran a 20-second HOME-network trial at volume 30. All 20 state samples remained online and playing, without a music error; reported position advanced from 816 to 19920 ms. The actual ffmpeg child read a private original-file copy and wrote 48 kHz stereo s16le to a pipe, rather than reading the old PCM cache. Device logs recorded negotiated 48 kHz SBC, bitpool 32, 845 packets and 973440 audio frames (20.28 seconds). The last packet carried 9 SBC frames, 694 bytes under the 704-byte MTU.
+
+One running rebuffer interval of 89 ms was observed, failed=0. The final counter rose again at stopping, with no added elapsed rebuffer time. This is a successful short data-path trial, not proof of perfectly uninterrupted or long-duration playback. User audible acceptance is separate.
+
+The script paused playback and restored the original volume 34. A subsequent read confirmed E-ink_1 online, Bluetooth connected, playing=false, no music error and position 19944 ms. The decoder process and its private temporary directory had both disappeared. No additional playback or AWAY trial was initiated. Captures and hashes are retained in `/home/tane/picomado-staging/20261108-streaming-94fde75/live-trial-145914`. Intermediate PCM retirement remains a separate, unperformed action pending verification and authorization.

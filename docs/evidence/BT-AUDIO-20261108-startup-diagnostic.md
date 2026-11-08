@@ -291,13 +291,13 @@ with sudo; no firewall or conntrack policy conclusion is claimed.
 
 The earlier LCD header record at
 `/tmp/picomado-power-observe-20261108-092316/tcp-headers.log` gives a more
-precise boundary for connection 58400. Its final FIN has seq1871/ack39886,
-while subsequent host output and the response to seq1872 RST still ACK824.
+precise boundary for connection 58400. Its final FIN has seq=1871/ack=39886,
+while subsequent host output and the response to seq=1872 RST still ACK=824.
 Therefore it is not enough to say the eth0 capture missed data that arrived
 normally into host TCP through wlan0: the host's cumulative receive position
 itself did not advance. This does not prove every byte in [824,1871) was
 absent; a missing prefix and out-of-order later bytes remain possible.
-It also does not locate the drop. Downstream receipt had reached39886.
+It also does not locate the drop. Downstream receipt had reached 39886.
 
 Current sockets with empty Send-Q/Recv-Q show only a recovered sample.
 The existing server journal identifies E-ink_1 sessions but does not expose
