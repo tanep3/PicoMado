@@ -1,6 +1,8 @@
 /* BT-AUDIO-20261107: compile the real main-loop adapter against bounded fake IO.
  * No SDK, socket, USB or Bluetooth hardware is opened. */
 #include <assert.h>
+#include <stdarg.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,8 +38,15 @@ static bool pm_net_send(unsigned kind,const char *j){assert(!locks&&(kind==21||k
 /* Minimal fixture parser: adapter validation is tested, JSON parser is not replaced in production. */
 static bool number(const char *j,const char *key,uint64_t *v){char needle[80];snprintf(needle,sizeof needle,"\"%s\":",key);const char *p=strstr(j,needle);if(!p)return false;char *end;*v=strtoull(p+strlen(needle),&end,10);return end!=p+strlen(needle);}
 static bool string_equals(const char *j,const char *key,const char *v){char needle[100];snprintf(needle,sizeof needle,"\"%s\":\"%s\"",key,v);return strstr(j,needle)!=NULL;}
-void pm_bt_runtime_link_snapshot(pm_bt_link_snapshot *out){assert(locks);memset(out,0,sizeof *out);}
-static void pm_logf(const char *fmt,...){(void)fmt;assert(!locks);}
+static pm_bt_link_snapshot fake_snapshot;
+static unsigned complete_config_records;
+void pm_bt_runtime_link_snapshot(pm_bt_link_snapshot *out){assert(locks);*out=fake_snapshot;}
+static void pm_logf(const char *fmt,...){
+ assert(!locks);char line[512];va_list args;va_start(args,fmt);
+ int n=vsnprintf(line,sizeof line,fmt,args);va_end(args);
+ assert(n>0&&n<144&&line[n-1]=='\n');
+ if(strncmp(line,"bt config ",10)==0||strncmp(line,"bt endpoint ",12)==0||strncmp(line,"bt transaction ",15)==0)complete_config_records++;
+}
 #include "../src/bluetooth_control.inc"
 static void emit(pm_bt_event_kind kind,uint64_t generation){assert(!queued);event=(pm_bt_event){.kind=kind,.generation=generation};queued=true;}
 static pm_api_result command(uint64_t gen,uint64_t id,const char *action){char j[512];snprintf(j,sizeof j,"{\"incarnation\":1,\"session_epoch\":2,\"token\":{\"session\":2,\"generation\":%llu,\"command_id\":%llu,\"expires_ms\":1},\"action\":\"%s\",\"target\":\"00:11:22:33:44:55\"}",(unsigned long long)gen,(unsigned long long)id,action);return api_bluetooth(20,j);}
@@ -123,4 +132,16 @@ static void test_media_input(void){
     assert(!send_media_input(PM_MEDIA_NEXT));poll_bluetooth();assert(!bt_input.connected&&inputs==7);
     state=0;assert(!send_media_input(PM_MEDIA_NEXT));
 }
-int main(void){test_media_input();test_scan_and_supersede();test_deadline_and_init_failure();test_connect_stop_and_stale_session();puts("Bluetooth control: supersession, asynchronous stop, stale identity, deadline, init failure PASS");}
+static void test_snapshot_log_bounds(void){
+ reset();fake_snapshot=(pm_bt_link_snapshot){.generation=UINT64_MAX,.cid=UINT16_MAX,
+ .configuration=INT_MIN,.endpoint_valid=true,.local_seid=UINT8_MAX,.active_matches=true,
+ .endpoint_initiator=INT_MIN,.endpoint_acceptor=INT_MAX,
+ .initiator_label=UINT8_MAX,.acceptor_label=UINT8_MAX,
+ .initiator_signal=UINT8_MAX,.acceptor_signal=UINT8_MAX,
+ .initiator_packet_label=UINT8_MAX,.acceptor_packet_label=UINT8_MAX};
+ bt_initialized=bt_waiting=true;bt_token.session=session_epoch;bt_incarnation=incarnation;
+ now_ms=2000;bt_received_ms=now_ms;
+ complete_config_records=0;poll_bluetooth();assert(complete_config_records==3);
+ memset(&fake_snapshot,0,sizeof fake_snapshot);
+}
+int main(void){test_snapshot_log_bounds();test_media_input();test_scan_and_supersede();test_deadline_and_init_failure();test_connect_stop_and_stale_session();puts("Bluetooth control: supersession, asynchronous stop, stale identity, deadline, init failure PASS");}

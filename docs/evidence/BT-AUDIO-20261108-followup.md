@@ -345,3 +345,35 @@ After the parent completed ARP RX capture, specification2c94338 was implemented 
 Focused host policy and actual coordinator tests cover DISCOVER→SET_CONFIGURATION and reverse transitions, all16 progress fields,4999/5000ms boundaries, endpoint/owner loss, connection validity, configured/connected exclusion, ACL plus either setup phase exhausting the same budget, cancellation through observe/release/cooldown, and25-second timeout priority. Existing actual stream-handler late-success/stale-CID/terminal-once and control-adapter deadline/session tests also pass. All four test executables pass native and ASan/UBSan; LeakSanitizer remains disabled due to environment ptrace limits. Log: /tmp/picomado-bt-setconfig-focused.log. The runtime passes ARM -fsyntax-only with the actual pinned SDK build command. No device, service, config.h, main.c, net.c or SDK original was changed by this worker.
 
 Integration full host and final LCD build are delegated to the HOME2 integration worker after source freeze, to avoid duplicate builds and concurrent snapshot ambiguity. No new UF2 or hardware improvement is claimed by these focused results. Root cause of the earlier codec stall remains unresolved; source8 alone cannot distinguish rejected local request, send failure, remote silence or simultaneous configuration.
+
+### 10:58 HOME observation: DISCOVER recovery teardown, bounded text correction
+
+Source: `/tmp/picomado-power-observe-20261108-105836/usb.log`, candidate
+582271… applied by parent. No device/service operations were performed for this
+analysis. Generation 48 has initial status 11, then CID 2 status 0, source 3
+(`A2DP_W4_DISCOVER_SEPS`), connection 7 (OPENED), initiator 9 (W4_ANSWER),
+no local endpoint. This is before SET_CONFIGURATION. The recovery phase 5
+record requests disconnect; subsequent connection 8 is
+`AVDTP_SIGNALING_CONNECTION_W4_L2CAP_DISCONNECTED`. No phase 6 new establish
+record appears before error ff10. This supports incomplete teardown rather than
+proving exhausted retries. ff10 is shared by the 3-second teardown deadline,
+25-second total deadline, and retry exhaustion; without timestamped recovery
+reason it cannot uniquely distinguish these branches. The budget is a maximum
+of two retries, not a promise of two retries when safe teardown never completes.
+The earlier DHCP delay does not itself consume the command's received-time
+budget. Snapshot TCP ACK continues advancing; this capture does not prove a
+simultaneous WLAN stall caused the Bluetooth failure.
+
+The config diagnostic exceeded trace.c's 144-byte record capacity, visibly
+ending in `packe`. Existing spec 2c94338 already requires the missing transaction
+snapshot. Correct its representation only: split into config, endpoint, and
+transaction records, each retaining generation and CID. Existing 2-second rate,
+SDK reads, recovery policy, queue capacity, and timeout values remain unchanged.
+Two additional text records per snapshot can still be dropped under bounded
+queue pressure; separate rows are not an atomic delivery guarantee.
+Production-adapter host test checks every formatted line against the real
+144-byte limit, newline completion, and all three records with maximum uint64
+identity, uint16 CID, byte labels and signed endpoint values. Native and
+ASan/UBSan runs passed (LeakSanitizer disabled for this environment); diff check
+passed. This formatting correction is not yet built or deployed and is not a
+Bluetooth reconnect remedy.
