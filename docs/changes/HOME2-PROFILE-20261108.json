@@ -1,0 +1,46 @@
+{
+  "id": "HOME2-PROFILE-20261108",
+  "title": "Add optional HOME2 direct network profile",
+  "owner": "parent develop_picomado_audio",
+  "implementer": "add_home2_profile worker",
+  "status": "in_progress",
+  "standard": "development/standard/v1/standard.md",
+  "domain_authority": "docs/requirements/kernel.md",
+  "design_artifacts": [
+    "docs/changes/HOME2-PROFILE-20261108.md"
+  ],
+  "cause": "User needs L13 HOME, Aterm HOME2 and tethering AWAY.",
+  "introduction_cause": "Existing firmware has only two network profiles.",
+  "escape_cause": "New capability, not a proven networking defect.",
+  "dependencies": [
+    "EEX1-RESTORE-20261022",
+    "a9b361f ARP diagnostic baseline"
+  ],
+  "deliverables": [
+    "Stable profile IDs and optional HOME2 configuration",
+    "Menu, settings and direct/EEX1 routing tests",
+    "Isolated LCD build and explicit rollback procedure"
+  ],
+  "stages": {
+    "design": {
+      "state": "in_progress",
+      "evidence": []
+    },
+    "implementation": {
+      "state": "in_progress",
+      "evidence": []
+    },
+    "independent_verification": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "operational_application": {
+      "state": "not_started",
+      "evidence": []
+    },
+    "effectiveness_confirmation": {
+      "state": "not_started",
+      "evidence": []
+    }
+  }
+}
