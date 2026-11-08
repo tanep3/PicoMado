@@ -27,3 +27,7 @@ ELF size: text561064, data0, BSS238228 bytes. Compared with the ARP_RX baseline:
 ## Remaining acceptance
 
 This is implementation evidence only, not independent review. No USB, flash, service, SSH or network-setting operation was performed by this worker. HOME2 physical connection, menu selection/reboot retention on the device, Bluetooth watchdog/backpressure effects and independent acceptance remain for the parent. The known old-firmware profile2 incompatibility remains: select and confirm HOME or AWAY using the new firmware before downgrading, or the old firmware can discard the complete settings record. See the [contract](../changes/HOME2-PROFILE-20261108.md).
+
+## Artifact retention after the next candidate
+
+Before the incremental 502b2cb build replaced the working output, the exact 582271 UF2 and its original candidate manifest/checks were copied and SHA-verified in `/tmp/picomado-candidate-backup-582271-20261108/`. The parent records physical application separately. The newer build is documented in [the refresh integration record](BT-AUDIO-20261108-refresh-integrated.md).
