@@ -88,3 +88,22 @@ reaching the server, server ACK emission, and return ACK loss. Existing USB
 logs alone cannot locate those losses. No new privileged packet capture or
 network configuration was started to fill that gap. Physical stability and
 final independent approval remain open; no stage is self-promoted to verified.
+
+## Third startup (18:11 JST)
+
+An additional same-artifact trial `20261108-181132` did not report BADAUTH.
+Hint installation succeeded at5.836s and physical render report was generated
+at12.868546s. The first valid TCP snapshot nevertheless showed send end7375
+with ACK7199 and one unacknowledged segment, while ARP still named the correct
+server MAC. The next snapshot recovered to ACK=end7679 on the same conn1;
+the remaining eight snapshots stayed caught up, with no TCP error or trace
+loss through150s. Server Rendered2447237 appeared in the30-second state sample.
+Thus the remaining transient stall also occurs without the re-JOIN condition.
+
+Read-only `ss -tin` observations of the existing E-ink_1 socket
+(.120:16153/.174:49793) were saved in `ss-repeat3.jsonl` beside the retained logs.
+Received bytes progressed from689 at the initial read to1267 after recovery;
+`rcv_ooopack=2` appeared. This supports out-of-order reception during this
+interval, but does not identify where the missing packet or ACK was lost.
+No packet capture, network configuration change, or sound was introduced.
+The currently applied firmware remains the opt-in Welcome-hint version.
