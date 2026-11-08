@@ -7,7 +7,8 @@
   "standard": "development/standard/v1/standard.md",
   "domain_authority": "docs/changes/BT-AUDIO-20261107.md",
   "design_artifacts": [
-    "docs/changes/BT-AUDIO-20261107.md"
+    "docs/changes/BT-AUDIO-20261107.md",
+    "docs/design/bluetooth-sbc-transport.md"
   ],
   "cause": "User wants A2DP audio and AVRCP remote input in PicoMado without waiting for HFP microphone research.",
   "introduction_cause": "PicoMado has no Bluetooth audio adapter or audio transport.",
@@ -31,7 +32,8 @@
         "e014e86: independent mute and volume slider specification",
         "6f02af5: negotiated media input and physical Sub separation specification",
         "13a03f5: preserve AVRCP short controls, add long Cancel and volume specification",
-        "67d7d31: HCI comparison and host deadline diagnostic specification"
+        "67d7d31: HCI comparison and host deadline diagnostic specification",
+        "docs/design/bluetooth-sbc-transport.md (specification; not implementation or hardware acceptance)"
       ]
     },
     "implementation": {
