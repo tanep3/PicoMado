@@ -61,7 +61,8 @@ remain regression coverage rather than being replaced by a new model.
 ## Read-only Linux adapter check
 
 On raspi5, the explicit ignored `server_link::tests::live_linux_lookup` test
-queried accepted local `192.168.0.120` and peer `192.168.0.44`. It exercised the
+queried supplied local `192.168.0.120` and peer `192.168.0.44` addresses. The
+ports are fixture values; this test does not open a TCP connection. It exercised the
 actual getifaddrs → GETLINK → GETROUTE → getifaddrs path and returned:
 
 ```json
@@ -84,7 +85,47 @@ where the test expected a refusal. The service changes do not touch the build
 route or approval rules; this unrelated assertion was not weakened. Full gate
 success and independent approval are not claimed.
 
-Full server regression and final commit results are recorded below after the
-run completes. Deployment/release artifact and silent device trials belong to
-the parent integration task. No service install, device operation, playback,
-router login, network configuration change, SSH or push occurred in this worker.
+## Source and regression binding
+
+Implementation is `c7bd652dc9dde6086fb6a8e809009d1fe9708d7c`, on canonical main.
+An exploratory full regression passed402 unit +2 binary +20 integration tests
+with0 failures and3 intentional ignores. Its build overlapped the final
+conservative unknown-route-attribute correction, so it is **not** the final
+source acceptance run. The final run checks that service sources match this
+commit and repeats the complete command:
+
+```sh
+PICOMADO_PIC2GRAY4PX=/home/tane/bin/pic2gray4px cargo test --manifest-path service/Cargo.toml -j1 --features caricature-retention-delete -- --test-threads=1
+```
+
+The ignored cases require a separately supplied reference MP4, live JMA HTTPS,
+and the explicit local-kernel lookup. The latter is run separately; the other
+two are not claimed. No existing assertion or test timeout was weakened.
+
+The final frozen-source run completed successfully: **402 library unit +2
+server binary +20 integration tests passed,0 failed**, with the three intentional
+ignores above. Library tests took317.70seconds; final rebuild took3m39s. The
+production `caricature-retention-delete` feature was enabled, preserving the
+current streaming server lineage. The final service tree was checked against
+`c7bd652` before and after the run with no differences. `git diff --check` passes.
+
+The explicit real Linux lookup was rerun using that final feature-specific test
+binary after the unknown-route-attribute correction. It again returned the
+same .120/.44,/24,2c:cf:67:11:72:f3 hint in under0.01s. Thus425 tests including
+this separately invoked check passed; the reference MP4 and live public HTTPS
+cases remain unrun. The timeout fixture also proves that a timed-out blocking
+worker retains its permit until exit, saturation skips the next resolver, and
+resolver failure yields no hint.
+
+Retained local logs:
+
+- `/tmp/picomado-server-link-cargo-final-c7bd652.log`, SHA256
+  `2522187ff34b46ec4cee58f510b889614841880b04ea6dab8c0e79cc19d616cd`.
+- `/tmp/picomado-server-link-kernel-final-c7bd652.log`, SHA256
+  `3499077d71f87e07f4e904b9d4a8b450d512f2e00c023e3fd0f83823abfdffdc`.
+
+Release compilation was left to the parent to avoid duplicate builds. This
+worker did not produce a release-artifact SHA or assert operational application.
+Deployment/release artifact and silent device trials belong to the parent
+integration task. No service install, device operation, playback, router login,
+network configuration change, SSH or push occurred in this worker.
