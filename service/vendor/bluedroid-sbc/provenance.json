@@ -1,0 +1,68 @@
+{
+  "upstream": "https://github.com/bluekitchen/btstack.git",
+  "commit": "eb0bb8b5ea6d234ccb940313b47f7a5c3b4e20ec",
+  "license": "Apache-2.0 (per-file notices)",
+  "local_modifications": [],
+  "files": [
+    {
+      "path": "include/sbc_dct.h",
+      "upstream_path": "3rd-party/bluedroid/encoder/include/sbc_dct.h",
+      "sha256": "8e6c8b0859782b5adfe376e5622a16f5717984669304cdb7aff3f0cc1d0bb7aa"
+    },
+    {
+      "path": "include/sbc_enc_func_declare.h",
+      "upstream_path": "3rd-party/bluedroid/encoder/include/sbc_enc_func_declare.h",
+      "sha256": "d6aa640df4124801192b9e3b750239809fe4d6c21e7f183c2fdbad4a50708c90"
+    },
+    {
+      "path": "include/sbc_encoder.h",
+      "upstream_path": "3rd-party/bluedroid/encoder/include/sbc_encoder.h",
+      "sha256": "ff5f793597768b5a68f9d7405e326b3b78157f048663009ebe20722581bbd460"
+    },
+    {
+      "path": "include/sbc_types.h",
+      "upstream_path": "3rd-party/bluedroid/encoder/include/sbc_types.h",
+      "sha256": "77d2d885cac350d690a8ffbff549e55ef9b8c8801c245553fb6d57ab60bb7026"
+    },
+    {
+      "path": "srce/sbc_analysis.c",
+      "upstream_path": "3rd-party/bluedroid/encoder/srce/sbc_analysis.c",
+      "sha256": "d5c200cf3c966bef66220d2c6e3b353b071b812f3322cfafcc8cdaba2cd2b0c9"
+    },
+    {
+      "path": "srce/sbc_dct.c",
+      "upstream_path": "3rd-party/bluedroid/encoder/srce/sbc_dct.c",
+      "sha256": "e6a85340cf7df8784513c70c7527a1e02502dfc01a549db2c23883478af11cf1"
+    },
+    {
+      "path": "srce/sbc_dct_coeffs.c",
+      "upstream_path": "3rd-party/bluedroid/encoder/srce/sbc_dct_coeffs.c",
+      "sha256": "adef9c42b009aba0bf4afcf9ea153b50a0b38cffe8936215a5294b90dd73de7d"
+    },
+    {
+      "path": "srce/sbc_enc_bit_alloc_mono.c",
+      "upstream_path": "3rd-party/bluedroid/encoder/srce/sbc_enc_bit_alloc_mono.c",
+      "sha256": "a1c9197bf40b48cb6f613bfa9c7fb4546f78a87709f8a9ee1d6b1e650b47f257"
+    },
+    {
+      "path": "srce/sbc_enc_bit_alloc_ste.c",
+      "upstream_path": "3rd-party/bluedroid/encoder/srce/sbc_enc_bit_alloc_ste.c",
+      "sha256": "a9779170e30f96425480977073c73b19735351f04c7161ac546b781e3708203d"
+    },
+    {
+      "path": "srce/sbc_enc_coeffs.c",
+      "upstream_path": "3rd-party/bluedroid/encoder/srce/sbc_enc_coeffs.c",
+      "sha256": "41719c5c0ed20639e2f4e61af8436c9e4cc08035d74854fef618a4b17435e367"
+    },
+    {
+      "path": "srce/sbc_encoder.c",
+      "upstream_path": "3rd-party/bluedroid/encoder/srce/sbc_encoder.c",
+      "sha256": "41cff5c30ec6cbd7b29c390a6c29b1c9d48bc199c0d144caf22bf8284cc3f9b2"
+    },
+    {
+      "path": "srce/sbc_packing.c",
+      "upstream_path": "3rd-party/bluedroid/encoder/srce/sbc_packing.c",
+      "sha256": "db37c18303cebc83781df0f59874a128fe6f0eb0d6026707a15bba825f9ffa0e"
+    }
+  ]
+}
