@@ -82,6 +82,9 @@ or compare host monotonic timestamps against Pico uptime. Omit the hint on
 lookup failure, stale result, IPv6, loopback, non-Ethernet link, multiple owners,
 invalid MAC, missing mask, a nonlocal peer, or an ambiguous route/interface.
 Do not persist the candidate in App/SQLite or reuse a process-wide MAC cache.
+In a generic listener, use an optional connection-metadata adapter or a concrete
+TCP wrapper; do not call TcpStream-only methods on unconstrained generic IO.
+Do not use a global fd-to-address map, because descriptor reuse breaks identity.
 A result from an obsolete accept-order/session cannot annotate a newer reply.
 Existing `hello_accept_order` rejects an older accepted connection's late Hello;
 publication must retain the same binding and not relabel delayed lookup results.
@@ -95,8 +98,20 @@ IPv4 and server peer IPv4, plus direct same-netif routing. Different/unknown
 prefixes omit/reject the hint. This deliberately rejects some legitimate but
 complex configurations instead of pinning a gateway as a peer.
 
-Equal prefixes do not prove physical L2 reachability or exclude proxy ARP. The
-existing HOME hardware comparison supplies evidence only for that tested path.
+Prefix equality alone does not exclude a more-specific host/policy route.
+Before publishing, the host additionally queries `RTM_GETROUTE` for destination
+accepted peer IPv4 with source accepted local IPv4. Require `RTN_UNICAST`, no
+gateway and output ifindex equal to the uniquely selected address-owner NIC.
+Unknown, stale, unsupported or failed route results omit the hint. Current
+getifaddrs ownership alone is not a general proof of the route. Initial support
+omits point-to-point /31-/32 and complex/ambiguous bridge, bond, VLAN, VRF or
+tunnel configurations; future support must select the IPv4-owning logical link,
+not a guessed physical slave. This is separate from MAC validation: a valid
+locally administered unicast MAC is not rejected merely for lacking a global OUI.
+
+Even these route facts do not prove physical L2 reachability or exclude proxy
+ARP. The existing HOME hardware comparison supplies evidence only for that
+tested path.
 
 ## Pico query → decision → effect and ownership
 
