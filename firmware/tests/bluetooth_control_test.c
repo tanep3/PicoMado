@@ -23,13 +23,35 @@ static unsigned init_calls,stop_calls,scan_calls,connect_calls,reports,inputs;
 static uint64_t last_stop,last_scan,last_connect;
 static unsigned locks,refresh_calls;
 static bool refresh_result;
+#if PM_BT_STARTUP_DIAGNOSTIC
+typedef struct {uint64_t connection_id;uint32_t lastack,snd_lbb;bool valid,unsent,unacked;} pm_net_tcp_status;
+enum {PM_NET_DOWN,PM_NET_READY,CYW43_ITF_STA=0,CYW43_LINK_UP=3};
+static int cyw43_state;
+static bool net_ready=true,ip_ready=true;
+static pm_net_tcp_status startup_tcp;
+static pm_bt_startup_times runtime_times;
+static unsigned startup_reads;
+static char startup_log[32768];static size_t startup_log_used;
+static void pm_net_tcp_snapshot(pm_net_tcp_status *out){assert(!locks);startup_reads++;*out=startup_tcp;}
+static inline int pm_net_state(void){assert(!locks);return net_ready?PM_NET_READY:PM_NET_DOWN;}
+static inline int cyw43_tcpip_link_status(int *s,int itf){assert(!locks&&s==&cyw43_state&&itf==0);return ip_ready?CYW43_LINK_UP:0;}
+void pm_bt_runtime_startup_snapshot(pm_bt_startup_times *out){assert(locks);*out=runtime_times;}
+#endif
 bool pm_bt_runtime_refresh_connected(uint64_t gen,const uint8_t address[6],uint32_t received){assert(locks&&address[5]==0x55&&now_ms-received<25000);refresh_calls++;if(refresh_result){assert(!queued);event=(pm_bt_event){.kind=PM_BT_CONNECTED,.generation=gen};queued=true;}return refresh_result;}
 static uint32_t get_absolute_time(void){return now_ms;}
 static uint32_t to_ms_since_boot(uint32_t t){return t;}
 static void cyw43_arch_lwip_begin(void){assert(!locks);locks++;}
 static void cyw43_arch_lwip_end(void){assert(locks==1);locks--;}
-bool pm_bt_runtime_init(void){assert(locks);init_calls++;return init_result;}
-bool pm_bt_runtime_ready(void){assert(locks);return ready_result;}
+bool pm_bt_runtime_init(void){assert(locks);init_calls++;
+#if PM_BT_STARTUP_DIAGNOSTIC
+pm_bt_startup_capture(&runtime_times,1,now_ms,0);pm_bt_startup_capture(&runtime_times,2,now_ms,init_result?0:-1);
+#endif
+return init_result;}
+bool pm_bt_runtime_ready(void){assert(locks);
+#if PM_BT_STARTUP_DIAGNOSTIC
+if(ready_result)pm_bt_startup_capture(&runtime_times,4,now_ms,0);
+#endif
+return ready_result;}
 void pm_bt_runtime_stop(uint64_t g){assert(locks);stop_calls++;last_stop=g;ready_result=false;}
 uint8_t pm_bt_runtime_scan(uint64_t g){assert(locks&&ready_result);scan_calls++;last_scan=g;return 0;}
 uint8_t pm_bt_runtime_connect(uint64_t g,const uint8_t address[6]){assert(locks&&ready_result);assert(address[5]==0x55);connect_calls++;last_connect=g;return 0;}
@@ -47,6 +69,9 @@ static void pm_logf(const char *fmt,...){
  assert(!locks);char line[512];va_list args;va_start(args,fmt);
  int n=vsnprintf(line,sizeof line,fmt,args);va_end(args);
  assert(n>0&&n<144&&line[n-1]=='\n');
+#if PM_BT_STARTUP_DIAGNOSTIC
+ if(startup_log_used+(size_t)n<sizeof startup_log){memcpy(startup_log+startup_log_used,line,(size_t)n+1);startup_log_used+=(size_t)n;}
+#endif
  if(strncmp(line,"bt config ",10)==0||strncmp(line,"bt endpoint ",12)==0||strncmp(line,"bt transaction ",15)==0)complete_config_records++;
 }
 #include "../src/bluetooth_control.inc"
@@ -61,6 +86,14 @@ static void reset(void){
     now_ms=0;init_result=ready_result=true;queued=false;
     init_calls=stop_calls=scan_calls=connect_calls=reports=inputs=locks=0;
     state=ACTIVE;incarnation=1;session_epoch=2;last_report[0]=0;
+#if PM_BT_STARTUP_DIAGNOSTIC
+    net_ready=ip_ready=true;startup_tcp=(pm_net_tcp_status){.connection_id=1,.lastack=100,.snd_lbb=100,.valid=true};
+    runtime_times=(pm_bt_startup_times){0};startup_reads=0;startup_log_used=0;startup_log[0]=0;
+    bt_startup_gate=(pm_bt_startup_gate){0};bt_startup_sampled_ms=0;
+    bt_startup_sampled=bt_startup_tracking=bt_startup_attempted=false;
+    bt_startup_command_connection=bt_startup_first_connection=bt_startup_first_generation=0;
+    bt_startup_records=0;bt_startup_seen=0;
+#endif
 }
 static void finish_stop(uint64_t gen){ready_result=true;emit(PM_BT_STOPPED,gen);poll_bluetooth();}
 static void test_scan_and_supersede(void){
@@ -161,4 +194,4 @@ static void test_same_peer_refresh(void){
  reset();command(1,1,"connect");poll_bluetooth();finish_stop(1);refresh_result=true;bt_incarnation=99;command(2,2,"connect");poll_bluetooth();assert(!refresh_calls&&stop_calls==2);
  reset();command(1,1,"connect");poll_bluetooth();finish_stop(1);refresh_result=true;bt_token.session=99;command(2,2,"connect");poll_bluetooth();assert(!refresh_calls&&stop_calls==2);
 }
-int main(void){test_same_peer_refresh();test_snapshot_log_bounds();test_media_input();test_scan_and_supersede();test_deadline_and_init_failure();test_connect_stop_and_stale_session();puts("Bluetooth control: supersession, asynchronous stop, stale identity, deadline, init failure PASS");}
+int main(void){test_same_peer_refresh();test_snapshot_log_bounds();test_media_input();test_scan_and_supersede();test_deadline_and_init_failure();test_connect_stop_and_stale_session();puts("Bluetooth control: supersession, asynchronous stop, stale identity, deadline, init failure PASS");return 0;}

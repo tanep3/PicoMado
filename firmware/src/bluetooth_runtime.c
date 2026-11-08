@@ -11,6 +11,10 @@ static pm_bt_event_queue events;
 static uint64_t generation, stop_generation;
 static bool stopping;
 static bool init_ok, initialized, ready, wanted, scanning;
+#if PM_BT_STARTUP_DIAGNOSTIC
+static pm_bt_startup_times startup_times;
+void pm_bt_runtime_startup_snapshot(pm_bt_startup_times *out){if(out)*out=startup_times;}
+#endif
 static bd_addr_t peer;
 static uint16_t cid;
 static uint8_t seid;
@@ -112,6 +116,9 @@ static void hci_handler(uint8_t type,uint16_t channel,uint8_t *p,uint16_t size){
   break;
  case BTSTACK_EVENT_STATE:
   ready=btstack_event_state_get_state(p)==HCI_STATE_WORKING;
+#if PM_BT_STARTUP_DIAGNOSTIC
+  if(ready)pm_bt_startup_capture(&startup_times,4,btstack_run_loop_get_time_ms(),0);
+#endif
   if(ready)emit((pm_bt_event){.kind=PM_BT_READY});break;
  case GAP_EVENT_INQUIRY_RESULT:{
   if(!scanning)return;
@@ -241,7 +248,16 @@ bool pm_bt_runtime_init(void){
  registration.callback=hci_handler;hci_add_event_handler(&registration);
  gap_set_local_name("PicoMado");gap_discoverable_control(0);gap_ssp_set_io_capability(SSP_IO_CAPABILITY_NO_INPUT_NO_OUTPUT);
  hci_set_inquiry_mode(INQUIRY_MODE_RSSI_AND_EIR);
- timer.process=tick;connect_timer.process=retry_connect;recovery_timer.process=recovery_poll;init_ok=hci_power_control(HCI_POWER_ON)==0;return init_ok;
+ timer.process=tick;connect_timer.process=retry_connect;recovery_timer.process=recovery_poll;
+#if PM_BT_STARTUP_DIAGNOSTIC
+ pm_bt_startup_capture(&startup_times,1,btstack_run_loop_get_time_ms(),0);
+ int result=hci_power_control(HCI_POWER_ON);
+ pm_bt_startup_capture(&startup_times,2,btstack_run_loop_get_time_ms(),result);
+ init_ok=result==0;
+#else
+ init_ok=hci_power_control(HCI_POWER_ON)==0;
+#endif
+ return init_ok;
 }
 uint8_t pm_bt_runtime_scan(uint64_t gen){
  if(!ready||stopping||scanning||wanted||cid||!gen)return ERROR_CODE_COMMAND_DISALLOWED;

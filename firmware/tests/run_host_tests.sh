@@ -48,6 +48,7 @@ build bluetooth-rebuffer-runtime tests/bluetooth_rebuffer_runtime_test.c
 run bluetooth-rebuffer-runtime
 build bluetooth-control tests/bluetooth_control_test.c
 run bluetooth-control
+python3 tests/run_bluetooth_startup_tests.py
 build bluetooth-refresh tests/bluetooth_refresh_test.c
 run bluetooth-refresh
 build bluetooth-media tests/bluetooth_media_test.c

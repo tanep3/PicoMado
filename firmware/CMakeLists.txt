@@ -228,7 +228,9 @@ target_link_libraries(${PM_APP_TARGET} pico_stdlib pico_rand hardware_spi hardwa
 # Experimental until Wi-Fi coexistence and real-speaker acceptance are recorded.
 option(PM_BLUETOOTH_AUDIO "Build per-device A2DP/AVRCP support" OFF)
 include(cmake/bluetooth_hci_limit.cmake)
+include(cmake/bluetooth_startup.cmake)
 if(PM_BLUETOOTH_AUDIO)
+  target_compile_definitions(${PM_APP_TARGET} PRIVATE PM_BT_STARTUP_DIAGNOSTIC=${PM_BT_STARTUP_DIAGNOSTIC})
   if(PM_BT_HCI_DRAIN_LIMIT GREATER 0)
     target_compile_definitions(${PM_APP_TARGET} PRIVATE
       PICO_BTSTACK_CYW43_MAX_HCI_PROCESS_LOOP_COUNT=${PM_BT_HCI_DRAIN_LIMIT})

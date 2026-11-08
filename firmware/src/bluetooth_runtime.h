@@ -1,5 +1,6 @@
 #pragma once
 #include "bluetooth_audio.h"
+#include "bluetooth_startup.h"
 /* All calls, including poll/pop and PCM ingress, require the shared CYW43
  * async-context lock. Init only AFTER existing cyw43_arch_init. No run loop. */
 typedef enum { PM_BT_READY, PM_BT_FOUND, PM_BT_SCAN_DONE, PM_BT_CONNECTED,
@@ -13,6 +14,9 @@ uint8_t pm_bt_runtime_scan(uint64_t generation);
 uint8_t pm_bt_runtime_connect(uint64_t generation,const uint8_t address[6]);
 void pm_bt_runtime_stop(uint64_t generation);
 bool pm_bt_runtime_ready(void);
+#if PM_BT_STARTUP_DIAGNOSTIC
+void pm_bt_runtime_startup_snapshot(pm_bt_startup_times *out);
+#endif
 
 uint32_t pm_bt_runtime_rate(void);
 void pm_bt_runtime_enable_input(bool enabled);

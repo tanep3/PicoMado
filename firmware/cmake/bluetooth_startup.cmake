@@ -1,0 +1,5 @@
+set(PM_BT_STARTUP_DIAGNOSTIC 0 CACHE STRING "BT startup diagnostic: 0 off, 1 observe, 2 ACK wait")
+set_property(CACHE PM_BT_STARTUP_DIAGNOSTIC PROPERTY STRINGS 0 1 2)
+if(NOT PM_BT_STARTUP_DIAGNOSTIC MATCHES "^[012]$")
+  message(FATAL_ERROR "PM_BT_STARTUP_DIAGNOSTIC must be 0, 1 or 2")
+endif()

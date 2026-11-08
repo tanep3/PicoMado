@@ -72,7 +72,8 @@
         "31fc242: negotiated host SBC sender with bounded credit, cancellation and terminal feedback; qualified regression evidence in docs/evidence/BT-AUDIO-20261108-sbc-sender.md",
         "bacf317: fixed Apache-2.0 host SBC encoder statically integrated; no Pico SDK requirement",
         "68ebc52: bounded SBC receiver sharing the existing 16KiB audio payload storage",
-        "Terminal mandatory-send resource cleanup after specification 843c972; actual SDK heap/PCB reproduction and host validation: docs/evidence/BT-AUDIO-20261108-terminal-tcp-cleanup.md; not deployed"
+        "Terminal mandatory-send resource cleanup after specification 843c972; actual SDK heap/PCB reproduction and host validation: docs/evidence/BT-AUDIO-20261108-terminal-tcp-cleanup.md; not deployed",
+        "Startup timing diagnostic after specification df83047: modes0/1/2, bounded ACK gate and captured HCI markers; focused serial host checks and isolated ARM link passed; docs/evidence/BT-AUDIO-20261108-startup-diagnostic.md; not deployed or independently accepted"
       ]
     },
     "independent_verification": {

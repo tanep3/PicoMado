@@ -18,6 +18,7 @@ static uint32_t bt_received_ms;
 static bool bt_refresh_allowed;
 static pm_bluetooth_input bt_input;
 static uint32_t bt_input_epoch;
+#include "bluetooth_startup_control.inc"
 static bool bt_report(const char *report){
     int n=snprintf(outbound_json,sizeof outbound_json,
         "{\"type\":\"bluetooth_report\",\"data\":{\"incarnation\":%llu,\"session_epoch\":%llu,\"token\":{\"session\":%llu,\"generation\":%llu,\"command_id\":%llu,\"expires_ms\":%llu},\"report\":%s}}",
@@ -46,15 +47,27 @@ static pm_api_result api_bluetooth(uint8_t kind,const char *j){
             if(*p++!=(i==5?'"':':'))return PM_API_REJECTED;
         }
     }
+#if PM_BT_STARTUP_DIAGNOSTIC
+    bt_startup_cancel("superseded");
+#endif
     bt_refresh_allowed=action==3&&bt_action==3&&bt_incarnation==inc&&bt_token.session==session&&!memcmp(bt_target,address,6);
     bt_token=t;bt_incarnation=inc;bt_action=action;memcpy(bt_target,address,6);bt_pending=true;bt_preparing=false;bt_waiting=true;bt_timed_out=false;
     bt_received_ms=to_ms_since_boot(get_absolute_time());
+#if PM_BT_STARTUP_DIAGNOSTIC
+    bt_startup_command();
+#endif
     pm_bluetooth_input_reset(&bt_input,t.generation,false);
     return PM_API_PENDING;
 }
 static void poll_bluetooth(void){
+#if PM_BT_STARTUP_DIAGNOSTIC
+    bt_startup_markers();
+#endif
     if(!bt_pending&&!bt_initialized)return;
     if(state!=ACTIVE||bt_token.session!=session_epoch||bt_incarnation!=incarnation){
+#if PM_BT_STARTUP_DIAGNOSTIC
+        bt_startup_cancel("session_cancel");
+#endif
         cyw43_arch_lwip_begin();if(bt_initialized)pm_bt_runtime_stop(0);cyw43_arch_lwip_end();
         bt_pending=false;pm_bluetooth_input_reset(&bt_input,0,false);return;
     }
@@ -76,11 +89,29 @@ static void poll_bluetooth(void){
         }
     }
     if(bt_waiting&&(uint32_t)(to_ms_since_boot(get_absolute_time())-bt_received_ms)>=25000){
+#if PM_BT_STARTUP_DIAGNOSTIC
+        bt_startup_cancel("command_expired");
+#endif
         bt_waiting=false;bt_pending=false;bt_timed_out=true;
         cyw43_arch_lwip_begin();if(bt_initialized)pm_bt_runtime_stop(bt_token.generation);cyw43_arch_lwip_end();
         pm_bluetooth_input_reset(&bt_input,bt_token.generation,false);
         (void)bt_report("{\"event\":\"complete\",\"success\":false}");return;
     }
+#if PM_BT_STARTUP_DIAGNOSTIC
+    if(!bt_initialized){
+#if PM_BT_STARTUP_DIAGNOSTIC == 2
+        if(bt_pending&&bt_action==1){
+            bt_startup_cancel("stop_unstarted");bt_pending=bt_waiting=false;
+            (void)bt_report("{\"event\":\"complete\",\"success\":true}");return;
+        }
+#endif
+        if(!bt_startup_admit())return;
+        bt_startup_first_attempt();
+    }
+#endif
+#if PM_BT_STARTUP_DIAGNOSTIC
+    bool action_started=false;uint32_t action_ms=0;
+#endif
     cyw43_arch_lwip_begin();
     bool init_failed=false;
     if(!bt_initialized){bt_initialized=pm_bt_runtime_init();init_failed=!bt_initialized;}
@@ -97,6 +128,9 @@ static void poll_bluetooth(void){
             bt_preparing=true;pm_bt_runtime_stop(bt_token.generation);
         }else{
             bt_pending=false;
+#if PM_BT_STARTUP_DIAGNOSTIC
+            action_started=true;action_ms=to_ms_since_boot(get_absolute_time());
+#endif
             if(bt_action==1)pm_bt_runtime_stop(bt_token.generation);
             else if(bt_action==2)status=pm_bt_runtime_scan(bt_token.generation);
             else status=pm_bt_runtime_connect_at(bt_token.generation,bt_target,bt_received_ms);
@@ -104,7 +138,15 @@ static void poll_bluetooth(void){
     }
     pm_bt_event e;bool have=bt_initialized&&pm_bt_runtime_next(&e);
     cyw43_arch_lwip_end();
+#if PM_BT_STARTUP_DIAGNOSTIC
+    bt_startup_markers();
+    if(action_started)bt_startup_log(bt_action==3?"connect_begin":bt_action==2?"scan_begin":"stop_begin",
+        action_ms,bt_startup_command_connection,bt_token.generation,0);
+#endif
     if(init_failed){
+#if PM_BT_STARTUP_DIAGNOSTIC
+        bt_startup_cancel("init_failed");bt_startup_seen=7;
+#endif
         bt_waiting=false;bt_pending=false;bt_timed_out=true;
         (void)bt_report("{\"event\":\"complete\",\"success\":false}");return;
     }
