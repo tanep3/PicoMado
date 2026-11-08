@@ -641,6 +641,10 @@ fn failure_message(reason: AudioPlaybackFailure) -> &'static str {
         AudioPlaybackFailure::InvalidCredit => "端末の音声消費情報が不正なため停止しました。",
         AudioPlaybackFailure::CreditTimeout => "端末から音声消費の進捗が届かず停止しました。",
         AudioPlaybackFailure::SourceReadFailed => "音源データを読み込めず停止しました。",
+        AudioPlaybackFailure::SbcReadyTimeout => "端末の音声形式の確認が時間内に完了しませんでした。",
+        AudioPlaybackFailure::UnsupportedFormat => "対応していない音声形式のため停止しました。",
+        AudioPlaybackFailure::CodecMismatch => "端末の音声形式が一致しないため停止しました。",
+        AudioPlaybackFailure::EncodeFailed => "音声の圧縮処理に失敗したため停止しました。",
         AudioPlaybackFailure::SourceReadTimeout => "音源データの読み込みが時間内に完了しませんでした。",
     }
 }

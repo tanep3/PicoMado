@@ -1,10 +1,15 @@
-//! BT-AUDIO-20261107: bounded PCM sender credit and kind-24 codec, without IO.
+//! BT-AUDIO-20261107: bounded PCM/SBC sender credit and codecs, without IO.
 pub const AUDIO_CHUNK_KIND: u8 = 24;
 pub const PCM_FRAME_BYTES: usize = 4;
 pub const MAX_CHUNK_FRAMES: usize = 256;
 pub const RING_FRAMES: u64 = 2048;
 pub const LARGE_RING_FRAMES: u64 = 4096;
 pub const LARGE_RING_CAPABILITY: &str = "audio-buffer-4096-v1";
+pub const SBC_CAPABILITY: &str = "audio-sbc-v1";
+pub const SBC_CHUNK_KIND: u8 = 30;
+pub const SBC_RING_FRAMES: u64 = 16384;
+pub const SBC_BLOCK_FRAMES: usize = 128;
+pub const SBC_MAX_CHUNK_FRAMES: usize = 1024;
 const HEADER_BYTES: usize = 46; // length + version/kind + five big-endian u64s
 
 /// Attenuate a disposable s16le stereo packet. Source assets are never modified.
@@ -51,6 +56,8 @@ pub enum AudioError {
     InvalidCredit,
     InvalidCapacity,
     InvalidVolume,
+    InvalidConfiguration,
+    ConflictingReady,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DecodedChunk<'a> {
@@ -125,6 +132,72 @@ pub fn decode_chunk(bytes: &[u8]) -> Result<DecodedChunk<'_>, AudioError> {
         pcm,
     })
 }
+/// Source reads remain canonical PCM and cannot expand a declared asset duration.
+pub fn validate_source_read(offset:u64,requested:usize,declared_end:Option<u64>,bytes:usize)->Result<u64,AudioError> {
+    if bytes%PCM_FRAME_BYTES!=0 || bytes/PCM_FRAME_BYTES>requested {return Err(AudioError::InvalidLength);}
+    let end=offset.checked_add((bytes/PCM_FRAME_BYTES) as u64).ok_or(AudioError::Exhausted)?;
+    if declared_end.is_some_and(|n|end>n) {return Err(AudioError::InvalidLength);}
+    Ok(end)
+}
+/// Untrusted Ready facts. Admission belongs to AudioSender, never the adapter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SbcReady {
+    pub identity: StreamIdentity,
+    pub first_frame: u64,
+    pub codec_epoch: u64,
+    pub rate: u32,
+    pub channels: u8,
+    pub blocks: u8,
+    pub subbands: u8,
+    pub channel_mode: u8,
+    pub allocation: u8,
+    pub bitpool: u8,
+    pub capacity_frames: u64,
+}
+impl SbcReady {
+    pub fn valid(&self) -> bool {
+        self.codec_epoch != 0 && self.rate == 48000 && self.channels == 2
+            && self.blocks == 16 && self.subbands == 8
+            && matches!(self.channel_mode, 2 | 3) && self.allocation <= 1
+            && (2..=53).contains(&self.bitpool) && self.capacity_frames == SBC_RING_FRAMES
+    }
+    pub fn frame_bytes(&self) -> usize { 12 + usize::from(self.channel_mode == 3) + 2 * usize::from(self.bitpool) }
+    fn header(&self) -> u8 { 0xf1 | (self.channel_mode << 2) | (self.allocation << 1) }
+}
+fn crc8(bytes: impl Iterator<Item=u8>) -> u8 {
+    let mut crc=0x0fu8;
+    for byte in bytes {
+        for bit in (0..8).rev() {
+            let feedback=((crc >> 7) ^ (byte >> bit)) & 1;
+            crc <<= 1;
+            if feedback != 0 { crc ^= 0x1d; }
+        }
+    }
+    crc
+}
+/// Validate every protected header before publishing a bounded kind-30 chunk.
+pub fn encode_sbc_chunk(ready: SbcReady, first_frame: u64, sbc: &[u8]) -> Result<Vec<u8>, AudioError> {
+    if !ready.valid() || ready.identity.stream_id == 0 { return Err(AudioError::InvalidConfiguration); }
+    let size=ready.frame_bytes();
+    if sbc.is_empty() || sbc.len()%size != 0 || sbc.len()/size > 8 { return Err(AudioError::InvalidLength); }
+    first_frame.checked_add((sbc.len()/size*SBC_BLOCK_FRAMES) as u64).ok_or(AudioError::Exhausted)?;
+    for frame in sbc.chunks_exact(size) {
+        let protected_end=12 + usize::from(ready.channel_mode == 3);
+        if frame[0] != 0x9c || frame[1] != ready.header() || frame[2] != ready.bitpool
+            || (ready.channel_mode == 3 && frame[4]&1 != 0)
+            || frame[3] != crc8(frame[1..3].iter().chain(frame[4..protected_end].iter()).copied()) {
+            return Err(AudioError::InvalidConfiguration);
+        }
+    }
+    let mut out=Vec::with_capacity(HEADER_BYTES+sbc.len());
+    out.extend_from_slice(&((HEADER_BYTES-4+sbc.len()) as u32).to_be_bytes());
+    out.extend_from_slice(&[1,SBC_CHUNK_KIND]);
+    for field in [ready.identity.incarnation,ready.identity.session_epoch,ready.identity.display_epoch,ready.identity.stream_id,first_frame] { out.extend_from_slice(&field.to_be_bytes()); }
+    out.extend_from_slice(sbc);
+    Ok(out)
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum StreamFormat { Pcm, WaitingSbc, Sbc(SbcReady) }
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Stream {
     identity: StreamIdentity,
@@ -132,6 +205,7 @@ struct Stream {
     sent: u64,
     accepted: u64,
     consumed: u64,
+    format: StreamFormat,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AudioSender {
@@ -179,18 +253,42 @@ impl AudioSender {
             display_epoch,
             stream_id,
         };
+        if self.capacity == SBC_RING_FRAMES { self.capacity = RING_FRAMES; }
         self.active = Some(Stream {
             identity,
             start: start_frame,
             sent: start_frame,
             accepted: start_frame,
             consumed: start_frame,
+            format: StreamFormat::Pcm,
         });
         self.last_stream_id = stream_id;
         Ok(identity)
     }
+    /// Start only after current-session capability negotiation selected SBC.
+    pub fn start_sbc(&mut self, display_epoch:u64, start_frame:u64) -> Result<StreamIdentity,AudioError> {
+        let identity=self.start(display_epoch,start_frame)?;
+        self.capacity=SBC_RING_FRAMES;
+        self.active.as_mut().unwrap().format=StreamFormat::WaitingSbc;
+        Ok(identity)
+    }
+    pub fn waiting_ready(&self) -> bool { self.active.as_ref().is_some_and(|s| matches!(s.format,StreamFormat::WaitingSbc)) }
+    pub fn sbc_ready(&self) -> Option<SbcReady> { self.active.as_ref().and_then(|s| if let StreamFormat::Sbc(r)=s.format {Some(r)} else {None}) }
+    /// Stale identities are ignored before validation. Duplicate exact Ready is harmless.
+    pub fn admit_ready(&mut self, ready:SbcReady) -> Result<bool,AudioError> {
+        let Some(s)=self.active.as_mut().filter(|s|s.identity==ready.identity) else { return Ok(false); };
+        match s.format {
+            StreamFormat::Pcm=>Ok(false),
+            StreamFormat::Sbc(old)=>if old==ready {Ok(false)} else {Err(AudioError::ConflictingReady)},
+            StreamFormat::WaitingSbc=>{
+                if !ready.valid() || ready.first_frame!=s.start {return Err(AudioError::InvalidConfiguration);}
+                s.format=StreamFormat::Sbc(ready); Ok(true)
+            }
+        }
+    }
     pub fn stop(&mut self) {
         self.active = None;
+        if self.capacity == SBC_RING_FRAMES { self.capacity=RING_FRAMES; }
     }
     pub fn identity(&self) -> Option<StreamIdentity> {
         self.active.as_ref().map(|s| s.identity)
@@ -206,9 +304,10 @@ impl AudioSender {
     }
     pub fn allowance(&self) -> usize {
         self.active.as_ref().map_or(0, |s| {
-            (self.capacity.saturating_sub(s.sent - s.consumed))
-                .min(MAX_CHUNK_FRAMES as u64)
-                .min(u64::MAX - s.sent) as usize
+            let (limit,alignment)=match s.format {StreamFormat::Pcm=>(MAX_CHUNK_FRAMES,1),StreamFormat::WaitingSbc=>return 0,StreamFormat::Sbc(_)=>(SBC_MAX_CHUNK_FRAMES,SBC_BLOCK_FRAMES)};
+            let count=(self.capacity.saturating_sub(s.sent - s.consumed))
+                .min(limit as u64).min(u64::MAX-s.sent) as usize;
+            count/alignment*alignment
         })
     }
     /// Record only a successfully enqueued whole chunk; caller must serialize enqueue/record.
@@ -218,7 +317,8 @@ impl AudioSender {
         if first_frame != s.sent {
             return Err(AudioError::NonContiguous);
         }
-        if frames == 0 || frames > MAX_CHUNK_FRAMES {
+        let (limit,alignment)=match s.format {StreamFormat::Pcm=>(MAX_CHUNK_FRAMES,1),StreamFormat::WaitingSbc=>return Err(AudioError::Inactive),StreamFormat::Sbc(_)=>(SBC_MAX_CHUNK_FRAMES,SBC_BLOCK_FRAMES)};
+        if frames == 0 || frames > limit || frames%alignment != 0 {
             return Err(AudioError::InvalidLength);
         }
         if frames > self.allowance() {
@@ -245,6 +345,7 @@ impl AudioSender {
             || consumed > accepted
             || accepted > s.sent
             || accepted - consumed > self.capacity
+            || (matches!(s.format,StreamFormat::Sbc(_)) && ((accepted-s.start)%128!=0 || (consumed-s.start)%128!=0))
         {
             return Err(AudioError::InvalidCredit);
         }
@@ -423,5 +524,58 @@ mod tests {
                 .len(),
             1024
         );
+    }
+}
+
+#[cfg(test)]
+mod sbc_tests {
+    use super::*;
+    fn ready(id:StreamIdentity,start:u64)->SbcReady {SbcReady{identity:id,first_frame:start,codec_epoch:1,rate:48000,channels:2,blocks:16,subbands:8,channel_mode:3,allocation:0,bitpool:32,capacity_frames:16384}}
+    fn frame(r:SbcReady)->Vec<u8>{let mut f=vec![0;r.frame_bytes()];f[0]=0x9c;f[1]=r.header();f[2]=r.bitpool;let end=12+usize::from(r.channel_mode==3);f[3]=crc8(f[1..3].iter().chain(f[4..end].iter()).copied());f}
+    #[test]
+    fn handshake_pins_tuple_identity_and_bounds_credit_in_canonical_units(){
+        let mut s=AudioSender::new(1,2);assert_eq!(s.set_capacity(SBC_RING_FRAMES),Err(AudioError::InvalidCapacity));
+        let id=s.start_sbc(3,7).unwrap();let r=ready(id,7);
+        assert_eq!(s.capacity(),16384);assert!(s.waiting_ready());assert_eq!(s.allowance(),0);
+        assert_eq!(s.record_sent(7,128),Err(AudioError::Inactive));
+        let mut stale=r;stale.identity.stream_id+=1;stale.bitpool=255;assert_eq!(s.admit_ready(stale),Ok(false));assert!(s.waiting_ready());
+        assert_eq!(s.admit_ready(r),Ok(true));assert_eq!(s.admit_ready(r),Ok(false));
+        assert_eq!(s.record_sent(7,127),Err(AudioError::InvalidLength));
+        for n in 0..16 {assert_eq!(s.allowance(),1024);s.record_sent(7+n*1024,1024).unwrap();}
+        assert_eq!(s.allowance(),0);s.apply_credit(id,16391,135).unwrap();assert_eq!(s.allowance(),128);
+        s.record_sent(16391,128).unwrap();assert_eq!(s.allowance(),0);
+        assert!(!s.apply_credit(id,16391,135).unwrap());
+        let mut conflict=r;conflict.codec_epoch+=1;assert_eq!(s.admit_ready(conflict),Err(AudioError::ConflictingReady));
+        assert_eq!(s.sbc_ready(),Some(r));s.stop();assert_eq!(s.admit_ready(r),Ok(false));
+        let next=s.start(4,1).unwrap();assert_ne!(next,id);assert_eq!(s.capacity(),2048);assert_eq!(s.allowance(),256);
+    }
+    #[test]
+    fn source_bounds_reject_extension_and_overflow_before_padding() {
+        assert_eq!(validate_source_read(7,1024,Some(136),129*4),Ok(136));
+        assert_eq!(validate_source_read(7,1024,Some(136),130*4),Err(AudioError::InvalidLength));
+        assert_eq!(validate_source_read(7,128,None,129*4),Err(AudioError::InvalidLength));
+        assert_eq!(validate_source_read(7,128,None,3),Err(AudioError::InvalidLength));
+        assert_eq!(validate_source_read(u64::MAX,128,None,4),Err(AudioError::Exhausted));
+        assert_eq!(validate_source_read(7,128,None,0),Ok(7));
+    }
+    #[test]
+    fn every_unsupported_ready_field_fails_without_admission(){
+        let mut s=AudioSender::new(1,2);let id=s.start_sbc(3,9).unwrap();let r=ready(id,9);
+        let mut invalid=vec![];
+        macro_rules! bad {($field:ident,$val:expr)=>{{let mut b=r;b.$field=$val;invalid.push(b);}}}
+        bad!(first_frame,10);bad!(rate,44100);bad!(channels,1);bad!(blocks,8);bad!(subbands,4);bad!(channel_mode,1);bad!(allocation,2);bad!(bitpool,1);bad!(bitpool,54);bad!(capacity_frames,4096);bad!(codec_epoch,0);
+        for b in invalid {assert_eq!(s.admit_ready(b),Err(AudioError::InvalidConfiguration));assert!(s.waiting_ready());assert_eq!(s.allowance(),0);}
+        let mut near=AudioSender::new(1,2);let id=near.start_sbc(3,u64::MAX-127).unwrap();near.admit_ready(ready(id,u64::MAX-127)).unwrap();assert_eq!(near.allowance(),0);
+    }
+    #[test]
+    fn complete_sbc_packet_validates_every_frame_and_protected_header(){
+        for mode in [2,3] {for allocation in [0,1] {for bitpool in 2..=53 {
+            let id=StreamIdentity{incarnation:1,session_epoch:2,display_epoch:3,stream_id:4};let mut r=ready(id,9);r.channel_mode=mode;r.allocation=allocation;r.bitpool=bitpool;
+            let f=frame(r);let payload=f.repeat(8);let bytes=encode_sbc_chunk(r,9,&payload).unwrap();
+            assert_eq!(bytes[5],30);assert_eq!(bytes.len(),46+8*r.frame_bytes());assert_eq!(&bytes[38..46],&9u64.to_be_bytes());assert!(bytes.len()<=998);assert!(decode_chunk(&bytes).is_err());
+            assert!(encode_sbc_chunk(r,0,&[]).is_err());assert!(encode_sbc_chunk(r,0,&f.repeat(9)).is_err());assert!(encode_sbc_chunk(r,0,&payload[..payload.len()-1]).is_err());
+            assert!(encode_sbc_chunk(r,u64::MAX-1023,&payload).is_err());
+            for field in [0,1,2,3,4,11] {let mut bad=payload.clone();bad[7*r.frame_bytes()+field]^=1;assert!(encode_sbc_chunk(r,9,&bad).is_err());}
+        }}}
     }
 }

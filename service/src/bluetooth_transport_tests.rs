@@ -61,3 +61,6 @@ async fn legacy_writer_stop_does_not_wait_for_durable_lease() {
 
 #[path = "audio_barrier_sink_tests.rs"]
 mod audio_barrier_sink_tests;
+
+#[path = "sbc_sender_sink_tests.rs"]
+mod sbc_sender_sink_tests;

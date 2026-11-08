@@ -480,6 +480,7 @@ struct QueuedReply {
 }
 include!("transport_audio.rs");
 enum WriterCommand {
+    AudioReady(crate::audio_transport::SbcReady),
     AudioCredit(crate::audio_transport::StreamIdentity,u64,u64,bool),
     #[cfg(test)]
     Bind(SessionToken),
@@ -915,6 +916,11 @@ async fn writer_loop_with_progress<S>(
                         eprintln!("picomado input_reply_sent id={} incarnation={} session_epoch={} display_epoch={} mode={} kind={} elapsed_us={}",id,ctx.incarnation,ctx.session_epoch,ctx.display_epoch,ctx.mode,kind,reply_started.elapsed().as_micros());
                     }
                 },
+                Some(WriterCommand::AudioReady(ready))=>{
+                    if let (Some(a),Some(session))=(&mut audio,&current) {
+                        if a.transfer.as_ref().is_some_and(|t|SocketAudio::offer_current(&app,session,t)) {a.ready(ready);}
+                    }
+                },
                 Some(WriterCommand::AudioCredit(id,accepted,consumed,failed))=>{
                     if let Some(a)=&mut audio {a.credit(id,accepted,consumed,failed);}
                 },
@@ -1253,6 +1259,16 @@ where S:Sink<Message>+Unpin+Send+'static, St:Stream<Item=Result<Message,E>>+Unpi
             let (message,cause,invalid_cause)=(received.message,received.cause,received.invalid_cause);
             #[cfg(not(feature="boundary-observation"))]
             let (message,cause,invalid_cause)=(received,None,false);
+            if let WireMessage::AudioSbcReady{incarnation,session_epoch,display_epoch,stream_id,first_frame,codec_epoch,rate,channels,blocks,subbands,channel_mode,allocation,bitpool,capacity_frames}=message {
+                if let Some(t)=current.as_ref().filter(|t|t.incarnation==incarnation&&t.session_epoch==session_epoch) {
+                    if app.read().is_ok_and(|a|a.session_is_current(t)&&a.audio_sbc_supported(t)) {
+                        let identity=crate::audio_transport::StreamIdentity{incarnation,session_epoch,display_epoch,stream_id};
+                        let ready=crate::audio_transport::SbcReady{identity,first_frame,codec_epoch,rate,channels,blocks,subbands,channel_mode,allocation,bitpool,capacity_frames};
+                        if !matches!(tokio::time::timeout(SEND_TIMEOUT,tx.send(WriterCommand::AudioReady(ready))).await,Ok(Ok(()))){failed=true;break;}
+                    }
+                }
+                continue;
+            }
             if let WireMessage::AudioStatus{incarnation,session_epoch,display_epoch,stream_id,accepted,consumed,failed:audio_failed}=message {
                 if let Some(t)=current.as_ref().filter(|t|t.incarnation==incarnation&&t.session_epoch==session_epoch) {
                     if app.read().is_ok_and(|a|a.session_is_current(t)) {

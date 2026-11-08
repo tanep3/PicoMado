@@ -63,6 +63,8 @@ pub const EINK_VIDEO_CAPABILITY: &str = "eink-video-partial-v1";
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum WireMessage {
+    AudioSbcStart { incarnation:u64, session_epoch:u64, display_epoch:u64, stream_id:u64, first_frame:u64, rate:u32 },
+    AudioSbcReady { incarnation:u64, session_epoch:u64, display_epoch:u64, stream_id:u64, first_frame:u64, codec_epoch:u64, rate:u32, channels:u8, blocks:u8, subbands:u8, channel_mode:u8, allocation:u8, bitpool:u8, capacity_frames:u64 },
     MediaInput { incarnation: u64, session_epoch: u64, operation: crate::content::MediaOperation },
     AudioFinish { incarnation:u64, session_epoch:u64, display_epoch:u64, stream_id:u64, final_frame:u64 },
     AudioStart { incarnation:u64, session_epoch:u64, display_epoch:u64, stream_id:u64, first_frame:u64, rate:u32 },
@@ -183,6 +185,8 @@ impl WireMessage {
             Self::MediaInput { .. } => 27,
             Self::AudioFinish { .. } => 26,
             Self::AudioStart { .. } => 22,
+            Self::AudioSbcStart { .. } => 28,
+            Self::AudioSbcReady { .. } => 29,
             Self::AudioStop { .. } => 23,
             Self::AudioStatus { .. } => 25,
             Self::BluetoothCommand { .. } => 20,
@@ -502,7 +506,7 @@ impl Decoder {
                 self.buffer.clear();
                 return Err(ProtocolError::UnsupportedVersion);
             }
-            if !matches!(frame[1],1..=23|25..=27) {
+            if !matches!(frame[1],1..=23|25..=29) {
                 self.buffer.clear();
                 return Err(ProtocolError::UnknownKind);
             }
@@ -1054,4 +1058,17 @@ mod observation_contract_tests {
         }
     }
 
+}
+
+#[cfg(test)]
+mod sbc_handshake_tests {
+    use super::*;
+    #[test]
+    fn new_handshake_roundtrips_with_exact_kinds_and_binary_remains_separate() {
+        for message in [WireMessage::AudioSbcStart{incarnation:1,session_epoch:2,display_epoch:3,stream_id:4,first_frame:7,rate:48000},
+            WireMessage::AudioSbcReady{incarnation:1,session_epoch:2,display_epoch:3,stream_id:4,first_frame:7,codec_epoch:5,rate:48000,channels:2,blocks:16,subbands:8,channel_mode:3,allocation:0,bitpool:32,capacity_frames:16384}] {
+            let encoded=encode(&message).unwrap();assert!(matches!(encoded[5],28|29));
+            let mut d=Decoder::default();assert_eq!(d.push(&encoded).unwrap(),vec![message]);
+        }
+    }
 }

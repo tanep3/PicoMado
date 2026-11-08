@@ -107,6 +107,12 @@ impl App {
             .map(|d|self.runtime.bluetooth_saved(&session.device_id,d.incarnation).desired.effective_volume())
             .unwrap_or(0)
     }
+    pub fn audio_sbc_supported(&self,session:&SessionToken)->bool {
+        self.runtime.world.devices.get(&session.device_id).is_some_and(|d|
+            session_current(d,session) && d.online
+            && d.capabilities.contains(crate::protocol::BLUETOOTH_AUDIO_CAPABILITY)
+            && d.capabilities.contains(crate::audio_transport::SBC_CAPABILITY))
+    }
     pub fn audio_buffer_capacity(&self, session: &SessionToken) -> u64 {
         if self.runtime.world.devices.get(&session.device_id).is_some_and(|d|
             session_current(d,session) && d.online
@@ -323,6 +329,16 @@ mod bluetooth_integration_tests {
         assert_eq!(app.audio_buffer_capacity(&legacy),2048);
         let other=app.hello("b",caps(),1).unwrap();assert_eq!(app.audio_buffer_capacity(&other),2048);
         app.disconnect(current.clone()).unwrap();assert_eq!(app.audio_buffer_capacity(&current),2048);
+    }
+    #[test]
+    fn sbc_selection_requires_current_online_capability_and_retains_pcm_capacity_query() {
+        let dir=tempfile::tempdir().unwrap();let mut app=App::open(&dir.path().join("sbc.sqlite")).unwrap();
+        let old=app.hello("a",caps(),1).unwrap();assert!(!app.audio_sbc_supported(&old));
+        let mut upgraded=caps();upgraded.insert(crate::audio_transport::SBC_CAPABILITY.into());
+        let current=app.hello("a",upgraded,1).unwrap();assert!(app.audio_sbc_supported(&current));
+        assert!(!app.audio_sbc_supported(&old));assert_eq!(app.audio_buffer_capacity(&current),2048);
+        let other=app.hello("b",caps(),1).unwrap();assert!(!app.audio_sbc_supported(&other));
+        app.disconnect(current.clone()).unwrap();assert!(!app.audio_sbc_supported(&current));
     }
     #[test]
     fn desired_survives_restart_but_commands_do_not() {

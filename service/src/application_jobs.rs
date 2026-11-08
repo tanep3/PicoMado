@@ -82,11 +82,16 @@ impl App {
 
     /// Pure, current-session audio offer. Recheck this tuple after async IO.
     pub fn audio_playback_for(&self, session: &SessionToken) -> Option<(crate::DisplayToken, String, crate::plugin_jobs::AudioPlaybackSpec, PluginPaths)> {
+        self.audio_playback_offer(session).filter(|(_,_,spec,_)|spec.valid())
+    }
+    /// Current raw intent for format admission and exact terminal-failure matching only.
+    /// Callers must validate before start/read/encode and after asynchronous work.
+    pub(crate) fn audio_playback_offer(&self, session: &SessionToken) -> Option<(crate::DisplayToken, String, crate::plugin_jobs::AudioPlaybackSpec, PluginPaths)> {
         let d = self.runtime.world.devices.get(&session.device_id)?;
         if !session_current(d, session) || !d.online || d.owner != Owner::Remote || d.mode != Mode::Normal { return None; }
         let plugin = d.selected.as_ref()?;
         let ctx = PluginContext { token: session.clone(), settings_revision: d.settings_revision, mode: d.mode.clone() };
-        let spec = self.contents.get(plugin)?.audio_playback(&ctx).filter(|s|s.valid())?;
+        let spec = self.contents.get(plugin)?.audio_playback(&ctx)?;
         Some((crate::display_token(&session.device_id, d), plugin.clone(), spec, self.plugin_paths(plugin)?))
     }
 
@@ -101,11 +106,11 @@ impl App {
         consumed_frame: u64,
         reason: crate::plugin_jobs::AudioPlaybackFailure,
     ) -> Result<bool, AppError> {
-        let Some((current_display, current_plugin, current_spec, _)) = self.audio_playback_for(session) else {
+        let Some((current_display, current_plugin, current_spec, _)) = self.audio_playback_offer(session) else {
             return Ok(false);
         };
         if &current_display != display || current_plugin != plugin || &current_spec != spec
-            || consumed_frame < spec.start_frame
+            || !crate::plugin_jobs::audio_failure_position_valid(spec,consumed_frame,reason)
         {
             return Ok(false);
         }

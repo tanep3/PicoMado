@@ -180,6 +180,8 @@
       "BluetoothCommand",
       "BluetoothReport",
       "AudioStart",
+      "AudioSbcStart",
+      "AudioSbcReady",
       "AudioStop",
       "AudioStatus",
       "AudioFinish",

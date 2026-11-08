@@ -226,6 +226,10 @@ pub enum AudioPlaybackFailure {
     CreditTimeout,
     SourceReadFailed,
     SourceReadTimeout,
+    SbcReadyTimeout,
+    UnsupportedFormat,
+    CodecMismatch,
+    EncodeFailed,
 }
 
 /// Audio sample frames count all channels at one instant (not video frames).
@@ -654,5 +658,26 @@ mod tests {
         assert_eq!(restored.ready().len(), 3);
         assert_eq!(restored.next_generation, state.next_generation);
         assert_eq!(restored.jobs[&token.generation].job.token, token);
+    }
+}
+
+/// Failed format validation is reportable only at the untouched source start.
+/// All other terminal outcomes require a valid canonical source specification.
+pub(crate) fn audio_failure_position_valid(spec:&AudioPlaybackSpec,consumed:u64,reason:AudioPlaybackFailure)->bool {
+    consumed>=spec.start_frame && (spec.valid() || (reason==AudioPlaybackFailure::UnsupportedFormat && consumed==spec.start_frame))
+}
+#[cfg(test)]
+mod audio_source_failure_tests {
+    use super::*;
+    #[test]
+    fn invalid_sources_can_only_report_unsupported_before_consumption() {
+        let spec=AudioPlaybackSpec{asset_id:"a".into(),generation:1,sample_rate:48000,channels:2,frame_count:Some(129),start_frame:3,started_mono_ms:0,source:Value::Null};
+        assert!(audio_failure_position_valid(&spec,256,AudioPlaybackFailure::DeviceFailed));
+        for bad in [AudioPlaybackSpec{sample_rate:44100,..spec.clone()},AudioPlaybackSpec{channels:1,..spec.clone()},AudioPlaybackSpec{generation:0,..spec.clone()},AudioPlaybackSpec{frame_count:Some(2),..spec.clone()}] {
+            assert!(!bad.valid());assert!(audio_failure_position_valid(&bad,3,AudioPlaybackFailure::UnsupportedFormat));
+            assert!(!audio_failure_position_valid(&bad,4,AudioPlaybackFailure::UnsupportedFormat));
+            assert!(!audio_failure_position_valid(&bad,3,AudioPlaybackFailure::DeviceFailed));
+            assert!(!audio_failure_position_valid(&bad,2,AudioPlaybackFailure::UnsupportedFormat));
+        }
     }
 }
