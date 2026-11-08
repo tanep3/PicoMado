@@ -10,6 +10,8 @@ trap 'rm -rf -- "$work"' EXIT
 base=(-std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -include "$root/profiles/pico_w_lcd_160x80_4.h" -Idevices/sample-a -Iprofiles -Isrc)
 build() { local name=$1; shift; cc "${base[@]}" "$@" -o "$work/$name"; }
 run() { local name=$1; shift; "$work/$name" "$@"; printf 'PASS %s %s\n' "$name" "$*"; }
+build arp-rx tests/arp_rx_probe_test.c
+run arp-rx
 build bluetooth-input tests/bluetooth_input_test.c
 run bluetooth-input
 build bluetooth-remote-input tests/bluetooth_remote_input_test.c

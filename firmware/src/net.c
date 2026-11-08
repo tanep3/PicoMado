@@ -1,3 +1,6 @@
+#if PM_ARP_RX_PROBE
+#include "arp_rx_probe.h"
+#endif
 #ifndef PM_BLUETOOTH_AUDIO
 #define PM_BLUETOOTH_AUDIO 0
 #endif
@@ -509,6 +512,9 @@ static void begin_unlocked(const pm_profile *p) {
     tcp_status=(pm_net_tcp_status){.connection_id=next};
     profile=p;proxy_target_connected=false;last_failure=PM_NET_FAIL_NONE;
     if(!p || !p->server_ip || !ipaddr_aton(p->server_ip,&server_addr)) { stage=PM_NET_FAILED;return; }
+#if PM_ARP_RX_PROBE
+    pm_arp_rx_server((const uint8_t *)ip_2_ip4(&server_addr));
+#endif
     if(p->socks && (!p->proxy_ip || !ipaddr_aton(p->proxy_ip,&proxy_addr) ||
                     !p->proxy_user || !p->proxy_password ||
                     !p->proxy_user[0] || !p->proxy_password[0] ||

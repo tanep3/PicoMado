@@ -1,3 +1,6 @@
+#if PM_ARP_RX_PROBE
+#include "arp_rx_probe.h"
+#endif
 #if PM_CYW43_SLEEP_PROBE
 #include "cyw43_sleep_probe.h"
 #endif
@@ -339,6 +342,16 @@ static void log_usb_snapshot(void){
     pm_logf("sleep count=%lu wake=%lu before=%u after=%u at_us=%lu duration=%lu\n",(unsigned long)sl.sleep,(unsigned long)sl.wake,sl.before,sl.after,(unsigned long)sl.last_us,(unsigned long)sl.duration_us);
     pm_logf("kso sleep_ok=%lu sleep_fail=%lu wake_ok=%lu wake_fail=%lu\n",(unsigned long)sl.success[0],(unsigned long)sl.failure[0],(unsigned long)sl.success[1],(unsigned long)sl.failure[1]);
     pm_logf("kso max_loops=%lu last_read=%ld failure_us=%lu\n",(unsigned long)sl.max_loops,(long)sl.last_read,(unsigned long)sl.last_failure_us);
+#endif
+#if PM_ARP_RX_PROBE
+    static unsigned arp_next;uint32_t arp_count=0,arp_drop=0;
+    for(unsigned a=0;a<4;a++){
+        pm_arp_rx_row r;cyw43_arch_lwip_begin();bool got=pm_arp_rx_get(arp_next,&r,&arp_count,&arp_drop);cyw43_arch_lwip_end();if(!got)break;
+        pm_logf("arp_rx row=%u us=%llu if=%u op=%u sip=%u.%u.%u.%u tip=%u.%u.%u.%u\n",arp_next++,(unsigned long long)r.at_us,r.itf,r.opcode,r.sender_ip[0],r.sender_ip[1],r.sender_ip[2],r.sender_ip[3],r.target_ip[0],r.target_ip[1],r.target_ip[2],r.target_ip[3]);
+        pm_logf("arp_rx eth src=%02x:%02x:%02x:%02x:%02x:%02x dst=%02x:%02x:%02x:%02x:%02x:%02x\n",r.eth_src[0],r.eth_src[1],r.eth_src[2],r.eth_src[3],r.eth_src[4],r.eth_src[5],r.eth_dst[0],r.eth_dst[1],r.eth_dst[2],r.eth_dst[3],r.eth_dst[4],r.eth_dst[5]);
+        pm_logf("arp_rx arp src=%02x:%02x:%02x:%02x:%02x:%02x dst=%02x:%02x:%02x:%02x:%02x:%02x\n",r.sender_mac[0],r.sender_mac[1],r.sender_mac[2],r.sender_mac[3],r.sender_mac[4],r.sender_mac[5],r.target_mac[0],r.target_mac[1],r.target_mac[2],r.target_mac[3],r.target_mac[4],r.target_mac[5]);
+    }
+    pm_logf("arp_rx count=%lu dropped=%lu\n",(unsigned long)arp_count,(unsigned long)arp_drop);
 #endif
     // Replay cached results for late USB attachment; never repeat radio IOCTLs.
     log_wifi_pm_status();
