@@ -150,3 +150,16 @@ owner 内に保持するだけで、plugin の再生意図へ返す契約が欠�
 - 端末ごとの選曲、再生・一時停止・停止、失敗理由、位置、ボタン無効条件は変更しない。ページ表示・再表示だけで再生などのコマンドを発行しない。
 - 曲の有無、複数端末、失敗／再生中／未選択の表示、再描画、対象端末と選択曲のコマンドを無音DOM試験で確認する。全体JavaScript構文と既存UI試験も実行し、既存失敗は分離する。
 - 本変更の範囲はWeb UI配置と回帰試験。音源・永続状態・通信／音声処理・ファームは変更しない。サーバ埋込みUIの反映は他担当と調整し、再生や出音を起こさず、配信HTMLと正常応答で確認する。独立確認と変更全体のクローズは親が所有する。
+
+
+### プレーヤー先頭配置の実装・無音UI検証（2026-11-08）
+
+仕様 `b710e6e` 後、`renderLocalMusic` の端末別カード生成2行を関数先頭へ移動した。
+フォーム・音源一覧・コマンド内容と表示文字列はそのまま保持した。
+`service/tests/local_music_ui_test.js` は実際のrendererとsection関数を実行し、
+多曲時の順序、端末別失敗／再生中／位置、選択曲と操作対象、曲なし、未選択、
+繰り返し再描画の6試験がPASS。旧ソース `b710e6e` では順序3試験だけがFAILする。
+全UI試験は28 PASS / 6 FAILで、既存 `ui_video_fps.test.cjs` の
+`renderEinkVideoControls is not defined` 6件は対象外のfixture不足として維持した。
+JavaScript全体の `node --check`、`git diff --check`、project gateのstaticはPASS。
+ログは `/tmp/picomado-ui-order-{all,negative}.log`。全Cargo・本番反映は別途追記する。
