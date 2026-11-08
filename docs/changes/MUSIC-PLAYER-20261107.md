@@ -167,3 +167,7 @@ JavaScript全体の `node --check`、`git diff --check`、project gateのstatic�
 ## 原本から逐次復号（2026-11-08）
 
 ユーザーの「ストリーミング復号の方向でたのむ」に対応する事前契約は[逐次復号設計](../design/local-music-streaming.md)、仕様commitは3985647/7ad5768/b924181。手動の全曲PCM変換を前提にせず、metadataの自動登録とtransfer所有のffmpeg readerで原本を逐次復号する。PCM canonical形式、端末別音量、交渉済みSBCの順序と既存legacy資産を維持する。[実装・検証記録](../evidence/MUSIC-PLAYER-20261108-streaming.md)でホスト試験、本番適用、実音声確認を分離する。
+
+## 画面進入時の停止解除（2026-11-08）
+
+[事前契約](../design/local-music-navigation.md)に従い、端末の実際の画面遷移で停止中だけ再生要求する。一時停止・失敗・未選曲・再起動を区別する。独立確認と本番適用は別段階。

@@ -8,7 +8,8 @@
   "domain_authority": "docs/changes/MUSIC-PLAYER-20261107.md",
   "design_artifacts": [
     "docs/changes/MUSIC-PLAYER-20261107.md",
-    "docs/design/local-music-streaming.md"
+    "docs/design/local-music-streaming.md",
+    "docs/design/local-music-navigation.md"
   ],
   "cause": "User wants an audio source plugin via Web UI uploads, ahead of internet radio.",
   "introduction_cause": "No audio source plugin exists.",
