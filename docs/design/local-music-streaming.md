@@ -34,3 +34,8 @@ EOF後のPLAY/トグル、およびEOF→pause→PLAYは先頭から再開する
 ### Scanと明示削除の競合
 
 自動登録のScanが原本を読み終えた後、削除が先に採用されても、遅いScan結果で削除済みtrackを復活させてはならない。削除要求の採用時にscan slotを取り消し、明示的な新しいScan要求まで旧Scan結果の採用を無効化する。新しいScanの世代は既存PluginJob aggregateが検証する。削除失敗時は既存trackを保持し、必要なら一覧更新で新たに検査する。起動時の自動Scanがこの取消しを上書きしてはならない。
+削除完了時もScanを再度取り消し、削除中に始まった新Scanを無効にする。Scanが先に完了していた場合に備え、要求時のkeyに加え現在の同名track/選択参照を除く。互換prepareも完了時に取り消し、pending generationを破棄する。別曲の同時登録まで取り消された場合は原本と既存trackを維持し、完了後の「一覧更新」で再検査する。取消しを避けるために無制限の自動再試行は加えない。
+
+### 旧metadataの既知EOF
+
+停止中legacy Trackを同じkeyのstreaming Trackへ移行する際、旧PCMの確定frames以上に達していた保存positionだけを0へ正規化する。再生は開始せず、途中の一時停止位置は変えない。これにより旧EOFからの空再生を避け、save/load後も次のPLAYが先頭になる。volatile endedだけに依存しない。再生中の同keyは従来通り移行を保留する。
