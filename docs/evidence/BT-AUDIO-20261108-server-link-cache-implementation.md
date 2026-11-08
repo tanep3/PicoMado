@@ -137,3 +137,50 @@ and scan 1,304, or 3,232 bytes for that nested path before leaf/IRQ usage in the
 4,096-byte core0 stack. This is not a complete runtime stack high-water proof.
 Cold persistence, warm pre-TCP use, radio behavior during flash blackout, and
 recovery effectiveness still require the separately authorized device trial.
+
+
+## Pre-deployment correction: bounded stack scratch
+
+The first `2b700edd...` candidate above was **withheld before device deployment**
+after parent review of the 3,232-byte partial stack estimate. Specification
+`b3a47df` requires aggregate-owned static scratch and defensive recursion
+rejection, without changing the format or persistence/fallback behavior. The
+replacement's implementation/tests/artifact are recorded below only when run.
+
+The SDK initialization concern was checked using the actual installed
+`pico_flash/flash.c` and `pico/flash.h`, not only adapter mocks. Native and
+ASan/UBSan fixtures execute before explicit core-init at timeout 0, 20 and
+UINT32_MAX, after init/deinit, and with IRQs initially disabled. All pass with
+exactly one callback and IRQ-state restoration per call. Effective ARM compile
+flags were also used for preprocessing: multicore/FreeRTOS support are absent,
+ASSUME_CORE0/1 are zero, core-init returns true, enter only disables local IRQs
+and returns OK, exit restores them and returns OK. No lockout or timeout branch
+remains, so this single-core build does not require initializing a nonexistent
+lockout victim before its first save. No safety override was introduced.
+
+Command: `python3 firmware/tests/server_link_cache_flash_safety_test.py --sdk
+/home/tane/dev/PicoW/pico-sdk --out /tmp/picomado-server-link-cache-flash-safety
+--compile-commands /tmp/picomado-server-link-cache-deploy.zjce2qdz/build-cache/compile_commands.json`.
+Six compile/run/preprocessor steps pass; SDK hashes and logs are in that output.
+The first fixture parser expected `bool` in preprocessed text; it was corrected
+to match the function name because the actual C preprocessor emits `_Bool`.
+Neither the SDK nor its branching conditions were changed. This is no guarantee
+of flash hardware success, blackout duration or asynchronous radio behavior.
+
+
+The scratch correction's product storage suite passes all 12 native/sanitizer
+steps, including the original byte-cut/corruption/neighbor-preservation cases
+and new callback re-entry during load, needs-erase, append, rollover and failures.
+Re-entry leaves pending HOME/HOME2 values, IO bindings, output buffers and durable
+bytes unchanged, and failure exits release the guard. Logs:
+`/tmp/server-link-cache-owned-scratch-tests/`. Static scratch occupies 2,152 bytes
+plus the independent one-byte guard; no heap, format or scheduling change.
+
+After this correction, actual owner/main-deadline 56 checks, actual main BT OFF/ON
+8 steps and prior v1 30 steps all pass again with native/sanitizer coverage:
+`/tmp/picomado-server-link-cache-scratch-owner/`,
+`/tmp/picomado-server-link-cache-scratch-app/`, and
+`/tmp/picomado-server-link-cache-scratch-v1/`. An initially unsupported `--sdk`
+argument to the v1 runner was removed and the full runner then passed.
+Same-flags ARM translation-unit preview reduces scan to 56, flush to 56 and
+encode to 48 bytes; regular source-fixed artifact checks follow separately.

@@ -52,6 +52,7 @@ python3 tests/run_bluetooth_startup_tests.py
 python3 tests/run_home_static_arp_tests.py --sdk "${PICO_SDK_PATH:-$root/../../pico-sdk}" --out "$work/home-static-arp"
 python3 tests/run_server_link_hint_tests.py --out "$work/server-link-hint"
 python3 tests/server_link_cache_run_tests.py --out "$work/server-link-cache-storage"
+python3 tests/server_link_cache_flash_safety_test.py --sdk "${PICO_SDK_PATH:-$root/../../pico-sdk}" --out "$work/server-link-cache-flash-safety"
 python3 tests/run_server_link_cache_owner_tests.py --out "$work/server-link-cache-owner"
 python3 tests/run_server_link_cache_app_tests.py --out "$work/server-link-cache-app"
 python3 tests/server_link_cache_uf2_test.py

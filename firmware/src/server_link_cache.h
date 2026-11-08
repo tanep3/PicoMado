@@ -51,7 +51,13 @@ typedef struct {
 } pm_server_link_cache_io;
 
 /* Single main-loop owner. No API is IRQ-safe or callable inside lwIP callbacks.
- * load resets RAM, never writes, and copies the IO table. A failed load is empty.
+ * Scratch is static and exclusively owned by an active load/needs_erase/flush.
+ * Synchronous IO callback re-entry never changes state, bindings, or outputs:
+ * load/remember/flush return DEFERRED, get returns false, needs_erase returns
+ * true conservatively. dirty is observation-only; record_valid/result_name
+ * remain pure. This recursion guard is not an IRQ/multicore synchronization API.
+ * An admitted load resets RAM, never writes, and copies the IO table. Its
+ * failure leaves an empty cache; a deferred recursive load leaves it unchanged.
  */
 pm_server_link_cache_result pm_server_link_cache_load(const pm_server_link_cache_io *io);
 bool pm_server_link_cache_record_valid(const pm_server_link_cache_record *record);
@@ -60,7 +66,7 @@ bool pm_server_link_cache_get(pm_profile_id profile, const uint8_t *ssid,
 /* Only submit records accepted against a current Welcome/live network scope. */
 pm_server_link_cache_result pm_server_link_cache_remember(const pm_server_link_cache_record *record);
 bool pm_server_link_cache_dirty(void);
-/* Conservative on read failure. Does not erase or modify pending RAM. */
+/* Conservative (true) on read failure/re-entry. Never modifies pending RAM. */
 bool pm_server_link_cache_needs_erase(void);
 /* Caller owns idle scheduling and the >=60s successful-commit rate limit.
  * No WiFi disconnect is required. Failure retains pending RAM for later retry.

@@ -11,10 +11,17 @@ static bool fail_erase,fail_safety,corrupt_data,corrupt_marker,corrupt_erase;
 static pm_server_link_cache_record home={.profile=PM_PROFILE_HOME,.ssid_length=4,.ssid={'H','o',0,'e'},
     .server_ipv4=0xc0a80102,.prefix_length=24,.mac={2,0x10,0x20,0x30,0x40,0x50}};
 static pm_server_link_cache_io io;
+static bool reenter_enabled,inside_reentry,expected_dirty;
+static unsigned reentry_checks;
+static void reenter(void);
+
 static pm_server_link_cache_result read_io(void *ctx,uint32_t at,uint8_t *out,size_t n) {
-    (void)ctx;assert(at<=4096&&n<=4096-at);
+    (void)ctx;assert(at<=4096&&n<=4096-at);reenter();
     if((int)++reads==fail_read)return PM_SERVER_LINK_CACHE_READ_FAILED;
-    memcpy(out,media+PREFIX+at,n);return PM_SERVER_LINK_CACHE_OK;
+    memcpy(out,media+PREFIX+at,n);
+    /* Callback recursion must not overwrite the scan/readback destination. */
+    uint8_t saved[512];assert(n<=sizeof(saved));memcpy(saved,out,n);reenter();
+    assert(!memcmp(saved,out,n));return PM_SERVER_LINK_CACHE_OK;
 }
 static pm_server_link_cache_result apply(uint32_t at,const uint8_t *p,size_t n,bool erase) {
     for(size_t j=0;j<n;j++) {
@@ -26,23 +33,57 @@ static pm_server_link_cache_result apply(uint32_t at,const uint8_t *p,size_t n,b
     return PM_SERVER_LINK_CACHE_OK;
 }
 static pm_server_link_cache_result erase_io(void *ctx) {
-    (void)ctx;++erases;if(fail_safety)return PM_SERVER_LINK_CACHE_SAFETY_FAILED;
+    (void)ctx;reenter();++erases;if(fail_safety)return PM_SERVER_LINK_CACHE_SAFETY_FAILED;
     if(fail_erase)return PM_SERVER_LINK_CACHE_ERASE_FAILED;
     pm_server_link_cache_result rc=apply(0,NULL,4096,true);
     if(corrupt_erase)media[PREFIX+1024]=0;
-    return rc;
+    reenter();return rc;
 }
 static pm_server_link_cache_result program_io(void *ctx,uint32_t at,const uint8_t *p) {
-    (void)ctx;assert(at%256==0&&at<=3840);++programs;
+    (void)ctx;assert(at%256==0&&at<=3840);
+    uint8_t saved[256];memcpy(saved,p,sizeof(saved));reenter();
+    assert(!memcmp(saved,p,sizeof(saved)));++programs;
     if(fail_safety)return PM_SERVER_LINK_CACHE_SAFETY_FAILED;
     if((int)programs==fail_program)return PM_SERVER_LINK_CACHE_PROGRAM_FAILED;
     pm_server_link_cache_result rc=apply(at,p,256,false);
     if(corrupt_data&&at%512==0)media[PREFIX+at]^=1;
     if(corrupt_marker&&at%512==256)media[PREFIX+at]^=1;
-    return rc;
+    reenter();assert(!memcmp(saved,p,sizeof(saved)));return rc;
+}
+/* Distinct IO table catches attempted replacement of the outer operation's
+ * binding even when re-entered load returns before a recursive read. */
+static pm_server_link_cache_result trap_read(void *ctx,uint32_t at,uint8_t *p,size_t n) {
+    (void)ctx;(void)at;(void)p;(void)n;assert(!"re-entry replaced the IO binding");
+    return PM_SERVER_LINK_CACHE_READ_FAILED;
+}
+static void reenter(void) {
+    if(!reenter_enabled)return;
+    assert(!inside_reentry);inside_reentry=true;++reentry_checks;
+    unsigned r=reads,p=programs,e=erases;
+    pm_server_link_cache_io other=io;other.read=trap_read;
+    pm_server_link_cache_record replacement=home,out,untouched;
+    replacement.mac[5]^=0x7f;
+    memset(&out,0xa7,sizeof(out));memcpy(&untouched,&out,sizeof(out));
+    assert(pm_server_link_cache_dirty()==expected_dirty);
+    assert(pm_server_link_cache_load(&other)==PM_SERVER_LINK_CACHE_DEFERRED);
+    assert(pm_server_link_cache_load(NULL)==PM_SERVER_LINK_CACHE_DEFERRED);
+    assert(pm_server_link_cache_remember(&replacement)==PM_SERVER_LINK_CACHE_DEFERRED);
+    replacement.profile=PM_PROFILE_HOME2;
+    assert(pm_server_link_cache_remember(&replacement)==PM_SERVER_LINK_CACHE_DEFERRED);
+    assert(pm_server_link_cache_remember(NULL)==PM_SERVER_LINK_CACHE_DEFERRED);
+    assert(pm_server_link_cache_flush(true,true)==PM_SERVER_LINK_CACHE_DEFERRED);
+    assert(pm_server_link_cache_flush(false,false)==PM_SERVER_LINK_CACHE_DEFERRED);
+    assert(pm_server_link_cache_needs_erase());
+    assert(!pm_server_link_cache_get(home.profile,home.ssid,home.ssid_length,home.server_ipv4,&out));
+    assert(!memcmp(&out,&untouched,sizeof(out)));
+    assert(pm_server_link_cache_record_valid(&replacement));
+    assert(!strcmp(pm_server_link_cache_result_name(PM_SERVER_LINK_CACHE_DEFERRED),"deferred"));
+    assert(pm_server_link_cache_dirty()==expected_dirty);
+    assert(reads==r&&programs==p&&erases==e);inside_reentry=false;
 }
 static void reset_faults(void) {
     reads=programs=erases=0;byte_budget=fail_read=fail_program=-1;
+    reenter_enabled=inside_reentry=expected_dirty=false;reentry_checks=0;
     fail_erase=fail_safety=corrupt_data=corrupt_marker=corrupt_erase=false;
 }
 static void reset(void) {
@@ -179,10 +220,62 @@ static void failures(void) {
     reset_faults();fail_read=1;assert(pm_server_link_cache_load(&io)==PM_SERVER_LINK_CACHE_READ_FAILED);assert(!get(&r));
     puts("PASS safety/erase/program/read/commit failures preserve dirty RAM; uncertain commit rescan; allow flags; retry");
 }
+static void reentry(void) {
+    static uint8_t reference[SIZE];
+    for(unsigned full=0;full<=1;full++) {
+        reset();pm_server_link_cache_record r=home,home2=home,out;
+        home2.profile=PM_PROFILE_HOME2;home2.ssid[0]='2';home2.mac[5]^=0x40;
+        commit(&home2);commit(&r);
+        if(full)for(unsigned i=2;i<8;i++){r.mac[5]++;commit(&r);}
+        memcpy(before,media,SIZE);r.mac[5]++;
+        /* Exact durable-byte reference from the same operation without recursion. */
+        commit(&r);memcpy(reference,media,SIZE);memcpy(media,before,SIZE);reset_faults();
+        reenter_enabled=true;expected_dirty=false;
+        assert(pm_server_link_cache_load(&io)==PM_SERVER_LINK_CACHE_OK);
+        assert(reentry_checks==16&&!programs&&!erases&&!pm_server_link_cache_dirty());
+        assert(!memcmp(media,before,SIZE));
+        assert(pm_server_link_cache_remember(&r)==PM_SERVER_LINK_CACHE_CHANGED);
+        expected_dirty=true;reentry_checks=0;
+        assert(pm_server_link_cache_needs_erase()==(bool)full);
+        assert(reentry_checks==16&&pm_server_link_cache_dirty());
+        assert(!memcmp(media,before,SIZE));
+        reentry_checks=0;
+        assert(pm_server_link_cache_flush(true,true)==PM_SERVER_LINK_CACHE_OK);
+        assert(reentry_checks==(full?58u:24u));assert(!pm_server_link_cache_dirty());
+        assert(!memcmp(media,reference,SIZE));preserved();
+        assert(get(&out)&&out.mac[5]==r.mac[5]);
+        assert(pm_server_link_cache_get(home2.profile,home2.ssid,home2.ssid_length,home2.server_ipv4,&out));
+        assert(out.mac[5]==home2.mac[5]);
+        /* Both RAM records and reloaded durable records survive every callback. */
+        expected_dirty=false;
+        assert(pm_server_link_cache_load(&io)==PM_SERVER_LINK_CACHE_OK);
+        assert(get(&out)&&out.mac[5]==r.mac[5]);
+        assert(pm_server_link_cache_get(home2.profile,home2.ssid,home2.ssid_length,home2.server_ipv4,&out));
+        assert(out.mac[5]==home2.mac[5]);
+        assert(!memcmp(media,reference,SIZE));
+    }
+    /* The guard must release on load/scan/flush failure, not just successful IO. */
+    reset();commit(&home);reset_faults();reenter_enabled=true;fail_read=1;
+    assert(pm_server_link_cache_load(&io)==PM_SERVER_LINK_CACHE_READ_FAILED);
+    pm_server_link_cache_record r=home,out;r.mac[5]++;
+    assert(!get(&out));assert(pm_server_link_cache_remember(&r)==PM_SERVER_LINK_CACHE_CHANGED);
+    expected_dirty=true;fail_read=(int)reads+1;
+    assert(pm_server_link_cache_needs_erase());assert(get(&out)&&out.mac[5]==r.mac[5]);
+    fail_read=-1;fail_program=1;
+    assert(pm_server_link_cache_flush(true,true)==PM_SERVER_LINK_CACHE_PROGRAM_FAILED);
+    assert(pm_server_link_cache_dirty());assert(get(&out)&&out.mac[5]==r.mac[5]);
+    fail_program=-1;assert(pm_server_link_cache_flush(true,true)==PM_SERVER_LINK_CACHE_OK);
+    expected_dirty=false;assert(pm_server_link_cache_load(&io)==PM_SERVER_LINK_CACHE_OK);
+    assert(get(&out)&&out.mac[5]==r.mac[5]);
+    reenter_enabled=false;
+    assert(pm_server_link_cache_load(NULL)==PM_SERVER_LINK_CACHE_INVALID);
+    assert(pm_server_link_cache_load(&io)==PM_SERVER_LINK_CACHE_OK); /* invalid-load exit released */
+    puts("PASS IO callback re-entry across load/needs-erase/append/rollover/failures: guard, scratch/pending/outputs/IO/bytes preserved");
+}
 int main(void) {
     io=(pm_server_link_cache_io){.read=read_io,.erase=erase_io,.program=program_io};
     assert(pm_server_link_cache_load(NULL)==PM_SERVER_LINK_CACHE_INVALID);
     assert(pm_server_link_cache_remember(&home)==PM_SERVER_LINK_CACHE_INVALID);
-    rules();cuts(false);cuts(true);invalid_pages();failures();
+    rules();cuts(false);cuts(true);invalid_pages();failures();reentry();
     puts("PASS actual production cache aggregate/codec; RAM flash only, no hardware acceptance");return 0;
 }

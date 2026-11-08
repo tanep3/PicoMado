@@ -13,6 +13,18 @@ static struct {
     snapshot pending;
     bool initialized, dirty;
 } cache;
+/* One main-loop owner, deliberately outside cache's load/reset memset. This
+ * rejects synchronous adapter recursion; it is not an IRQ/multicore lock. */
+static bool busy;
+static struct {
+    snapshot disk, candidate, writing;
+    uint8_t scan_pair[SLOT_SIZE];
+    uint8_t expected[256], expected_marker[256];
+    uint8_t page[256], marker[256], readback[256];
+} scratch;
+/* Keep scan input, decoded candidate, newest disk snapshot, canonical encoding
+ * and pending write separate. Nested scan -> decode -> encode must not alias
+ * either its unread input or cache.pending. No scratch is exposed by the API. */
 
 static int index_for(pm_profile_id profile) {
     return profile==PM_PROFILE_HOME ? 0 : profile==PM_PROFILE_HOME2 ? 1 : -1;
@@ -77,50 +89,56 @@ static void encode(const snapshot *s,uint8_t page[256],uint8_t marker[256]) {
     marker[6]=24;marker[7]=0;write64(marker+8,s->sequence);
     write32(marker+16,crc);write32(marker+20,~crc);
 }
-static bool decode(const uint8_t page[256],const uint8_t marker[256],snapshot *out) {
+static bool decode(const uint8_t page[256],const uint8_t marker[256]) {
     if(memcmp(page,"SLCH",4)||page[4]!=FORMAT_VERSION||page[5]||page[6]!=112||page[7]||
        !read64(page+8)||read32(page+252)!=crc32(page,252)||!filled(page+112,140,0xff))return false;
-    snapshot s={0};s.sequence=read64(page+8);
+    snapshot *s=&scratch.candidate;memset(s,0,sizeof(*s));s->sequence=read64(page+8);
     for(unsigned i=0;i<2;i++) {
         const uint8_t *p=page+16+i*RECORD_SIZE;
         if(!p[0]) {if(!filled(p,RECORD_SIZE,0))return false;continue;}
         if(p[0]!=1||p[1]!=(i?PM_PROFILE_HOME2:PM_PROFILE_HOME)||p[2]>32)return false;
-        pm_server_link_cache_record *r=&s.records[i];r->profile=(pm_profile_id)p[1];
+        pm_server_link_cache_record *r=&s->records[i];r->profile=(pm_profile_id)p[1];
         r->ssid_length=p[2];r->prefix_length=p[3];r->server_ipv4=read32(p+4);
         memcpy(r->mac,p+8,6);memcpy(r->ssid,p+14,r->ssid_length);
         if(!pm_server_link_cache_record_valid(r)||!filled(p+14+r->ssid_length,34-r->ssid_length,0))return false;
-        s.present[i]=true;
+        s->present[i]=true;
     }
-    uint8_t expected[256],expected_marker[256];encode(&s,expected,expected_marker);
-    if(memcmp(page,expected,256)||memcmp(marker,expected_marker,256))return false;
-    *out=s;return true;
+    encode(s,scratch.expected,scratch.expected_marker);
+    if(memcmp(page,scratch.expected,256)||memcmp(marker,scratch.expected_marker,256))return false;
+    return true;
 }
 /* Rescan after any IO failure: an SDK timeout may occur after the effect. Never
  * program a partially used slot, nor fill a hole before a later occupied slot. */
 static pm_server_link_cache_result scan(snapshot *latest,unsigned *next) {
     memset(latest,0,sizeof(*latest));*next=0;
-    uint8_t pair[SLOT_SIZE];bool found=false;
+    uint8_t *pair=scratch.scan_pair;bool found=false;
     for(unsigned i=0;i<SLOT_COUNT;i++) {
-        pm_server_link_cache_result rc=cache.io.read(cache.io.context,i*SLOT_SIZE,pair,sizeof(pair));
+        pm_server_link_cache_result rc=cache.io.read(cache.io.context,i*SLOT_SIZE,pair,SLOT_SIZE);
         if(rc!=PM_SERVER_LINK_CACHE_OK)return rc;
-        if(!filled(pair,sizeof(pair),0xff))*next=i+1;
-        snapshot candidate;
-        if(!decode(pair,pair+256,&candidate))continue;
-        if(found&&candidate.sequence<=latest->sequence)return PM_SERVER_LINK_CACHE_INVALID;
-        *latest=candidate;found=true;
+        if(!filled(pair,SLOT_SIZE,0xff))*next=i+1;
+        if(!decode(pair,pair+256))continue;
+        if(found&&scratch.candidate.sequence<=latest->sequence)return PM_SERVER_LINK_CACHE_INVALID;
+        *latest=scratch.candidate;found=true;
     }
     return found?PM_SERVER_LINK_CACHE_OK:PM_SERVER_LINK_CACHE_EMPTY;
 }
-pm_server_link_cache_result pm_server_link_cache_load(const pm_server_link_cache_io *io) {
+static pm_server_link_cache_result load_owned(const pm_server_link_cache_io *io) {
     memset(&cache,0,sizeof(cache));
     if(!io||!io->read||!io->erase||!io->program)return PM_SERVER_LINK_CACHE_INVALID;
-    cache.io=*io;cache.initialized=true;snapshot loaded;unsigned next;
-    pm_server_link_cache_result rc=scan(&loaded,&next);
-    if(rc==PM_SERVER_LINK_CACHE_OK)cache.pending=loaded;
+    cache.io=*io;cache.initialized=true;unsigned next;
+    pm_server_link_cache_result rc=scan(&scratch.disk,&next);
+    if(rc==PM_SERVER_LINK_CACHE_OK)cache.pending=scratch.disk;
     return rc;
+}
+pm_server_link_cache_result pm_server_link_cache_load(const pm_server_link_cache_io *io) {
+    if(busy)return PM_SERVER_LINK_CACHE_DEFERRED;
+    busy=true;
+    pm_server_link_cache_result rc=load_owned(io);
+    busy=false;return rc;
 }
 bool pm_server_link_cache_get(pm_profile_id profile,const uint8_t *ssid,size_t length,
                               uint32_t server,pm_server_link_cache_record *out) {
+    if(busy)return false;
     int i=index_for(profile);
     if(i<0||!cache.initialized||!ssid||!length||length>32||!out||!cache.pending.present[i])return false;
     const pm_server_link_cache_record *r=&cache.pending.records[i];
@@ -128,6 +146,7 @@ bool pm_server_link_cache_get(pm_profile_id profile,const uint8_t *ssid,size_t l
     *out=*r;return true;
 }
 pm_server_link_cache_result pm_server_link_cache_remember(const pm_server_link_cache_record *r) {
+    if(busy)return PM_SERVER_LINK_CACHE_DEFERRED;
     if(!cache.initialized||!pm_server_link_cache_record_valid(r))return PM_SERVER_LINK_CACHE_INVALID;
     int i=index_for(r->profile);
     if(cache.pending.present[i]&&record_equal(&cache.pending.records[i],r))return PM_SERVER_LINK_CACHE_UNCHANGED;
@@ -136,35 +155,38 @@ pm_server_link_cache_result pm_server_link_cache_remember(const pm_server_link_c
 }
 bool pm_server_link_cache_dirty(void) {return cache.dirty;}
 bool pm_server_link_cache_needs_erase(void) {
+    if(busy)return true;
     if(!cache.initialized||!cache.dirty)return false;
-    snapshot disk;unsigned next;pm_server_link_cache_result rc=scan(&disk,&next);
-    if(rc==PM_SERVER_LINK_CACHE_OK&&contents_equal(&disk,&cache.pending))return false;
-    return (rc!=PM_SERVER_LINK_CACHE_OK&&rc!=PM_SERVER_LINK_CACHE_EMPTY)||next>=SLOT_COUNT;
+    busy=true;unsigned next;
+    pm_server_link_cache_result rc=scan(&scratch.disk,&next);
+    bool needed=!(rc==PM_SERVER_LINK_CACHE_OK&&contents_equal(&scratch.disk,&cache.pending))&&
+        ((rc!=PM_SERVER_LINK_CACHE_OK&&rc!=PM_SERVER_LINK_CACHE_EMPTY)||next>=SLOT_COUNT);
+    busy=false;return needed;
 }
-pm_server_link_cache_result pm_server_link_cache_flush(bool allow_flash,bool allow_erase) {
+static pm_server_link_cache_result flush_owned(bool allow_flash,bool allow_erase) {
     if(!cache.initialized)return PM_SERVER_LINK_CACHE_INVALID;
     if(!cache.dirty)return PM_SERVER_LINK_CACHE_UNCHANGED;
     if(!allow_flash)return PM_SERVER_LINK_CACHE_DEFERRED;
-    snapshot disk;unsigned next;pm_server_link_cache_result rc=scan(&disk,&next);
+    snapshot *disk=&scratch.disk;unsigned next;pm_server_link_cache_result rc=scan(disk,&next);
     if(rc!=PM_SERVER_LINK_CACHE_OK&&rc!=PM_SERVER_LINK_CACHE_EMPTY)return rc;
-    if(rc==PM_SERVER_LINK_CACHE_OK&&contents_equal(&disk,&cache.pending)) {
-        cache.pending.sequence=disk.sequence;cache.dirty=false;return PM_SERVER_LINK_CACHE_OK;
+    if(rc==PM_SERVER_LINK_CACHE_OK&&contents_equal(disk,&cache.pending)) {
+        cache.pending.sequence=disk->sequence;cache.dirty=false;return PM_SERVER_LINK_CACHE_OK;
     }
-    uint64_t sequence=cache.pending.sequence>disk.sequence?cache.pending.sequence:disk.sequence;
+    uint64_t sequence=cache.pending.sequence>disk->sequence?cache.pending.sequence:disk->sequence;
     if(sequence==UINT64_MAX)return PM_SERVER_LINK_CACHE_SEQUENCE_EXHAUSTED;
     if(next>=SLOT_COUNT) {
         if(!allow_erase)return PM_SERVER_LINK_CACHE_NEEDS_ERASE;
         rc=cache.io.erase(cache.io.context);if(rc!=PM_SERVER_LINK_CACHE_OK)return rc;
-        uint8_t readback[256];
         for(unsigned offset=0;offset<PM_SERVER_LINK_CACHE_SECTOR_SIZE;offset+=256) {
-            rc=cache.io.read(cache.io.context,offset,readback,sizeof(readback));
+            rc=cache.io.read(cache.io.context,offset,scratch.readback,sizeof(scratch.readback));
             if(rc!=PM_SERVER_LINK_CACHE_OK)return rc;
-            if(!filled(readback,sizeof(readback),0xff))return PM_SERVER_LINK_CACHE_READBACK_FAILED;
+            if(!filled(scratch.readback,sizeof(scratch.readback),0xff))return PM_SERVER_LINK_CACHE_READBACK_FAILED;
         }
         next=0;
     }
-    snapshot writing=cache.pending;writing.sequence=sequence+1;
-    uint8_t page[256],marker[256],readback[256];encode(&writing,page,marker);
+    scratch.writing=cache.pending;scratch.writing.sequence=sequence+1;
+    uint8_t *page=scratch.page,*marker=scratch.marker,*readback=scratch.readback;
+    encode(&scratch.writing,page,marker);
     uint32_t offset=next*SLOT_SIZE;
     rc=cache.io.program(cache.io.context,offset,page);if(rc!=PM_SERVER_LINK_CACHE_OK)return rc;
     rc=cache.io.read(cache.io.context,offset,readback,256);if(rc!=PM_SERVER_LINK_CACHE_OK)return rc;
@@ -172,7 +194,13 @@ pm_server_link_cache_result pm_server_link_cache_flush(bool allow_flash,bool all
     rc=cache.io.program(cache.io.context,offset+256,marker);if(rc!=PM_SERVER_LINK_CACHE_OK)return rc;
     rc=cache.io.read(cache.io.context,offset+256,readback,256);if(rc!=PM_SERVER_LINK_CACHE_OK)return rc;
     if(memcmp(marker,readback,256))return PM_SERVER_LINK_CACHE_COMMIT_FAILED;
-    cache.pending.sequence=writing.sequence;cache.dirty=false;return PM_SERVER_LINK_CACHE_OK;
+    cache.pending.sequence=scratch.writing.sequence;cache.dirty=false;return PM_SERVER_LINK_CACHE_OK;
+}
+pm_server_link_cache_result pm_server_link_cache_flush(bool allow_flash,bool allow_erase) {
+    if(busy)return PM_SERVER_LINK_CACHE_DEFERRED;
+    busy=true;
+    pm_server_link_cache_result rc=flush_owned(allow_flash,allow_erase);
+    busy=false;return rc;
 }
 const char *pm_server_link_cache_result_name(pm_server_link_cache_result r) {
     switch(r) {
