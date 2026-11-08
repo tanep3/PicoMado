@@ -197,3 +197,54 @@ size limits, late lookup and reconnect races, profile switching, DHCP changes,
 NIC replacement and SDK add/readback/removal failure, followed by same-device
 ordinary → Welcome-hint → ordinary silent trials with exact receive/apply
 markers, ACK progress, Receipt/Rendered and drop accounting.
+
+## Authorized v1 implementation contract (before implementation)
+
+The user approved implementation and application of HOME/HOME2 temporary MAC
+selection with cleanup on disconnect; AWAY/router settings remain unchanged.
+This section promotes the preceding design into the implementation contract,
+without claiming it is already implemented, deployed or effective.
+
+Wire names are agreed between firmware and service implementers:
+`server-link-hint-v1`; optional Welcome `data.server_link` object containing
+`version:1`, dotted-decimal string `server_ipv4`, dotted-decimal string
+`client_ipv4`, integer `prefix_length`1..30, and colon-separated six-byte `mac`.
+Hex case is immaterial. Outer Welcome incarnation/session bind the hint; never
+repeat those keys inside the object. Omitted or null means no hint. Invalid
+optional contents mean hint rejected, with a valid ordinary Welcome retained.
+Invalid required Welcome envelope/session fields still use normal failure.
+
+For staged firmware rollout, `PM_SERVER_LINK_HINT` defaults OFF; this approved
+E-ink_1 candidate explicitly enables it. Enabling it also enables the actual
+SDK `ETHARP_SUPPORT_STATIC_ENTRIES`. Reject a build combining it with the older
+hardcoded `PM_HOME_STATIC_ARP_DIAGNOSTIC`. No hardcoded IP, MAC or device identity
+belongs in this product feature. HOME/HOME2 advertise capability; AWAY does not.
+
+The product parser is allocation-free, bounded by the existing control-message
+size and a small nesting limit. It validates direct envelope/data fields,
+integer overflow, exact IPv4/MAC encodings and duplicate required/known fields.
+Optional hint data is not parsed with the old global substring helpers. Parse
+base session data into temporary values; apply a validated hint through the
+network aggregate before publishing ACTIVE or starting later application sends.
+
+Network query/apply snapshots bind transport generation, profile, link/route
+identity, local/remote IPv4 and mask/netif. Recheck under the existing SDK lock.
+The owner keeps one current-session RAM mapping. Close/retry/terminal failures,
+observed link/address/mask/route changes revoke it; no normal-session TTL and no
+ACK-stall-triggered reset are added. Missing/invalid hint or add/readback failure
+continues unpinned ordinary operation after safe cleanup. Unknown cleanup failure
+retains ownership and prevents leakage into a different connection/profile.
+
+Service owns socket-local accepted metadata and asynchronous bounded lookup
+outside the App lock. Publication must keep the original accepted connection
+and session association. Linux eligibility requires unique getifaddrs IPv4
+owner plus RTM_GETROUTE(peer, source=local): unicast, no gateway, OIF matches
+owner and same prefix. Failure/ambiguity/deadline omits the optional field,
+not Welcome. The firmware independently verifies its live endpoint/prefix.
+
+Acceptance includes new parser/domain/owner/app host fixtures, unchanged old
+paths and BT-OFF, service old/new negotiation and bounded OS-adapter fixtures,
+regular E-ink_1 ARM build with source/config/SDK/artifact hashes, then parent-owned
+same-device silent application/comparison/rollback. Native/sanitizer/model passes
+are not physical acceptance. Root-wide Cargo/build validation remains parent-
+coordinated to avoid duplicate heavy jobs. Workers do not flash or use SSH.
