@@ -173,3 +173,15 @@ pub async fn read_audio_chunk(plugin: &str, spec: crate::plugin_jobs::AudioPlayb
     let executor = executors().remove(plugin).ok_or_else(|| crate::plugin_jobs::JobFailure::new("unsupported", "audio executor unavailable"))?;
     executor.read_audio(spec, offset, max, paths).await
 }
+
+/// State is owned by one socket transfer, never shared by asset or device ID.
+pub async fn read_audio_session(handle: crate::plugin_jobs::AudioReadHandle, plugin: &str, spec: crate::plugin_jobs::AudioPlaybackSpec, offset: u64, max: u32, paths: crate::plugin_jobs::PluginPaths) -> Result<Vec<u8>, crate::plugin_jobs::JobFailure> {
+    let mut state = handle.lock().await;
+    let executor = executors().remove(plugin).ok_or_else(crate::plugin_jobs::JobFailure::unsupported)?;
+    if !state.opened {
+        state.reader = executor.open_audio(spec.clone(), paths.clone()).await?;
+        state.opened = true;
+    }
+    if let Some(reader) = state.reader.as_mut() { reader.read(offset, max).await }
+    else { executor.read_audio(spec, offset, max, paths).await }
+}

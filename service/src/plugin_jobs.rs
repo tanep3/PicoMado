@@ -269,6 +269,17 @@ pub struct AssetDescriptor {
 /// application owner. Optional maintenance follows its separate explicit
 /// publication/finish protocol. Cancellation must stop/wait children before returning;
 /// dropping a future must not leave a child process running.
+/// A single playback transfer owns this reader. Reads must be cancellation safe.
+pub trait AudioSourceReader: Send {
+    fn read(&mut self, offset: u64, max: u32) -> BoxFuture<'_, Result<Vec<u8>, JobFailure>>;
+}
+#[derive(Default)]
+pub struct AudioReadState {
+    pub(crate) opened: bool,
+    pub(crate) reader: Option<Box<dyn AudioSourceReader>>,
+}
+pub type AudioReadHandle = std::sync::Arc<tokio::sync::Mutex<AudioReadState>>;
+
 pub trait PluginJobExecutor: Send + Sync {
     fn maintenance(&self) -> Option<&dyn crate::maintenance::PluginMaintenanceExecutor> { None }
     fn execute(
@@ -277,6 +288,11 @@ pub trait PluginJobExecutor: Send + Sync {
         context: JobExecutionContext,
     ) -> BoxFuture<'static, JobOutcome>;
     /// Bounded interleaved signed 16-bit LE PCM. Empty means finite EOF.
+    /// None preserves the legacy stateless PCM executor contract.
+    fn open_audio(&self, _spec: AudioPlaybackSpec, _paths: PluginPaths)
+        -> BoxFuture<'static, Result<Option<Box<dyn AudioSourceReader>>, JobFailure>> {
+        Box::pin(async { Ok(None) })
+    }
     fn read_audio(&self, _spec: AudioPlaybackSpec, _offset_frames: u64,
         _max_frames: u32, _paths: PluginPaths)
         -> BoxFuture<'static, Result<Vec<u8>, JobFailure>> {

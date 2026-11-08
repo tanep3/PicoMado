@@ -1,11 +1,13 @@
 //! Bounded local-only decode and sample IO. No application lock is held.
 use super::*;
+#[path = "streaming.rs"]
+mod streaming;
 use futures_util::future::BoxFuture;
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
-    os::unix::fs::OpenOptionsExt,
+    os::unix::fs::{OpenOptionsExt, DirBuilderExt},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
@@ -96,6 +98,17 @@ impl PluginJobExecutor for LocalMusicExecutor {
             }
         })
     }
+    fn open_audio(&self, spec: AudioPlaybackSpec, paths: PluginPaths) -> BoxFuture<'static, Result<Option<Box<dyn AudioSourceReader>>, JobFailure>> {
+        Box::pin(async move {
+            let track = validated_track(&spec)?;
+            if !track.streaming { return Ok(None); }
+            let token = crate::youtube::Cancellation::default();
+            let _guard = CancelOnDrop(token.clone());
+            let worker = tokio::task::spawn_blocking(move || streaming::Decoder::open(spec, paths, &token));
+            let decoder = worker.await.map_err(|_| fail("復号起動が終了しました"))??;
+            Ok(Some(Box::new(decoder) as Box<dyn AudioSourceReader>))
+        })
+    }
     fn read_audio(
         &self,
         spec: AudioPlaybackSpec,
@@ -159,7 +172,16 @@ fn run(
                 }
             }
             names.sort();
-            Ok(json!(names))
+            let mut tracks = Vec::new();
+            let mut errors = Vec::new();
+            for name in &names {
+                if cancel.is_cancelled() { return Err(fail("取り消しました")); }
+                match run(Work::Prepare { name: name.clone(), generation: 0 }, paths.clone(), cancel) {
+                    Ok(track) => tracks.push(track),
+                    Err(e) => errors.push(format!("{name}: {}", e.message)),
+                }
+            }
+            Ok(json!({"imports": names, "tracks": tracks, "errors": errors}))
         }
         Work::Delete {
             name,
@@ -186,153 +208,32 @@ fn run(
             Ok(Value::Null)
         }
         Work::Prepare { name, generation } => {
-            if !good_name(&name) {
-                return Err(fail("音源名が不正です"));
-            }
-            let mut input = source(&imports.join(&name), MAX_SOURCE)?;
-            directory(&paths.cache)?;
-            let nonce = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|_| fail("時刻が不正です"))?
-                .as_nanos();
-            let work = paths.cache.join(format!(
-                "music-work-{}-{generation}-{nonce}",
-                std::process::id()
-            ));
-            fs::create_dir(&work).map_err(|_| fail("作業先を作れません"))?;
-            let _cleanup = WorkDir(work.clone());
-            let mut copy =
-                File::create(work.join("input")).map_err(|_| fail("音源コピーに失敗しました"))?;
-            let mut hash = Sha256::new();
-            hash.update(b"local-music-pcm48-v1");
-            hash.update(name.as_bytes());
-            let mut buf = [0u8; 65536];
-            let mut total = 0u64;
-            loop {
-                if cancel.is_cancelled() {
-                    return Err(fail("取り消しました"));
-                }
-                let n = input.read(&mut buf).map_err(|_| fail("音源が読めません"))?;
-                if n == 0 {
-                    break;
-                }
-                total += n as u64;
-                if total > MAX_SOURCE {
-                    return Err(fail("音源が大きすぎます"));
-                }
-                copy.write_all(&buf[..n])
-                    .map_err(|_| fail("音源コピーに失敗しました"))?;
-                hash.update(&buf[..n]);
-            }
-            drop(copy);
-            let key = format!("{:x}", hash.finalize());
-            let target = pcm_path(&paths, &key)?;
-            if target.exists() {
-                let f = source(&target, MAX_FRAMES * 4)?;
-                let bytes = f
-                    .metadata()
-                    .map_err(|_| fail("音源を確認できません"))?
-                    .len();
-                if bytes % 4 != 0 {
-                    return Err(fail("音源が破損しています"));
-                }
-                return Ok(json!(Track {
-                    key,
-                    name,
-                    frames: bytes / 4
-                }));
-            }
-            let output = work.join("output.pcm");
-            let child = Command::new("ffmpeg")
-                .args([
-                    "-nostdin",
-                    "-hide_banner",
-                    "-loglevel",
-                    "error",
-                    "-protocol_whitelist",
-                    "file,pipe",
-                    "-format_whitelist",
-                    "mp3,wav,flac,ogg,mov,aac",
-                    "-i",
-                ])
-                .arg(work.join("input"))
-                .args([
-                    "-map",
-                    "0:a:0",
-                    "-vn",
-                    "-sn",
-                    "-dn",
-                    "-ac",
-                    "2",
-                    "-ar",
-                    "48000",
-                    "-c:a",
-                    "pcm_s16le",
-                    "-f",
-                    "s16le",
-                    "-t",
-                    "7201",
-                    "-fs",
-                    &(MAX_FRAMES * 4 + 4096).to_string(),
-                ])
-                .arg(&output)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .map_err(|_| fail("ffmpegを起動できません"))?;
-            let mut child = ChildGuard(child);
+            let (work, key) = private_input(&paths, &name, generation, cancel)?;
+            let output = work.0.join("probe.json");
+            let mut child = ChildGuard(Command::new("ffprobe").args([
+                "-v", "error", "-protocol_whitelist", "file,pipe", "-format_whitelist", "mp3,wav,flac,ogg,mov,aac",
+                "-select_streams", "a:0", "-show_entries", "stream=duration:format=duration", "-of", "json",
+            ]).arg(work.0.join("input")).stdin(Stdio::null())
+                .stdout(File::create(&output).map_err(|_| fail("音源情報を取得できません"))?)
+                .stderr(Stdio::null()).spawn().map_err(|_| fail("ffprobeを起動できません"))?);
             let started = Instant::now();
             loop {
-                if cancel.is_cancelled() || started.elapsed() > Duration::from_secs(850) {
-                    return Err(fail("変換を取り消したか時間切れです"));
-                }
-                if fs::metadata(&output).is_ok_and(|m| m.len() > MAX_FRAMES * 4) {
-                    return Err(fail("音源は2時間以内にしてください"));
-                }
-                if let Some(status) = child
-                    .0
-                    .try_wait()
-                    .map_err(|_| fail("変換状態を取得できません"))?
-                {
-                    if !status.success() {
-                        return Err(fail("音源を変換できません。対応形式を確認してください"));
-                    }
+                if cancel.is_cancelled() || started.elapsed() > Duration::from_secs(20) { return Err(fail("音源検査を取り消したか時間切れです")); }
+                if fs::metadata(&output).is_ok_and(|m| m.len() > 65536) { return Err(fail("音源情報が大きすぎます")); }
+                if let Some(status) = child.0.try_wait().map_err(|_| fail("音源検査状態を取得できません"))? {
+                    if !status.success() { return Err(fail("対応する音声を確認できません")); }
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(25));
+                std::thread::sleep(Duration::from_millis(10));
             }
-            let f = source(&output, MAX_FRAMES * 4)?;
-            let bytes = f
-                .metadata()
-                .map_err(|_| fail("音源を検証できません"))?
-                .len();
-            if bytes % 4 != 0 {
-                return Err(fail("音源が破損しています"));
-            }
-            f.sync_all().map_err(|_| fail("音源を保存できません"))?;
-            if cancel.is_cancelled() {
-                return Err(fail("取り消しました"));
-            }
-            match fs::hard_link(&output, &target) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    if source(&target, MAX_FRAMES * 4)?
-                        .metadata()
-                        .map_err(|_| fail("音源を検証できません"))?
-                        .len()
-                        != bytes
-                    {
-                        return Err(fail("保存済み音源が一致しません"));
-                    }
-                }
-                Err(_) => return Err(fail("音源を保存できません")),
-            };
-            Ok(json!(Track {
-                key,
-                name,
-                frames: bytes / 4
-            }))
+            let mut bytes = Vec::new();
+            source(&output, 65536)?.read_to_end(&mut bytes).map_err(|_| fail("音源情報を読めません"))?;
+            let info: Value = serde_json::from_slice(&bytes).map_err(|_| fail("音源情報が不正です"))?;
+            let streams = info["streams"].as_array().filter(|s| !s.is_empty()).ok_or_else(|| fail("音声streamがありません"))?;
+            let duration = streams[0]["duration"].as_str().or_else(|| info["format"]["duration"].as_str())
+                .and_then(|s| s.parse::<f64>().ok()).filter(|s| s.is_finite() && *s > 0.0 && *s <= 7200.0)
+                .ok_or_else(|| fail("音源は長さが分かる2時間以内の音声にしてください"))?;
+            Ok(json!(Track { key, name, frames: (duration * SAMPLE_RATE as f64).ceil() as u64, streaming: true }))
         }
     }
 }
@@ -351,7 +252,7 @@ mod tests {
         let t = Track {
             key: key.clone(),
             name: "x.wav".into(),
-            frames: 100,
+            frames: 100, streaming: false,
         };
         fs::write(pcm_path(&paths, &key).unwrap(), vec![3u8; 400]).unwrap();
         let spec = AudioPlaybackSpec {
@@ -400,7 +301,7 @@ mod tests {
         let token = crate::youtube::Cancellation::default();
         assert_eq!(
             run(Work::Scan, paths.clone(), &token).unwrap(),
-            json!(["real.wav"])
+            json!({"imports":["real.wav"],"tracks":[],"errors":["real.wav: 対応する音声を確認できません"]})
         );
         token.cancel();
         assert!(run(
@@ -415,7 +316,7 @@ mod tests {
         assert_eq!(fs::read_dir(&paths.cache).unwrap().count(), 0);
     }
     #[test]
-    fn wav_decodes_to_stereo48k_and_reuses_cache() {
+    fn wav_metadata_registers_without_pcm_cache() {
         if Command::new("ffmpeg")
             .arg("-version")
             .stdout(Stdio::null())
@@ -469,6 +370,56 @@ mod tests {
             )
             .unwrap()
         );
-        assert_eq!(fs::read_dir(&paths.cache).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(&paths.cache).unwrap().count(), 0);
     }
+}
+
+fn validated_track(spec: &AudioPlaybackSpec) -> Result<Track, JobFailure> {
+    let t: Track = serde_json::from_value(spec.source.clone()).map_err(|_| fail("音源情報が不正です"))?;
+    if !spec.valid() || !t.valid() || spec.start_frame >= MAX_FRAMES || t.key != spec.asset_id || (if t.streaming { spec.frame_count.is_some() } else { spec.frame_count != Some(t.frames) }) { return Err(fail("音源情報が一致しません")); }
+    Ok(t)
+}
+fn private_input(paths: &PluginPaths, name: &str, generation: u64, cancel: &crate::youtube::Cancellation) -> Result<(WorkDir, String), JobFailure> {
+    let imports = paths.data.join("imports");
+            if !good_name(&name) {
+                return Err(fail("音源名が不正です"));
+            }
+            let mut input = source(&imports.join(&name), MAX_SOURCE)?;
+            directory(&paths.cache)?;
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| fail("時刻が不正です"))?
+                .as_nanos();
+            let work = paths.cache.join(format!(
+                "music-work-{}-{generation}-{nonce}",
+                std::process::id()
+            ));
+            fs::DirBuilder::new().mode(0o700).create(&work).map_err(|_| fail("作業先を作れません"))?;
+            let cleanup = WorkDir(work.clone());
+            let mut copy =
+                File::create(work.join("input")).map_err(|_| fail("音源コピーに失敗しました"))?;
+            let mut hash = Sha256::new();
+            hash.update(b"local-music-pcm48-v1");
+            hash.update(name.as_bytes());
+            let mut buf = [0u8; 65536];
+            let mut total = 0u64;
+            loop {
+                if cancel.is_cancelled() {
+                    return Err(fail("取り消しました"));
+                }
+                let n = input.read(&mut buf).map_err(|_| fail("音源が読めません"))?;
+                if n == 0 {
+                    break;
+                }
+                total += n as u64;
+                if total > MAX_SOURCE {
+                    return Err(fail("音源が大きすぎます"));
+                }
+                copy.write_all(&buf[..n])
+                    .map_err(|_| fail("音源コピーに失敗しました"))?;
+                hash.update(&buf[..n]);
+            }
+            drop(copy);
+            let key = format!("{:x}", hash.finalize());
+    Ok((cleanup, key))
 }

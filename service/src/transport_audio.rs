@@ -16,6 +16,12 @@ struct AudioTransfer {
     ready_started: tokio::time::Instant,
     encoder: Option<crate::sbc_encoder::SbcEncoder>,
     pending_pcm: Vec<u8>,
+    source: Option<crate::plugin_jobs::AudioReadHandle>,
+    source_eof: bool,
+    source_final: Option<u64>,
+    progress_sent: Option<(u64,bool)>,
+    start_sent: bool,
+    source_deadline: Option<tokio::time::Instant>,
 }
 struct SocketAudio {
     sender: crate::audio_transport::AudioSender,
@@ -33,7 +39,7 @@ impl SocketAudio {
         Self::apply_ready(&mut self.sender,t,ready);
     }
     fn apply_ready(sender:&mut crate::audio_transport::AudioSender,t:&mut AudioTransfer,ready:crate::audio_transport::SbcReady) {
-        if t.identity!=ready.identity || t.stopped || t.failure.is_some() {return;}
+        if !t.start_sent || t.identity!=ready.identity || t.stopped || t.failure.is_some() {return;}
         if sender.waiting_ready() && t.ready_started.elapsed()>=Duration::from_secs(3) {
             t.failure=Some(AudioPlaybackFailure::SbcReadyTimeout);return;
         }
@@ -57,7 +63,7 @@ impl SocketAudio {
         Self::apply_credit(&mut self.sender,t,id,accepted,consumed,failed);
     }
     fn apply_credit(sender:&mut crate::audio_transport::AudioSender,t:&mut AudioTransfer,id:crate::audio_transport::StreamIdentity,accepted:u64,consumed:u64,failed:bool){
-        if t.identity!=id || t.failure.is_some(){return;}
+        if !t.start_sent || t.identity!=id || t.failure.is_some(){return;}
         if sender.accepted_end()==Some(t.spec.start_frame) && accepted>t.spec.start_frame {
             eprintln!("picomado audio_first_credit stream={} accepted={} consumed={}",id.stream_id,accepted,consumed);
         }
@@ -76,10 +82,26 @@ impl SocketAudio {
             t.failure.get_or_insert(AudioPlaybackFailure::DeviceFailed);
         }
     }
+    fn publish_progress(&mut self, app:&SharedApp, session:&SessionToken)->Result<(),()> {
+        if let Some(t)=&mut self.transfer { Self::publish_transfer_progress(&self.sender,t,app,session)?; }
+        Ok(())
+    }
+    fn publish_transfer_progress(sender:&crate::audio_transport::AudioSender,t:&mut AudioTransfer,app:&SharedApp,session:&SessionToken)->Result<(),()> {
+        if t.spec.frame_count.is_none() && t.failure.is_none() && t.start_sent {
+            let consumed=sender.consumed_end().ok_or(())?.min(t.source_final.unwrap_or(u64::MAX));
+            let ended=t.final_frame.is_some_and(|end|sender.consumed_end()==Some(end));
+            if t.progress_sent != Some((consumed,ended)) {
+                app.lock().map_err(|_|())?.audio_playback_progress(session,&t.display,&t.plugin,&t.spec,consumed,ended);
+                t.progress_sent=Some((consumed,ended));
+            }
+        }
+        Ok(())
+    }
     fn publish_failure(&mut self,app:&SharedApp,session:&SessionToken)->Result<(),()> {
         let Some(t)=self.transfer.as_mut() else{return Ok(())};
         let Some(reason)=t.failure.filter(|_|!t.failure_reported) else{return Ok(())};
         let consumed=self.sender.consumed_end().ok_or(())?;
+        let consumed=if t.spec.frame_count.is_none() { consumed.min(t.source_final.unwrap_or(u64::MAX)) } else { consumed };
         // Publish before trying AudioStop: a broken socket must not hide failure.
         app.lock().map_err(|_|())?.audio_playback_failed(session,&t.display,&t.plugin,&t.spec,consumed,reason).map_err(|_|())?;
         t.failure_reported=true;
@@ -93,7 +115,7 @@ fn drain_audio_controls(app:&SharedApp,session:&SessionToken,sender:&mut crate::
     if pending.is_some(){return false;}
     for _ in 0..32 {
         match rx.try_recv() {
-            Ok(WriterCommand::AudioCredit(id,a,c,f))=>SocketAudio::apply_credit(sender,t,id,a,c,f),
+            Ok(WriterCommand::AudioCredit(id,a,c,f))=>{SocketAudio::apply_credit(sender,t,id,a,c,f);if SocketAudio::publish_transfer_progress(sender,t,app,session).is_err(){return false;}},
             Ok(WriterCommand::AudioReady(r))=>if SocketAudio::offer_current(app,session,t) {SocketAudio::apply_ready(sender,t,r)},
             Ok(command)=>{*pending=Some(command);return false;},
             Err(TryRecvError::Disconnected)=>{*pending=Some(WriterCommand::Stop);return false;},
@@ -123,14 +145,14 @@ where F:std::future::Future,C:FnMut(crate::audio_transport::StreamIdentity,u64,u
     }}
 }
 async fn service_audio<S:Sink<Message>+Unpin>(sink:&mut S,app:&SharedApp,session:&SessionToken,audio:&mut SocketAudio,rx:&mut tokio::sync::mpsc::Receiver<WriterCommand>,pending:&mut Option<WriterCommand>)->Result<(),()> {
-    service_audio_with_reader(sink,app,session,audio,rx,pending,|plugin:String,spec,offset,count,paths|async move {
-        crate::plugins::read_audio_chunk(&plugin,spec,offset,count,paths).await
+    service_audio_with_reader(sink,app,session,audio,rx,pending,|plugin:String,spec,offset,count,paths,source|async move {
+        crate::plugins::read_audio_session(source,&plugin,spec,offset,count,paths).await
     }).await
 }
 // Production and injected-reader sink tests use the identical lifecycle and IO path.
 async fn service_audio_with_reader<S,R,F>(sink:&mut S,app:&SharedApp,session:&SessionToken,audio:&mut SocketAudio,rx:&mut tokio::sync::mpsc::Receiver<WriterCommand>,pending:&mut Option<WriterCommand>,mut read_source:R)->Result<(),()>
 where S:Sink<Message>+Unpin,
-    R:FnMut(String,crate::plugin_jobs::AudioPlaybackSpec,u64,u32,crate::plugin_jobs::PluginPaths)->F,
+    R:FnMut(String,crate::plugin_jobs::AudioPlaybackSpec,u64,u32,crate::plugin_jobs::PluginPaths,crate::plugin_jobs::AudioReadHandle)->F,
     F:std::future::Future<Output=Result<Vec<u8>,crate::plugin_jobs::JobFailure>> {
     audio.publish_failure(app,session)?;
     let selected={
@@ -160,7 +182,7 @@ where S:Sink<Message>+Unpin,
     if !same {
         if let Some(t)=audio.transfer.take(){
             eprintln!("picomado audio_offer_changed id={} stream={} sent={:?} consumed={:?}",session.device_id,t.identity.stream_id,audio.sender.sent_end(),audio.sender.consumed_end());
-            if !t.stopped {write_wire(sink,WireMessage::AudioStop{incarnation:t.identity.incarnation,session_epoch:t.identity.session_epoch,display_epoch:t.identity.display_epoch,stream_id:t.identity.stream_id}).await.map_err(|_|())?;}
+            if t.start_sent && !t.stopped {write_wire(sink,WireMessage::AudioStop{incarnation:t.identity.incarnation,session_epoch:t.identity.session_epoch,display_epoch:t.identity.display_epoch,stream_id:t.identity.stream_id}).await.map_err(|_|())?;}
         }
         audio.sender.stop();
         if let Some((display,plugin,spec,paths))=selected {
@@ -170,28 +192,55 @@ where S:Sink<Message>+Unpin,
             let identity=if sbc {audio.sender.start_sbc(display.display_epoch,spec.start_frame)} else {audio.sender.start(display.display_epoch,spec.start_frame)}.map_err(|_|())?;
             let failure=(!spec.valid()).then_some(AudioPlaybackFailure::UnsupportedFormat);
             let ready_started=tokio::time::Instant::now();
-            if failure.is_none() {
+            let start_sent = failure.is_none() && spec.frame_count.is_some();
+            if start_sent {
                 let start=if sbc {WireMessage::AudioSbcStart{incarnation:identity.incarnation,session_epoch:identity.session_epoch,display_epoch:identity.display_epoch,stream_id:identity.stream_id,first_frame:spec.start_frame,rate:spec.sample_rate}}
                     else {WireMessage::AudioStart{incarnation:identity.incarnation,session_epoch:identity.session_epoch,display_epoch:identity.display_epoch,stream_id:identity.stream_id,first_frame:spec.start_frame,rate:spec.sample_rate}};
                 write_wire(sink,start).await.map_err(|_|())?;
             }
-            if failure.is_none() {eprintln!("picomado audio_start_sent id={} stream={} session={} display={} rate={} first={} frames={:?} sbc={}",session.device_id,identity.stream_id,identity.session_epoch,identity.display_epoch,spec.sample_rate,spec.start_frame,spec.frame_count,sbc);}
-            audio.transfer=Some(AudioTransfer{display,plugin,spec,paths,identity,failure,failure_reported:false,stopped:false,drained:false,final_frame:None,last_credit:ready_started,ready_started,encoder:None,pending_pcm:Vec::new()});
+            if start_sent {eprintln!("picomado audio_start_sent id={} stream={} session={} display={} rate={} first={} frames={:?} sbc={}",session.device_id,identity.stream_id,identity.session_epoch,identity.display_epoch,spec.sample_rate,spec.start_frame,spec.frame_count,sbc);}
+            audio.transfer=Some(AudioTransfer{display,plugin,spec,paths,identity,failure,failure_reported:false,stopped:false,drained:false,final_frame:None,last_credit:ready_started,ready_started,encoder:None,pending_pcm:Vec::new(),source:Some(Default::default()),source_eof:false,source_final:None,progress_sent:None,start_sent,source_deadline:None});
         }
     }
     if let Some(t)=audio.transfer.as_mut() {
-        if audio.sender.waiting_ready() && t.ready_started.elapsed()>=Duration::from_secs(3) {t.failure.get_or_insert(AudioPlaybackFailure::SbcReadyTimeout);}
+        if t.start_sent && audio.sender.waiting_ready() && t.ready_started.elapsed()>=Duration::from_secs(3) {t.failure.get_or_insert(AudioPlaybackFailure::SbcReadyTimeout);}
     }
     audio.publish_failure(app,session)?;
     let Some(t)=audio.transfer.as_mut() else{return Ok(())};
     if t.failure.is_some() {
-        t.encoder=None;t.pending_pcm.clear();
-        if !t.stopped {
+        t.encoder=None;t.pending_pcm.clear();t.source=None;
+        if t.start_sent && !t.stopped {
             write_wire(sink,WireMessage::AudioStop{incarnation:t.identity.incarnation,session_epoch:t.identity.session_epoch,display_epoch:t.identity.display_epoch,stream_id:t.identity.stream_id}).await.map_err(|_|())?;
             t.stopped=true;
         }
         return Ok(());
     }
+    // Prime before device-side Ready/prefill timers. Deadline survives control yields.
+    if !t.start_sent {
+        let deadline = *t.source_deadline.get_or_insert_with(|| tokio::time::Instant::now() + Duration::from_secs(10));
+        if tokio::time::Instant::now() >= deadline {
+            t.failure=Some(AudioPlaybackFailure::SourceReadTimeout);t.source=None;audio.publish_failure(app,session)?;return Ok(());
+        }
+        let read = tokio::time::timeout_at(deadline, read_source(t.plugin.clone(), t.spec.clone(), t.spec.start_frame, 256, t.paths.clone(), t.source.as_ref().ok_or(())?.clone()));
+        let Some(result) = read_audio_with_credits(read, rx, pending, |id,a,c,f| { SocketAudio::apply_credit(&mut audio.sender,t,id,a,c,f); t.failure.is_none() }).await else { audio.publish_failure(app,session)?; return Ok(()); };
+        if tokio::time::Instant::now() >= deadline {
+            t.failure=Some(AudioPlaybackFailure::SourceReadTimeout);t.source=None;audio.publish_failure(app,session)?;return Ok(());
+        }
+        match result {
+            Ok(Ok(bytes)) if crate::audio_transport::validate_source_read(t.spec.start_frame,256,None,bytes.len()).is_ok() => { t.source_eof=bytes.is_empty();t.pending_pcm=bytes; },
+            Ok(_) => { t.failure=Some(AudioPlaybackFailure::SourceReadFailed);t.source=None;audio.publish_failure(app,session)?;return Ok(()); },
+            Err(_) => { t.failure=Some(AudioPlaybackFailure::SourceReadTimeout);t.source=None;audio.publish_failure(app,session)?;return Ok(()); },
+        }
+        if !drain_audio_controls(app,session,&mut audio.sender,t,rx,pending) { return Ok(()); }
+        if !SocketAudio::offer_current(app,session,t) { t.source=None;return Ok(()); }
+        let id=t.identity;
+        let start = if audio.sender.waiting_ready() { WireMessage::AudioSbcStart { incarnation:id.incarnation,session_epoch:id.session_epoch,display_epoch:id.display_epoch,stream_id:id.stream_id,first_frame:t.spec.start_frame,rate:t.spec.sample_rate } }
+            else { WireMessage::AudioStart { incarnation:id.incarnation,session_epoch:id.session_epoch,display_epoch:id.display_epoch,stream_id:id.stream_id,first_frame:t.spec.start_frame,rate:t.spec.sample_rate } };
+        write_wire(sink,start).await.map_err(|_|())?;
+        eprintln!("picomado audio_stream_source_ready id={} stream={} first={}",session.device_id,id.stream_id,t.spec.start_frame);
+        t.start_sent=true;t.ready_started=tokio::time::Instant::now();t.last_credit=t.ready_started;
+    }
+    SocketAudio::publish_transfer_progress(&audio.sender,t,app,session)?;
     if audio.sender.waiting_ready(){return Ok(());}
     if t.final_frame.is_some_and(|end|audio.sender.consumed_end()==Some(end)){
         if !t.drained {eprintln!("picomado audio_drained id={} stream={} final={:?}",session.device_id,t.identity.stream_id,t.final_frame);t.drained=true;}
@@ -203,7 +252,7 @@ where S:Sink<Message>+Unpin,
         let id=t.identity;
         audio.publish_failure(app,session)?;
         write_wire(sink,WireMessage::AudioStop{incarnation:id.incarnation,session_epoch:id.session_epoch,display_epoch:id.display_epoch,stream_id:id.stream_id}).await.map_err(|_|())?;
-        audio.transfer.as_mut().unwrap().stopped=true;
+        audio.transfer.as_mut().unwrap().stopped=true;audio.transfer.as_mut().unwrap().source=None;
         return Ok(());
     }
     // At most two chunks per 5ms turn: PCM 2x256, SBC 2x1024 canonical frames.
@@ -215,12 +264,12 @@ where S:Sink<Message>+Unpin,
         let Some(read_offset)=offset.checked_add(pending_frames as u64) else {t.failure=Some(AudioPlaybackFailure::SourceReadFailed);break;};
         let limit=count.saturating_sub(pending_frames);
         let limit=t.spec.frame_count.map_or(limit,|end|limit.min(end.saturating_sub(read_offset) as usize));
-        if limit>0 {
+        if limit>0 && !t.source_eof {
             let plugin=t.plugin.clone();
-            let read=tokio::time::timeout(Duration::from_millis(100),read_source(plugin,t.spec.clone(),read_offset,limit as u32,t.paths.clone()));
+            let read=tokio::time::timeout(Duration::from_millis(100),read_source(plugin,t.spec.clone(),read_offset,limit as u32,t.paths.clone(),t.source.as_ref().ok_or(())?.clone()));
             let Some(result)=read_audio_with_credits(read,rx,pending,|id,accepted,consumed,failed|{
                 SocketAudio::apply_credit(&mut audio.sender,t,id,accepted,consumed,failed);
-                t.failure.is_none()
+                SocketAudio::publish_transfer_progress(&audio.sender,t,app,session).is_ok() && t.failure.is_none()
             }).await else{audio.publish_failure(app,session)?;return Ok(());};
             let bytes=match result {
                 Ok(Ok(b))=>b,
@@ -231,7 +280,7 @@ where S:Sink<Message>+Unpin,
             if crate::audio_transport::validate_source_read(read_offset,limit,t.spec.frame_count,bytes.len()).is_err() {
                 t.failure=Some(AudioPlaybackFailure::SourceReadFailed);break;
             }
-            if bytes.is_empty(){break;}
+            if bytes.is_empty() { if t.spec.frame_count.is_none() { t.source_eof=true;t.source=None; } else { break; } }
             t.pending_pcm.extend_from_slice(&bytes);
         }
         if !drain_audio_controls(app,session,&mut audio.sender,t,rx,pending) {audio.publish_failure(app,session)?;return Ok(());}
@@ -242,7 +291,7 @@ where S:Sink<Message>+Unpin,
         if !still_current {t.pending_pcm.clear();break;}
         let frames=t.pending_pcm.len()/4;
         let Some(source_end)=offset.checked_add(frames as u64) else {t.failure=Some(AudioPlaybackFailure::SourceReadFailed);break;};
-        let eof=t.spec.frame_count==Some(source_end);
+        let eof=t.source_eof || t.spec.frame_count==Some(source_end);
         let send_frames=if eof {frames.div_ceil(128)*128} else {frames/128*128};
         if send_frames>count {t.failure=Some(AudioPlaybackFailure::SourceReadFailed);break;}
         let Some(end)=offset.checked_add(send_frames as u64) else {t.failure=Some(AudioPlaybackFailure::SourceReadFailed);break;};
@@ -252,7 +301,7 @@ where S:Sink<Message>+Unpin,
         let mut bytes=t.pending_pcm[..source_frames*4].to_vec();
         bytes.resize(send_frames*4,0);
         if eof && t.final_frame.is_none() {
-            t.final_frame=Some(end);
+            t.final_frame=Some(end);t.source_final=Some(source_end);t.source=None;
             write_wire(sink,WireMessage::AudioFinish{incarnation:t.identity.incarnation,session_epoch:t.identity.session_epoch,display_epoch:t.identity.display_epoch,stream_id:t.identity.stream_id,final_frame:end}).await.map_err(|_|())?;
             if !drain_audio_controls(app,session,&mut audio.sender,t,rx,pending) {audio.publish_failure(app,session)?;return Ok(());}
         }
@@ -276,6 +325,7 @@ where S:Sink<Message>+Unpin,
         t.pending_pcm.drain(..source_frames*4);
         if offset==t.spec.start_frame {eprintln!("picomado {} id={} stream={} frames={}",if t.encoder.is_some(){"audio_first_sbc_sent"}else{"audio_first_pcm_sent"},session.device_id,t.identity.stream_id,send_frames);}
     }
+    if let Some(t)=audio.transfer.as_mut().filter(|t|t.failure.is_some()) { t.source=None; }
     audio.publish_failure(app,session)?;
     Ok(())
 }
@@ -296,7 +346,7 @@ mod audio_read_credit_tests {
                 frame_count:Some(96000),start_frame:48000,started_mono_ms:0,source:serde_json::Value::Null},
             paths:crate::plugin_jobs::PluginPaths{data:"unused".into(),cache:"unused".into()},
             identity,failure:None,failure_reported:false,stopped:false,drained:false,final_frame:None,
-            last_credit:tokio::time::Instant::now(),ready_started:tokio::time::Instant::now(),encoder:None,pending_pcm:Vec::new(),
+            last_credit:tokio::time::Instant::now(),ready_started:tokio::time::Instant::now(),encoder:None,pending_pcm:Vec::new(),source:Some(Default::default()),source_eof:false,source_final:None,progress_sent:None,start_sent:true,source_deadline:None,
         });
         audio
     }

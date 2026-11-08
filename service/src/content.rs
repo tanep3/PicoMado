@@ -136,6 +136,8 @@ pub trait ContentPlugin: Send + Sync {
         None
     }
     /// Invoked on a clone only after the current audio offer has been revalidated.
+    /// Volatile validated observation, not a change to the playback intent.
+    fn audio_progress(&mut self, _ctx: &PluginContext, _spec: &crate::plugin_jobs::AudioPlaybackSpec, _consumed: u64, _ended: bool) {}
     fn audio_failed(
         &mut self,
         _ctx: &PluginContext,

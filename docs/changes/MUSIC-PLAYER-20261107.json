@@ -7,7 +7,8 @@
   "standard": "development/standard/v1/standard.md",
   "domain_authority": "docs/changes/MUSIC-PLAYER-20261107.md",
   "design_artifacts": [
-    "docs/changes/MUSIC-PLAYER-20261107.md"
+    "docs/changes/MUSIC-PLAYER-20261107.md",
+    "docs/design/local-music-streaming.md"
   ],
   "cause": "User wants an audio source plugin via Web UI uploads, ahead of internet radio.",
   "introduction_cause": "No audio source plugin exists.",
@@ -25,7 +26,8 @@
     "design": {
       "state": "in_progress",
       "evidence": [
-        "13a03f5: preserve AVRCP short controls, add long Cancel and volume specification"
+        "13a03f5: preserve AVRCP short controls, add long Cancel and volume specification",
+        "3985647, 7ad5768, b924181: transfer-owned streaming decode, consumed position and prime-before-Start contract"
       ]
     },
     "implementation": {
@@ -45,7 +47,8 @@
         "b5cfa6c: six-operation negotiated media input and physical Sub cycling; not deployed",
         "400 Cargo tests passed, 0 failed, 2 ignored with PICOMADO_PIC2GRAY4PX configured; /tmp/picomado-media-v2-configured-all-features.log",
         "Integrated release/UF2 staged, not deployed while sleeping user has connected LBS; docs/evidence/BT-AUDIO-20261108-followup.md",
-        "docs/evidence/MUSIC-PLAYER-20261108-failure.md: terminal audio failure feedback; frozen-input all-features 409 passed, 0 failed, 2 ignored; not deployed"
+        "docs/evidence/MUSIC-PLAYER-20261108-failure.md: terminal audio failure feedback; frozen-input all-features 409 passed, 0 failed, 2 ignored; not deployed",
+        "docs/evidence/MUSIC-PLAYER-20261108-streaming.md: final frozen source 446 passed, 1 existing host shutdown-timeout failure, 2 ignored; same-binary host rerun passed; music21/SBC9/UI15 passed; production deployment pending"
       ]
     },
     "independent_verification": {

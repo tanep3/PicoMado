@@ -136,3 +136,12 @@ Tests cover rejected stale/different spec feedback, invalid-rate admission
 without start/read/EOF, one terminal callback, and the unchanged valid-only
 public query. This explicitly relocates format admission for the socket rather
 than weakening the old query contract.
+
+### Original-source streaming extension
+
+The later [local-music streaming contract](local-music-streaming.md) removes the
+manual full-track PCM conversion prerequisite. It keeps the reader output in
+canonical48k s16le stereo PCM and preserves gain-before-SBC ordering, per-stream
+encoder history and negotiated transport. Source priming occurs before Start,
+so decoder startup does not consume the device Ready/prefill budget. Existing
+PCM-only assets remain supported and are not automatically deleted.

@@ -504,15 +504,14 @@
     function renderLocalMusic(data){
       const devices=section('端末ごとの再生','ローカル音楽チャンネルを選択した端末へ配信します。以下は再生要求の状態です。実際の接続はホームで確認できます。','plugin-card');
       for(const d of current.devices){const row=el('div',undefined,'location-row'),select=el('select');row.append(el('strong',d.id));for(const t of data.tracks||[]){const o=el('option',`${t.name} (${Math.round(t.frames/48000)}秒)`);o.value=t.key;select.append(o)}const state=data.devices?.[d.id];if(state)select.value=state.key;row.append(select);for(const [kind,label] of [['play','再生'],['pause','一時停止'],['stop','停止']]){const b=button(label);b.disabled=kind==='play'?!data.tracks?.length:!state;b.onclick=()=>managedCommand('local-music',{kind,device_id:d.id,key:select.value});row.append(b)}row.append(el('small',state?`${state.error?'再生失敗':state.playing?'再生要求中':'停止中'} · ${(state.position_ms/1000).toFixed(3)}秒`:'未選択'));if(state?.error)row.append(el('span',state.error.message,'error'));devices.append(row)}
-      const panel=section('ローカル音楽','音源をアップロード・変換し、端末ごとに再生します。Bluetoothの接続はホームの端末設定で行います。','plugin-card');
+      const panel=section('ローカル音楽','音源をアップロードすると自動で一覧に登録され、再生時に逐次復号します。Bluetoothの接続はホームの端末設定で行います。','plugin-card');
       jobsPanel('local-music',panel);if(data.error)panel.append(el('p',data.error,'error'));
       const form=el('form'),file=el('input');file.type='file';file.accept='.mp3,.wav,.flac,.ogg,.m4a,.aac';file.required=true;
       const upload=button('アップロード','primary');upload.type='submit';form.append(el('p','音源（256 MiB 以下、2時間以内）'),file,upload);
       form.onsubmit=async e=>{e.preventDefault();const f=file.files?.[0];if(!f)return;if(f.size>256*1024*1024){say('音源は256 MiB以下にしてください',true);return}upload.disabled=true;try{const r=await fetch(`/api/plugins/local-music/uploads/${encodeURIComponent(f.name)}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:f});if(!r.ok){const v=await r.json().catch(()=>({}));throw Error(v.error||'アップロード失敗')}await managedCommand('local-music',{kind:'scan'},'アップロードしました')}catch(e){say(e.message,true);upload.disabled=false}};panel.append(form);
       const scan=button('一覧更新');scan.onclick=()=>managedCommand('local-music',{kind:'scan'});panel.append(scan);
-      const cancel=button('変換を取消す');cancel.onclick=()=>managedCommand('local-music',{kind:'cancel'});panel.append(cancel);
       const names=[...new Set([...(data.imports||[]),...(data.tracks||[]).map(t=>t.name)])];
-      for(const name of names){const row=el('div',undefined,'location-row');row.append(el('strong',name));const prepare=button('再生用に変換');prepare.disabled=data.pending||!(data.imports||[]).includes(name);prepare.onclick=()=>managedCommand('local-music',{kind:'prepare',name});const del=button('音源と履歴を削除','danger');del.onclick=()=>{if(confirm(`「${name}」の原本・変換済み音源・再生選択を削除しますか？`))managedCommand('local-music',{kind:'delete',name,confirmation:name})};row.append(prepare,del);panel.append(row)}
+      for(const name of names){const row=el('div',undefined,'location-row');row.append(el('strong',name));const del=button('音源と履歴を削除','danger');del.onclick=()=>{if(confirm(`「${name}」の原本・変換済み音源・再生選択を削除しますか？`))managedCommand('local-music',{kind:'delete',name,confirmation:name})};row.append(del);panel.append(row)}
     }
     function renderLocalImage(data){
       const panel=section('ローカル画像','中心で画面比率に切り抜きます。端の文字や被写体は欠ける場合があります。','plugin-card');

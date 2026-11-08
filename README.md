@@ -83,6 +83,6 @@ Code is licensed under [MIT](LICENSE), copyright Tane Channel Technology. Fonts 
 
 ### Local music (in development)
 
-Upload your music in the Web UI, prepare it for playback, and choose a track per device. Manage each device's Bluetooth connection on Home. See the [music guide (Japanese)](docs/requirements/plugins/local-music.md) for formats and limits. Hardware audio playback is still under validation. See [Bluetooth setup and opt-in builds (Japanese)](docs/requirements/bluetooth-audio.md).
+Upload your music in the Web UI and choose a track per device. Metadata is registered automatically; playback decodes the original incrementally without a full-track PCM conversion. Manage each device's Bluetooth connection on Home. See the [music guide (Japanese)](docs/requirements/plugins/local-music.md) for formats and limits. Hardware audio playback is still under validation. See [Bluetooth setup and opt-in builds (Japanese)](docs/requirements/bluetooth-audio.md).
 
 Each device starts muted (volume 0). Set its volume under Home → Bluetooth speaker, beginning with a low value. This digitally attenuates outgoing audio without changing the original file; actual loudness also depends on the speaker's volume.

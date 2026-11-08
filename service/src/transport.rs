@@ -922,7 +922,7 @@ async fn writer_loop_with_progress<S>(
                     }
                 },
                 Some(WriterCommand::AudioCredit(id,accepted,consumed,failed))=>{
-                    if let Some(a)=&mut audio {a.credit(id,accepted,consumed,failed);}
+                    if let Some(a)=&mut audio {a.credit(id,accepted,consumed,failed);if let Some(session)=&current {if a.publish_progress(&app,session).is_err(){break "application_unavailable";}}}
                 },
                 Some(WriterCommand::Stop)=>break "requested_stop",
                 None=>break "command_channel_closed",

@@ -21,3 +21,5 @@ The main paths are `src/application.rs` for persistent application state, `src/p
 LCD and both zero- and two-button E-ink configurations are supported as listed in [hardware support](../docs/guides/hardware-support.en.md). Long-duration and multi-device acceptance remain open.
 
 The bundled weather and radar glyph assets and the default word card are derived from Noto Sans CJK JP; see [Noto copyright and license](assets/NOTO-COPYRIGHT) and [asset sources](assets/README.md). PicoMado itself is distributed under the [MIT License](../LICENSE).
+
+Local music uses `ffprobe` for automatic metadata registration and `ffmpeg` for per-playback streaming decode. Both must be available in the service PATH. No full-track PCM cache is created; each active decoder holds a temporary compressed source copy, removed on completion or cancellation. Existing PCM-only assets remain playable. See [the music guide](../docs/requirements/plugins/local-music.md).

@@ -102,3 +102,14 @@ test('rerender keeps one player above the library without issuing commands', () 
   }
   assert.deepEqual(f.commands, []);
 });
+
+test('streaming library has no prepare or conversion cancel action', () => {
+  const f = fixture();
+  const sections = f.render({imports: ['tone.mp3'], tracks: [{key: 'tone', name: 'tone.mp3', frames: 48000, streaming: true}]});
+  assert.match(texts(sections[1]), /自動で一覧に登録/);
+  assert.doesNotMatch(texts(sections[1]), /再生用に変換|変換を取消す/);
+  assert.equal(sections[1].children.filter(node => node.className === 'location-row').length, 1);
+  const row = sections[1].children.find(node => node.className === 'location-row');
+  assert.deepEqual(buttons(row).map(button => button.text), ['音源と履歴を削除']);
+  assert.deepEqual(f.commands, []);
+});

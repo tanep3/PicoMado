@@ -95,6 +95,14 @@ impl App {
         Some((crate::display_token(&session.device_id, d), plugin.clone(), spec, self.plugin_paths(plugin)?))
     }
 
+    /// Observed credit cannot change source identity or bypass current-session fencing.
+    pub(crate) fn audio_playback_progress(&mut self, session: &SessionToken, display: &crate::DisplayToken, plugin: &str, spec: &crate::plugin_jobs::AudioPlaybackSpec, consumed: u64, ended: bool) {
+        let Some((d, p, s, _)) = self.audio_playback_offer(session) else { return; };
+        if &d != display || p != plugin || &s != spec || consumed < spec.start_frame { return; }
+        let ctx = PluginContext { token: session.clone(), settings_revision: d.settings_revision, mode: Mode::Normal };
+        if let Some(content) = self.contents.get_mut(plugin) { content.audio_progress(&ctx, spec, consumed, ended); }
+    }
+
     /// Adopt a terminal result only for the exact still-current playback intent.
     /// The transport owner validates stream identity and absolute consumed credit.
     pub fn audio_playback_failed(

@@ -34,8 +34,11 @@ pub struct Track {
     pub key: String,
     pub name: String,
     pub frames: u64,
+    #[serde(default)]
+    pub streaming: bool,
 }
 impl Track {
+    fn limit(&self) -> u64 { if self.streaming { MAX_FRAMES } else { self.frames } }
     fn valid(&self) -> bool {
         good_key(&self.key) && good_name(&self.name) && (1..=MAX_FRAMES).contains(&self.frames)
     }
@@ -52,9 +55,14 @@ struct Selection {
     started: u64,
     #[serde(skip)]
     failure: Option<AudioPlaybackFailure>,
+    #[serde(skip)]
+    consumed: Option<u64>,
+    #[serde(skip)]
+    ended: bool,
 }
 impl Selection {
     fn position(&self, now: u64, max: u64) -> u64 {
+        if let Some(consumed) = self.consumed { return consumed.min(MAX_FRAMES); }
         self.position
             .saturating_add(if self.playing {
                 now.saturating_sub(self.started)
@@ -80,6 +88,8 @@ pub struct LocalMusicContent {
     #[serde(skip)]
     scheduled: bool,
     #[serde(skip)]
+    scan_blocked: bool,
+    #[serde(skip)]
     clock: u64,
 }
 impl Default for LocalMusicContent {
@@ -92,6 +102,7 @@ impl Default for LocalMusicContent {
             pending: None,
             error: None,
             scheduled: false,
+            scan_blocked: false,
             clock: 0,
         }
     }
@@ -168,10 +179,10 @@ impl LocalMusicContent {
         if keys.is_empty() { return Err(ContentError::Unavailable); }
         let current = self.devices.get(&ctx.token.device_id)
             .filter(|s| s.incarnation == ctx.token.incarnation && self.tracks.contains_key(&s.key)).cloned();
-        let limit = current.as_ref().and_then(|s| self.tracks.get(&s.key)).map(|t| t.frames);
+        let limit = current.as_ref().and_then(|s| self.tracks.get(&s.key)).map(|t| t.limit());
         let position = current.as_ref().zip(limit).map(|(s, max)| s.position(self.clock, max));
         let playing = current.as_ref().zip(position.zip(limit))
-            .is_some_and(|(s, (position, max))| s.playing && position < max);
+            .is_some_and(|(s, (position, max))| s.playing && !s.ended && position < max);
         let (operation, name) = match control {
             MusicControl::Toggle => {
                 if current.is_none() { return Err(ContentError::Unavailable); }
@@ -181,12 +192,12 @@ impl LocalMusicContent {
         };
         let mut next = current.clone().unwrap_or(Selection {
             incarnation: ctx.token.incarnation, key: keys[0].clone(), generation: 0,
-            position: 0, playing: false, started: self.clock, failure: None,
+            position: 0, playing: false, started: self.clock, failure: None, consumed: None, ended: false,
         });
         let changed = match operation {
             MusicOperation::Play if playing => false,
             MusicOperation::Play => {
-                next.position = position.filter(|p| self.tracks.get(&next.key).is_some_and(|t| *p < t.frames)).unwrap_or(0);
+                next.position = position.filter(|_| !next.ended).filter(|p| self.tracks.get(&next.key).is_some_and(|t| *p < t.limit())).unwrap_or(0);
                 next.playing = true;
                 true
             }
@@ -203,8 +214,10 @@ impl LocalMusicContent {
         };
         if changed {
             next.failure = None;
+            next.ended = false;
             next.generation = self.generation()?;
             next.started = self.clock;
+            next.consumed = self.tracks[&next.key].streaming.then_some(next.position);
             self.devices.insert(ctx.token.device_id.clone(), next);
         }
         Ok(PluginPlan {
@@ -217,8 +230,8 @@ impl LocalMusicContent {
         let s = self.devices.get(&ctx.token.device_id)?;
         let t = self.tracks.get(&s.key)?;
         if s.incarnation != ctx.token.incarnation
-            || !s.playing
-            || s.position >= t.frames
+            || !s.playing || s.ended
+            || s.position >= t.limit()
             || ctx.mode != crate::Mode::Normal
         {
             return None;
@@ -228,7 +241,7 @@ impl LocalMusicContent {
             generation: s.generation,
             sample_rate: SAMPLE_RATE,
             channels: 2,
-            frame_count: Some(t.frames),
+            frame_count: (!t.streaming).then_some(t.frames),
             start_frame: s.position,
             started_mono_ms: s.started,
             source: json!(t),
@@ -274,6 +287,7 @@ impl ContentPlugin for LocalMusicContent {
             if s.incarnation != inc {
                 self.devices.remove(id);
             } else {
+                if let Some(consumed)=s.consumed { s.position=consumed; }
                 s.playing = false;
             }
         }
@@ -297,7 +311,7 @@ impl ContentPlugin for LocalMusicContent {
         Some(crate::music_text::lcd(
             if s.is_some_and(|s| s.failure.is_some()) {
                 "MUSIC FAILED"
-            } else if s.is_some_and(|s| s.playing) {
+            } else if s.is_some_and(|s| s.playing && !s.ended) {
                 "MUSIC REQUESTED"
             } else {
                 "MUSIC STOPPED"
@@ -308,17 +322,24 @@ impl ContentPlugin for LocalMusicContent {
     fn eink_frame_for(&self, ctx: &PluginContext, _: &[u8]) -> Option<Vec<u8>> {
         let selection = self.devices.get(&ctx.token.device_id).filter(|s| s.incarnation == ctx.token.incarnation);
         let name = selection.and_then(|s| self.tracks.get(&s.key)).map(|t| t.name.as_str()).unwrap_or("NO MUSIC");
-        Some(crate::music_text::eink(if selection.is_some_and(|s|s.failure.is_some()) {"MUSIC FAILED"} else if selection.is_some_and(|s|s.playing) {"MUSIC REQUESTED"} else {"MUSIC STOPPED"}, name))
+        Some(crate::music_text::eink(if selection.is_some_and(|s|s.failure.is_some()) {"MUSIC FAILED"} else if selection.is_some_and(|s|s.playing&&!s.ended) {"MUSIC REQUESTED"} else {"MUSIC STOPPED"}, name))
     }
     fn audio_playback(&self, ctx: &PluginContext) -> Option<AudioPlaybackSpec> {
         self.spec(ctx)
+    }
+    fn audio_progress(&mut self, ctx: &PluginContext, spec: &AudioPlaybackSpec, consumed: u64, ended: bool) {
+        if self.spec(ctx).as_ref() != Some(spec) { return; }
+        if let Some(s) = self.devices.get_mut(&ctx.token.device_id) {
+            if s.consumed.is_some_and(|old| consumed >= old) { s.consumed = Some(consumed.min(MAX_FRAMES)); s.ended = ended; }
+        }
     }
     fn audio_failed(&mut self, ctx: &PluginContext, spec: &AudioPlaybackSpec, consumed_frame: u64,
         reason: AudioPlaybackFailure) -> Result<Option<PluginWorkPlan>, ContentError> {
         if self.spec(ctx).as_ref() != Some(spec) || consumed_frame < spec.start_frame { return Ok(None); }
         let generation = self.generation()?;
         let selection = self.devices.get_mut(&ctx.token.device_id).ok_or(ContentError::Stale)?;
-        selection.position = consumed_frame.min(self.tracks[&selection.key].frames);
+        selection.consumed = None;
+        selection.position = consumed_frame.min(self.tracks[&selection.key].limit());
         selection.playing = false;
         selection.generation = generation;
         selection.failure = Some(reason);
@@ -350,7 +371,7 @@ impl ContentPlugin for LocalMusicContent {
         Ok(())
     }
     fn web_state_at(&self, now: u64) -> Value {
-        json!({"imports":self.imports,"tracks":self.tracks.values().collect::<Vec<_>>(),"devices":self.devices.iter().map(|(id,s)|{let max=self.tracks.get(&s.key).map(|t|t.frames).unwrap_or(0);(id,json!({"key":s.key,"incarnation":s.incarnation,"playing":s.playing&&s.position(now,max)<max,"position_ms":s.position(now,max)*1000/SAMPLE_RATE as u64,"error":s.failure.map(|reason|json!({"code":reason,"message":failure_message(reason)}))}))}).collect::<BTreeMap<_,_>>(),"pending":self.pending.is_some(),"error":self.error})
+        json!({"imports":self.imports,"tracks":self.tracks.values().collect::<Vec<_>>(),"devices":self.devices.iter().map(|(id,s)|{let max=self.tracks.get(&s.key).map(|t|t.limit()).unwrap_or(0);(id,json!({"key":s.key,"incarnation":s.incarnation,"playing":s.playing&&!s.ended&&(s.consumed.is_some()||s.position(now,max)<max),"position_ms":s.position(now,max)*1000/SAMPLE_RATE as u64,"error":s.failure.map(|reason|json!({"code":reason,"message":failure_message(reason)}))}))}).collect::<BTreeMap<_,_>>(),"pending":self.pending.is_some(),"error":self.error})
     }
     fn plan_command(
         &mut self,
@@ -360,7 +381,7 @@ impl ContentPlugin for LocalMusicContent {
         self.clock = ctx.now_mono_ms;
         let mut p = PluginWorkPlan::default();
         match c["kind"].as_str().ok_or(ContentError::InvalidSource)? {
-            "scan" => p.jobs.push(request("scan", Work::Scan)),
+            "scan" => { self.scan_blocked=false;self.scheduled=true;p.jobs.push(request("scan", Work::Scan)); },
             "prepare" => {
                 if self.pending.is_some() {
                     return Err(ContentError::Unavailable);
@@ -402,8 +423,8 @@ impl ContentPlugin for LocalMusicContent {
                             .filter(|s| {
                                 s.incarnation == d.context.token.incarnation
                                     && s.key == key
-                                    && !s.playing
-                                    && s.position < t.frames
+                                    && !s.playing && !s.ended
+                                    && s.position < t.limit()
                             })
                             .map(|s| s.position)
                             .unwrap_or(0);
@@ -416,7 +437,7 @@ impl ContentPlugin for LocalMusicContent {
                                 position: pos,
                                 playing: true,
                                 started: ctx.now_mono_ms,
-                                failure: None,
+                                failure: None, consumed: t.streaming.then_some(pos), ended: false,
                             },
                         );
                     }
@@ -429,9 +450,10 @@ impl ContentPlugin for LocalMusicContent {
                         s.position = if kind == "stop" {
                             0
                         } else {
-                            s.position(ctx.now_mono_ms, self.tracks[&s.key].frames)
+                            s.position(ctx.now_mono_ms, self.tracks[&s.key].limit())
                         };
                         s.playing = false;
+                        s.consumed = None;
                         s.generation = gen;
                         s.failure = None;
                     }
@@ -454,6 +476,8 @@ impl ContentPlugin for LocalMusicContent {
                 if !self.imports.iter().any(|n| n == name) && key.is_none() {
                     return Err(ContentError::InvalidSource);
                 }
+                self.scan_blocked=true;
+                p.cancel_slots.push("scan".into());
                 if let Some(ref key) = key {
                     for selection in self.devices.values_mut().filter(|s| &s.key == key) { selection.playing = false; }
                     p.refresh = RefreshTargets::Selected;
@@ -476,7 +500,7 @@ impl ContentPlugin for LocalMusicContent {
         ctx: &CommandContext,
     ) -> Result<Option<PluginWorkPlan>, ContentError> {
         self.clock = ctx.now_mono_ms;
-        if self.scheduled {
+        if self.scheduled || self.scan_blocked {
             return Ok(None);
         }
         self.scheduled = true;
@@ -496,13 +520,30 @@ impl ContentPlugin for LocalMusicContent {
         let mut p = PluginWorkPlan::default();
         match w {
             Work::Scan => {
+                if self.scan_blocked { return Ok(p); }
                 if let JobOutcome::Succeeded(v) = outcome {
-                    let names: Vec<String> = serde_json::from_value(v.clone())
+                    let names: Vec<String> = serde_json::from_value(if v.is_array() { v.clone() } else { v["imports"].clone() })
                         .map_err(|_| ContentError::InvalidSource)?;
                     if names.iter().any(|n| !good_name(n)) {
                         return Err(ContentError::InvalidSource);
                     }
                     self.imports = names;
+                    if let Some(values) = v["tracks"].as_array() {
+                        for value in values {
+                            let t: Track = serde_json::from_value(value.clone()).map_err(|_| ContentError::InvalidSource)?;
+                            if !t.valid() { return Err(ContentError::InvalidSource); }
+                            let active = self.devices.values().any(|s| s.key == t.key && s.playing);
+                            if !active {
+                                if let Some(old) = self.tracks.get(&t.key).filter(|old| !old.streaming && t.streaming) {
+                                    for selection in self.devices.values_mut().filter(|s| s.key == t.key && !s.playing && s.position >= old.frames) {
+                                        selection.position=0;selection.consumed=None;selection.ended=false;
+                                    }
+                                }
+                                self.tracks.insert(t.key.clone(), t);
+                            }
+                        }
+                    }
+                    self.error = v["errors"].as_array().filter(|e| !e.is_empty()).map(|e| e.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("\n"));
                 }
             }
             Work::Prepare { generation, .. } => {
@@ -526,12 +567,16 @@ impl ContentPlugin for LocalMusicContent {
             }
             Work::Delete { name, key, .. } => match outcome {
                 JobOutcome::Succeeded(_) => {
+                    self.scan_blocked=true;
+                    p.cancel_slots.push("scan".into());
+                    p.cancel_slots.push("prepare".into());
+                    self.pending=None;
                     self.imports.retain(|n| n != &name);
-                    if let Some(key) = key {
-                        self.tracks.remove(&key);
-                        self.devices.retain(|_, s| s.key != key);
-                        p.refresh = RefreshTargets::Selected;
-                    }
+                    let mut removed: BTreeSet<String> = self.tracks.values().filter(|t| t.name == name).map(|t| t.key.clone()).collect();
+                    removed.extend(key);
+                    self.tracks.retain(|key, _| !removed.contains(key));
+                    self.devices.retain(|_, s| !removed.contains(&s.key));
+                    if !removed.is_empty() { p.refresh = RefreshTargets::Selected; }
                 }
                 JobOutcome::Failed(e) => self.error = Some(e.message.clone()),
                 _ => {}
@@ -544,7 +589,7 @@ impl ContentPlugin for LocalMusicContent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn ctx() -> CommandContext {
+    pub(super) fn ctx() -> CommandContext {
         CommandContext {
             now_unix: 0,
             now_mono_ms: 100,
@@ -579,7 +624,7 @@ mod tests {
             Track {
                 key: key.clone(),
                 name: "one.wav".into(),
-                frames: 480000,
+                frames: 480000, streaming: false,
             },
         );
         for id in ["a", "b"] {
@@ -602,17 +647,17 @@ mod tests {
         let p = c.plan_command(&x, &json!({"kind":"prepare","name":"x.wav"})).unwrap();
         c.plan_command(&x, &json!({"kind":"cancel"})).unwrap();
         let job = PluginJob { token: JobToken {plugin:"local-music".into(),slot:"prepare".into(),generation:1},payload:p.jobs[0].payload.clone(),timeout_seconds:900,created_unix:0 };
-        c.work_completed(&x,&job,&JobOutcome::Succeeded(json!(Track {key:"a".repeat(64),name:"x.wav".into(),frames:4800}))).unwrap();
+        c.work_completed(&x,&job,&JobOutcome::Succeeded(json!(Track {key:"a".repeat(64),name:"x.wav".into(),frames:4800,streaming:false}))).unwrap();
         assert!(c.tracks.is_empty());
     }
     #[test]
     fn missing_track_selection_is_safe_and_invalid_restore_is_rejected() {
         let mut c = LocalMusicContent::default();
         let x = ctx();
-        c.devices.insert("a".into(), Selection { incarnation:1, key:"b".repeat(64), generation:1, position:123, playing:true, started:0, failure:None });
+        c.devices.insert("a".into(), Selection { incarnation:1, key:"b".repeat(64), generation:1, position:123, playing:true, started:0, failure:None, consumed:None, ended:false });
         c.next_generation=2;
         assert!(c.plan(&x.devices[0].context, ButtonAction::Sub).is_err());
-        c.tracks.insert("a".repeat(64), Track {key:"a".repeat(64),name:"valid.wav".into(),frames:48000});
+        c.tracks.insert("a".repeat(64), Track {key:"a".repeat(64),name:"valid.wav".into(),frames:48000,streaming:false});
         let invalid=c.save_state();
         assert!(matches!(LocalMusicContent::default().load_state(invalid),Err(ContentError::InvalidSource)));
         c.plan(&x.devices[0].context, ButtonAction::Sub).unwrap();
@@ -646,5 +691,172 @@ fn failure_message(reason: AudioPlaybackFailure) -> &'static str {
         AudioPlaybackFailure::CodecMismatch => "端末の音声形式が一致しないため停止しました。",
         AudioPlaybackFailure::EncodeFailed => "音声の圧縮処理に失敗したため停止しました。",
         AudioPlaybackFailure::SourceReadTimeout => "音源データの読み込みが時間内に完了しませんでした。",
+    }
+}
+
+#[cfg(test)]
+mod streaming_state_tests {
+    use super::*;
+    #[test]
+    fn automatic_scan_registers_tracks_preserves_active_identity_and_pcm_only_legacy() {
+        let mut c=LocalMusicContent::default();let x=super::tests::ctx();let key="a".repeat(64);let legacy="b".repeat(64);
+        c.tracks.insert(legacy.clone(),Track{key:legacy.clone(),name:"legacy.wav".into(),frames:4800,streaming:false});
+        let job=PluginJob{token:JobToken{plugin:"local-music".into(),slot:"scan".into(),generation:1},payload:json!({"kind":"scan"}),timeout_seconds:900,created_unix:0};
+        let result=json!({"imports":["tone.wav"],"tracks":[{"key":key,"name":"tone.wav","frames":4800,"streaming":true}],"errors":[]});
+        c.work_completed(&x,&job,&JobOutcome::Succeeded(result.clone())).unwrap();
+        assert!(c.tracks[&key].streaming);assert!(!c.tracks[&legacy].streaming);assert!(c.pending.is_none());
+        c.plan_command(&x,&json!({"kind":"play","device_id":"a","key":key})).unwrap();
+        let ctx=&x.devices[0].context;let before=c.spec(ctx).unwrap();let mut changed=result;
+        changed["tracks"][0]["frames"]=json!(9600);
+        c.work_completed(&x,&job,&JobOutcome::Succeeded(changed)).unwrap();
+        assert_eq!(c.spec(ctx),Some(before));assert!(c.tracks.contains_key(&legacy));
+        let mut restored=LocalMusicContent::default();restored.load_state(c.save_state()).unwrap();assert!(restored.spec(ctx).is_none());
+    }
+    #[test]
+    fn deletion_fences_late_scan_and_only_explicit_rescan_reopens_registration() {
+        let mut c=LocalMusicContent::default();let x=super::tests::ctx();let key="a".repeat(64);
+        let result=json!({"imports":["tone.wav"],"tracks":[{"key":key,"name":"tone.wav","frames":4800,"streaming":true}],"errors":[]});
+        let job=PluginJob{token:JobToken{plugin:"local-music".into(),slot:"scan".into(),generation:1},payload:json!({"kind":"scan"}),timeout_seconds:900,created_unix:0};
+        c.work_completed(&x,&job,&JobOutcome::Succeeded(result.clone())).unwrap();
+        let deletion=c.plan_command(&x,&json!({"kind":"delete","name":"tone.wav","confirmation":"tone.wav"})).unwrap();
+        assert!(deletion.cancel_slots.iter().any(|s|s=="scan"));
+        assert!(c.plan_schedule(&x).unwrap().is_none());
+        let deleted=PluginJob{token:JobToken{plugin:"local-music".into(),slot:"delete".into(),generation:1},payload:deletion.jobs[0].payload.clone(),timeout_seconds:900,created_unix:0};
+        c.plan_command(&x,&json!({"kind":"scan"})).unwrap();
+        let completion=c.work_completed(&x,&deleted,&JobOutcome::Succeeded(Value::Null)).unwrap();
+        assert!(completion.cancel_slots.iter().any(|s|s=="scan"));
+        c.work_completed(&x,&job,&JobOutcome::Succeeded(result.clone())).unwrap();
+        assert!(c.tracks.is_empty());assert!(c.imports.is_empty());
+        c.plan_command(&x,&json!({"kind":"scan"})).unwrap();
+        // Aggregate job generation fencing occurs before this content callback.
+        let mut fresh=job.clone();fresh.token.generation=2;
+        c.work_completed(&x,&fresh,&JobOutcome::Succeeded(result)).unwrap();
+        assert!(c.tracks.contains_key(&key));
+    }
+    #[test]
+    fn delete_completion_removes_name_registered_while_deleting_and_retains_other_tracks() {
+        for had_key in [false,true] {
+            let mut c=LocalMusicContent::default();let x=super::tests::ctx();let old="a".repeat(64);let new="b".repeat(64);let other="c".repeat(64);
+            c.imports.push("tone.wav".into());
+            if had_key { c.tracks.insert(old.clone(),Track{key:old.clone(),name:"tone.wav".into(),frames:4800,streaming:true}); }
+            c.tracks.insert(other.clone(),Track{key:other.clone(),name:"other.wav".into(),frames:4800,streaming:true});
+            let plan=c.plan_command(&x,&json!({"kind":"delete","name":"tone.wav","confirmation":"tone.wav"})).unwrap();
+            c.plan_command(&x,&json!({"kind":"scan"})).unwrap();
+            let scan=PluginJob{token:JobToken{plugin:"local-music".into(),slot:"scan".into(),generation:1},payload:json!({"kind":"scan"}),timeout_seconds:900,created_unix:0};
+            let result=json!({"imports":["tone.wav"],"tracks":[{"key":new,"name":"tone.wav","frames":4800,"streaming":true}],"errors":[]});
+            c.work_completed(&x,&scan,&JobOutcome::Succeeded(result)).unwrap();
+            c.plan_command(&x,&json!({"kind":"play","device_id":"a","key":new})).unwrap();
+            let deleted=PluginJob{token:JobToken{plugin:"local-music".into(),slot:"delete".into(),generation:1},payload:plan.jobs[0].payload.clone(),timeout_seconds:900,created_unix:0};
+            c.work_completed(&x,&deleted,&JobOutcome::Succeeded(Value::Null)).unwrap();
+            assert!(!c.tracks.contains_key(&old));assert!(!c.tracks.contains_key(&new));assert!(c.devices.is_empty());assert!(c.tracks.contains_key(&other));
+        }
+    }
+    #[test]
+    fn compatibility_prepare_cannot_resurrect_a_deleted_name() {
+        let mut c=LocalMusicContent::default();let x=super::tests::ctx();let key="a".repeat(64);c.imports.push("tone.wav".into());
+        let deletion=c.plan_command(&x,&json!({"kind":"delete","name":"tone.wav","confirmation":"tone.wav"})).unwrap();
+        let preparation=c.plan_command(&x,&json!({"kind":"prepare","name":"tone.wav"})).unwrap();
+        let deleted=PluginJob{token:JobToken{plugin:"local-music".into(),slot:"delete".into(),generation:1},payload:deletion.jobs[0].payload.clone(),timeout_seconds:900,created_unix:0};
+        let plan=c.work_completed(&x,&deleted,&JobOutcome::Succeeded(Value::Null)).unwrap();
+        assert!(plan.cancel_slots.iter().any(|s|s=="prepare"));assert!(c.pending.is_none());
+        let prepared=PluginJob{token:JobToken{plugin:"local-music".into(),slot:"prepare".into(),generation:1},payload:preparation.jobs[0].payload.clone(),timeout_seconds:900,created_unix:0};
+        c.work_completed(&x,&prepared,&JobOutcome::Succeeded(json!({"key":key,"name":"tone.wav","frames":4800,"streaming":true}))).unwrap();
+        assert!(c.tracks.is_empty());assert!(c.imports.is_empty());
+    }
+    #[test]
+    fn legacy_eof_migration_replays_from_zero_after_reload_without_rewinding_partial_pause() {
+        for position in [512,4800] {
+            let mut c=LocalMusicContent::default();let x=super::tests::ctx();let key="a".repeat(64);
+            c.load_state(json!({"tracks":{key.clone():{"key":key,"name":"tone.wav","frames":4800}},"devices":{"a":{"incarnation":1,"key":key,"generation":1,"position":position}},"next_generation":2})).unwrap();
+            let scan=PluginJob{token:JobToken{plugin:"local-music".into(),slot:"scan".into(),generation:1},payload:json!({"kind":"scan"}),timeout_seconds:900,created_unix:0};
+            c.work_completed(&x,&scan,&JobOutcome::Succeeded(json!({"imports":["tone.wav"],"tracks":[{"key":key,"name":"tone.wav","frames":5000,"streaming":true}],"errors":[]}))).unwrap();
+            assert!(c.spec(&x.devices[0].context).is_none());
+            let mut reloaded=LocalMusicContent::default();reloaded.load_state(c.save_state()).unwrap();
+            reloaded.plan_command(&x,&json!({"kind":"play","device_id":"a","key":key})).unwrap();
+            assert_eq!(reloaded.spec(&x.devices[0].context).unwrap().start_frame,if position==4800 {0} else {512});
+        }
+    }
+    #[test]
+    fn streaming_pause_resume_and_actual_eof_exceed_metadata_without_rewind() {
+        let mut c = LocalMusicContent::default();
+        let x = super::tests::ctx();
+        let key = "a".repeat(64);
+        c.tracks.insert(key.clone(), Track {
+            key: key.clone(), name: "tone.wav".into(), frames: 4800, streaming: true,
+        });
+        c.plan_command(&x, &json!({"kind":"play","device_id":"a","key":key})).unwrap();
+        let ctx = &x.devices[0].context;
+        let spec = c.spec(ctx).unwrap();
+        c.audio_progress(ctx, &spec, 6000, false);
+        for _ in 0..2 {
+            c.plan_command(&x, &json!({"kind":"pause","device_id":"a"})).unwrap();
+            assert_eq!(c.devices["a"].position, 6000);
+            assert_eq!(c.web_state_at(x.now_mono_ms)["devices"]["a"]["position_ms"], 125);
+        }
+        let mut reloaded = LocalMusicContent::default();
+        reloaded.load_state(c.save_state()).unwrap();
+        assert_eq!(reloaded.web_state_at(x.now_mono_ms)["devices"]["a"]["position_ms"], 125);
+        reloaded.plan_command(&x, &json!({"kind":"play","device_id":"a","key":key})).unwrap();
+        let resumed = reloaded.spec(ctx).unwrap();
+        assert_eq!(resumed.start_frame, 6000);
+        reloaded.audio_progress(ctx, &resumed, 6500, true);
+        assert!(reloaded.spec(ctx).is_none());
+        for _ in 0..2 {
+            reloaded.plan_command(&x, &json!({"kind":"pause","device_id":"a"})).unwrap();
+            assert_eq!(reloaded.devices["a"].position, 6500);
+            assert_eq!(reloaded.web_state_at(x.now_mono_ms)["devices"]["a"]["position_ms"], 135);
+        }
+        reloaded.plan_command(&x, &json!({"kind":"play","device_id":"a","key":key})).unwrap();
+        assert_eq!(reloaded.spec(ctx).unwrap().start_frame, 0);
+    }
+    #[test]
+    fn legacy_pause_and_web_position_keep_exact_pcm_limit() {
+        let mut c = LocalMusicContent::default();
+        let mut x = super::tests::ctx();
+        let key = "a".repeat(64);
+        c.tracks.insert(key.clone(), Track {
+            key: key.clone(), name: "legacy.wav".into(), frames: 4800, streaming: false,
+        });
+        c.plan_command(&x, &json!({"kind":"play","device_id":"a","key":key})).unwrap();
+        x.now_mono_ms += 125;
+        assert_eq!(c.web_state_at(x.now_mono_ms)["devices"]["a"]["position_ms"], 100);
+        for _ in 0..2 {
+            c.plan_command(&x, &json!({"kind":"pause","device_id":"a"})).unwrap();
+            assert_eq!(c.devices["a"].position, 4800);
+        }
+        c.plan_command(&x, &json!({"kind":"play","device_id":"a","key":key})).unwrap();
+        let spec = c.spec(&x.devices[0].context).unwrap();
+        assert_eq!(spec.start_frame, 0);
+        assert_eq!(spec.frame_count, Some(4800));
+    }
+    #[test]
+    fn startup_pause_consumed_position_stale_progress_and_eof() {
+        let mut c=LocalMusicContent::default();let mut x=super::tests::ctx();let key="a".repeat(64);
+        c.tracks.insert(key.clone(),Track{key:key.clone(),name:"tone.wav".into(),frames:4800,streaming:true});
+        c.plan_command(&x,&json!({"kind":"play","device_id":"a","key":key})).unwrap();
+        let ctx=&x.devices[0].context;let original=c.spec(ctx).unwrap();assert_eq!(original.frame_count,None);
+        x.now_mono_ms+=9000;
+        assert_eq!(c.web_state_at(x.now_mono_ms)["devices"]["a"]["position_ms"],0);
+        c.plan_command(&x,&json!({"kind":"pause","device_id":"a"})).unwrap();assert_eq!(c.devices["a"].position,0);
+        c.plan_command(&x,&json!({"kind":"play","device_id":"a","key":key})).unwrap();
+        let ctx=&x.devices[0].context;let current=c.spec(ctx).unwrap();assert_eq!(current.start_frame,0);
+        c.audio_progress(ctx,&original,2400,false);assert_eq!(c.devices["a"].consumed,Some(0));
+        c.audio_progress(ctx,&current,512,false);assert_eq!(c.spec(ctx),Some(current.clone()));
+        c.audio_progress(ctx,&current,0,false);assert_eq!(c.devices["a"].consumed,Some(512));
+        c.session_reset("a",1);assert_eq!(c.devices["a"].position,512);
+        c.plan_command(&x,&json!({"kind":"play","device_id":"a","key":key})).unwrap();
+        let ctx=&x.devices[0].context;let current=c.spec(ctx).unwrap();assert_eq!(current.start_frame,512);
+        c.plan_command(&x,&json!({"kind":"pause","device_id":"a"})).unwrap();assert_eq!(c.devices["a"].position,512);
+        c.plan_command(&x,&json!({"kind":"play","device_id":"a","key":key})).unwrap();
+        let ctx=&x.devices[0].context;let current=c.spec(ctx).unwrap();assert_eq!(current.start_frame,512);
+        c.audio_progress(ctx,&current,4500,true);assert!(c.spec(ctx).is_none());
+        assert_eq!(c.web_state_at(x.now_mono_ms)["devices"]["a"]["playing"],false);
+        c.plan_control(ctx,MusicControl::Toggle).unwrap();assert_eq!(c.spec(ctx).unwrap().start_frame,0);
+        let current=c.spec(ctx).unwrap();c.audio_failed(ctx,&current,6000,AudioPlaybackFailure::DeviceFailed).unwrap();
+        assert_eq!(c.devices["a"].position,6000,"metadata duration does not rewind consumed position");
+        c.plan_command(&x,&json!({"kind":"play","device_id":"a","key":key})).unwrap();assert_eq!(c.spec(ctx).unwrap().start_frame,6000);
+        let current=c.spec(ctx).unwrap();c.audio_progress(ctx,&current,6500,true);
+        c.plan_command(&x,&json!({"kind":"pause","device_id":"a"})).unwrap();
+        c.plan_command(&x,&json!({"kind":"play","device_id":"a","key":key})).unwrap();assert_eq!(c.spec(ctx).unwrap().start_frame,0);
     }
 }

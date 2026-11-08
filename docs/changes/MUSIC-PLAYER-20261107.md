@@ -163,3 +163,7 @@ owner 内に保持するだけで、plugin の再生意図へ返す契約が欠�
 `renderEinkVideoControls is not defined` 6件は対象外のfixture不足として維持した。
 JavaScript全体の `node --check`、`git diff --check`、project gateのstaticはPASS。
 ログは `/tmp/picomado-ui-order-{all,negative}.log`。全Cargo・本番反映は別途追記する。
+
+## 原本から逐次復号（2026-11-08）
+
+ユーザーの「ストリーミング復号の方向でたのむ」に対応する事前契約は[逐次復号設計](../design/local-music-streaming.md)、仕様commitは3985647/7ad5768/b924181。手動の全曲PCM変換を前提にせず、metadataの自動登録とtransfer所有のffmpeg readerで原本を逐次復号する。PCM canonical形式、端末別音量、交渉済みSBCの順序と既存legacy資産を維持する。[実装・検証記録](../evidence/MUSIC-PLAYER-20261108-streaming.md)でホスト試験、本番適用、実音声確認を分離する。

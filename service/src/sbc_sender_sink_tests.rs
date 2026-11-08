@@ -6,12 +6,13 @@ struct AudioFixture {
     paths:crate::plugin_jobs::PluginPaths, key:String,
     failures:std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
-fn fixture(frames:u64,start:u64,rate:u32)->AudioFixture {
+fn fixture(frames:u64,start:u64,rate:u32)->AudioFixture { fixture_mode(frames,start,rate,false) }
+fn fixture_mode(frames:u64,start:u64,rate:u32,streaming:bool)->AudioFixture {
     let failures=std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let temp = tempfile::tempdir().unwrap();
     let key = "a".repeat(64);
     let mut content = crate::local_music::LocalMusicContent::default();
-    content.load_state(serde_json::json!({"tracks":{key.clone():{"key":key,"name":"fixture.wav","frames":frames}},"devices":{},"next_generation":1})).unwrap();
+    content.load_state(serde_json::json!({"tracks":{key.clone():{"key":key,"name":"fixture.wav","frames":frames,"streaming":streaming}},"devices":{},"next_generation":1})).unwrap();
     let mut plugins = crate::plugins::PluginSet::default();
     plugins
         .register(
@@ -206,6 +207,7 @@ impl ContentPlugin for TestAudioContent {
     fn load_state(&mut self,v:serde_json::Value)->Result<(),crate::content::ContentError>{self.inner.load_state(v)}
     fn plan_command(&mut self,c:&crate::plugin_jobs::CommandContext,v:&serde_json::Value)->Result<crate::plugin_jobs::PluginWorkPlan,crate::content::ContentError>{self.inner.plan_command(c,v)}
     fn audio_playback(&self,c:&crate::content::PluginContext)->Option<crate::plugin_jobs::AudioPlaybackSpec>{let mut s=self.inner.audio_playback(c)?;s.sample_rate=self.rate;s.start_frame=self.start;Some(s)}
+    fn audio_progress(&mut self,ctx:&crate::content::PluginContext,spec:&crate::plugin_jobs::AudioPlaybackSpec,consumed:u64,ended:bool){self.inner.audio_progress(ctx,spec,consumed,ended);}
     fn audio_failed(&mut self,ctx:&crate::content::PluginContext,spec:&crate::plugin_jobs::AudioPlaybackSpec,consumed:u64,reason:crate::plugin_jobs::AudioPlaybackFailure)->Result<Option<crate::plugin_jobs::PluginWorkPlan>,crate::content::ContentError>{
         self.failures.fetch_add(1,std::sync::atomic::Ordering::SeqCst);
         if self.rate==48000 {self.inner.audio_failed(ctx,spec,consumed,reason)} else {
@@ -335,7 +337,7 @@ async fn arbitrary_partial_pcm_reads_survive_ticks_and_empty_shortage_without_pa
         let mut sink=Box::pin(futures_util::sink::unfold(packets.clone(),|packets,message:Message|async move {if let Message::Binary(bytes)=message{packets.lock().unwrap().push(bytes.to_vec());}Ok::<_,std::convert::Infallible>(packets)}));
         let mut audio=SocketAudio::new(&session);let (_tx,mut rx)=tokio::sync::mpsc::channel(8);let mut pending=None;
         let mut reads=Vec::new();let mut pieces=std::collections::VecDeque::from(pieces);
-        let mut reader=|_:String,_:crate::plugin_jobs::AudioPlaybackSpec,offset:u64,max:u32,_:crate::plugin_jobs::PluginPaths| {
+        let mut reader=|_:String,_:crate::plugin_jobs::AudioPlaybackSpec,offset:u64,max:u32,_:crate::plugin_jobs::PluginPaths,_:crate::plugin_jobs::AudioReadHandle| {
             let count=pieces.pop_front().expect("no read after EOF");assert!(count<=max as usize);
             reads.push((offset,count));std::future::ready(Ok(vec![0;count*4]))
         };
@@ -413,7 +415,7 @@ async fn blocked_finish_rechecks_cancel_failure_ready_and_channel_close_but_pres
                 assert_eq!(audio.transfer.as_ref().unwrap().pending_pcm.len(),127*4);
                 assert_eq!(audio.transfer.as_ref().unwrap().final_frame,Some(128));
                 service_audio_with_reader(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending,
-                    |_,_,_,_,_|->std::future::Ready<Result<Vec<u8>,crate::plugin_jobs::JobFailure>>{panic!("pending final PCM must not be reread")}).await.unwrap();
+                    |_,_,_,_,_,_|->std::future::Ready<Result<Vec<u8>,crate::plugin_jobs::JobFailure>>{panic!("pending final PCM must not be reread")}).await.unwrap();
                 assert_eq!(audio.sender.sent_end(),Some(128));
                 assert!(audio.transfer.as_ref().unwrap().pending_pcm.is_empty());
                 let sent=packets.lock().unwrap();assert_eq!(sent.iter().filter(|p|p[5]==26).count(),1);assert_eq!(sent.iter().filter(|p|p[5]==30).count(),1);
@@ -426,4 +428,91 @@ async fn blocked_finish_rechecks_cancel_failure_ready_and_channel_close_but_pres
             },
         }
     }
+}
+
+#[tokio::test]
+async fn streaming_primes_before_start_and_actual_eof_controls_bounded_padding() {
+    for actual in [0u64,1,127,128,129,256,1024,1025,2051] {
+        let AudioFixture{_temp,app,session,frame,..}=fixture_mode(48000,0,48000,true);
+        app.lock().unwrap().terminal_event(crate::Event::ReceiptAck{token:frame}).unwrap();
+        let packets=std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut sink=Box::pin(futures_util::sink::unfold(packets.clone(),|packets,message:Message|async move{if let Message::Binary(bytes)=message{packets.lock().unwrap().push(bytes.to_vec());}Ok::<_,std::convert::Infallible>(packets)}));
+        let mut audio=SocketAudio::new(&session);let(_tx,mut rx)=tokio::sync::mpsc::channel(8);let mut pending=None;
+        let mut reads=0;let mut reader=|_:String,_:crate::plugin_jobs::AudioPlaybackSpec,offset:u64,max:u32,_:crate::plugin_jobs::PluginPaths,_:crate::plugin_jobs::AudioReadHandle| {
+            if reads==0 {assert!(packets.lock().unwrap().is_empty(),"no Start before first decoded chunk");}
+            reads+=1;std::future::ready(Ok(vec![0;actual.saturating_sub(offset).min(max as u64) as usize*4]))
+        };
+        service_audio_with_reader(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending,&mut reader).await.unwrap();
+        assert_eq!(packets.lock().unwrap().len(),1);assert_eq!(packets.lock().unwrap()[0][5],28);
+        let ready=ready_for(&audio);audio.ready(ready);
+        for _ in 0..6 {
+            service_audio_with_reader(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending,&mut reader).await.unwrap();
+            if audio.transfer.as_ref().is_some_and(|t|t.final_frame.is_some()) { break; }
+        }
+        let end=actual.div_ceil(128)*128;
+        assert_eq!(audio.transfer.as_ref().unwrap().source_final,Some(actual));
+        assert_eq!(audio.transfer.as_ref().unwrap().final_frame,Some(end));
+        assert_eq!(audio.sender.sent_end(),Some(end));assert!(end-actual<128);
+        assert_eq!(packets.lock().unwrap().iter().filter(|p|p[5]==26).count(),1);
+        assert!(audio.transfer.as_ref().unwrap().source.is_none());
+        if actual==129 {
+            audio.credit(audio.sender.identity().unwrap(),end,end,true);
+            service_audio_with_reader(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending,&mut reader).await.unwrap();
+            assert_eq!(app.read().unwrap().plugin_web_view("local-music").unwrap().data["devices"]["audio"]["position_ms"],2,"failure position excludes SBC EOF padding");
+        }
+    }
+}
+
+#[tokio::test]
+async fn streaming_startup_cancel_and_expired_deadline_never_start_device() {
+    for expired in [false,true] {
+        let AudioFixture{_temp,app,session,frame,failures,..}=fixture_mode(48000,0,48000,true);
+        app.lock().unwrap().terminal_event(crate::Event::ReceiptAck{token:frame}).unwrap();
+        let packets=std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut sink=Box::pin(futures_util::sink::unfold(packets.clone(),|packets,message:Message|async move{if let Message::Binary(bytes)=message{packets.lock().unwrap().push(bytes.to_vec());}Ok::<_,std::convert::Infallible>(packets)}));
+        let mut audio=SocketAudio::new(&session);let(tx,mut rx)=tokio::sync::mpsc::channel(8);let mut pending=None;
+        tx.send(WriterCommand::Stop).await.unwrap();
+        service_audio_with_reader(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending,|_,_,_,_,_,_|std::future::pending::<Result<Vec<u8>,crate::plugin_jobs::JobFailure>>()).await.unwrap();
+        assert!(matches!(pending.take(),Some(WriterCommand::Stop)));assert!(packets.lock().unwrap().is_empty());
+        let deadline=audio.transfer.as_ref().unwrap().source_deadline;
+        if expired {
+            audio.transfer.as_mut().unwrap().source_deadline=Some(tokio::time::Instant::now()-Duration::from_millis(1));
+            service_audio_with_reader(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending,|_,_,_,_,_,_|std::future::ready(Ok::<_,crate::plugin_jobs::JobFailure>(vec![0;1024]))).await.unwrap();
+            assert_eq!(failures.load(std::sync::atomic::Ordering::SeqCst),1);
+            assert!(audio.transfer.as_ref().unwrap().source.is_none());
+        } else { assert!(deadline.is_some()); }
+        assert!(packets.lock().unwrap().is_empty(),"startup cancellation/timeout sends neither Start nor Finish");
+    }
+}
+
+#[tokio::test]
+async fn streaming_credit_during_read_is_available_to_pause_and_stale_bytes_never_publish() {
+    let AudioFixture{_temp,app,session,frame,..}=fixture_mode(48000,0,48000,true);
+    app.lock().unwrap().terminal_event(crate::Event::ReceiptAck{token:frame}).unwrap();
+    let packets=std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut sink=Box::pin(futures_util::sink::unfold(packets.clone(),|packets,message:Message|async move{if let Message::Binary(bytes)=message{packets.lock().unwrap().push(bytes.to_vec());}Ok::<_,std::convert::Infallible>(packets)}));
+    let mut audio=SocketAudio::new(&session);let(tx,mut rx)=tokio::sync::mpsc::channel(8);let mut pending=None;
+    let mut fill=|_,_,_,max:u32,_,_|std::future::ready(Ok::<_,crate::plugin_jobs::JobFailure>(vec![0;max as usize*4]));
+    service_audio_with_reader(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending,&mut fill).await.unwrap();
+    audio.ready(ready_for(&audio));
+    service_audio_with_reader(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending,&mut fill).await.unwrap();
+    assert_eq!(audio.sender.sent_end(),Some(2048));
+    tx.send(WriterCommand::AudioCredit(audio.sender.identity().unwrap(),2048,1024,false)).await.unwrap();
+    let mut read=|_,_,_,max:u32,_,_| {let app=app.clone();async move {
+        loop {
+            let position=app.read().unwrap().plugin_web_view("local-music").unwrap().data["devices"]["audio"]["position_ms"].as_u64().unwrap();
+            if position==21 {break;}
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        let revision=app.read().unwrap().plugin_web_view("local-music").unwrap().revision;
+        app.lock().unwrap().plugin_command("local-music",revision,serde_json::json!({"kind":"pause","device_id":"audio"})).unwrap();
+        Ok::<_,crate::plugin_jobs::JobFailure>(vec![1;max as usize*4])
+    }};
+    service_audio_with_reader(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending,&mut read).await.unwrap();
+    let state=app.read().unwrap().plugin_web_view("local-music").unwrap().data;
+    assert_eq!(state["devices"]["audio"]["position_ms"],21);
+    assert_eq!(state["devices"]["audio"]["playing"],false);
+    assert_eq!(audio.sender.sent_end(),Some(2048),"read completed after pause cannot publish");
+    service_audio_with_reader(&mut sink,&app,&session,&mut audio,&mut rx,&mut pending,|_,_,_,_,_,_|->std::future::Ready<Result<Vec<u8>,crate::plugin_jobs::JobFailure>>{panic!("paused source cannot restart")}).await.unwrap();
+    assert!(audio.transfer.is_none());
 }
