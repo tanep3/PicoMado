@@ -33,7 +33,8 @@
         "6f02af5: negotiated media input and physical Sub separation specification",
         "13a03f5: preserve AVRCP short controls, add long Cancel and volume specification",
         "67d7d31: HCI comparison and host deadline diagnostic specification",
-        "docs/design/bluetooth-sbc-transport.md (specification; not implementation or hardware acceptance)"
+        "docs/design/bluetooth-sbc-transport.md (specification; not implementation or hardware acceptance)",
+        "docs/changes/BT-AUDIO-20261107.md: startup timing diagnostic modes0/1/2 specification; same-connection ACK/wait bound and original Wi-Fi/BT hypothesis; not a repair or device acceptance"
       ]
     },
     "implementation": {
