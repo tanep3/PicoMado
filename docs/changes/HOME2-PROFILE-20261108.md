@@ -20,3 +20,11 @@ Old firmware rejects profile 2 and discards the entire settings record, includin
 ## Acceptance and evidence boundaries
 
 Host tests must cover legacy records 0/1, profile 2 round-trip, missing HOME2 fallback preserving other settings, invalid IDs/CRC, navigation and reverse/wrap/skip, repeated input, confirm/cancel, both home profiles bypassing EEX1, and standard USB INPUT semantics. Run existing host and USB/contract suites and an isolated LCD cross-build with BT ON, HCI drain 0, SPI_REAL_SIZE OFF, INNER OFF and the a9b361f ARP/credit/sleep diagnostic flags retained. Record UF2 source and SHA, settings-sector bounds and build results. Local tests are implementation evidence only; independent verification, physical application and connectivity/effectiveness remain separate and pending.
+
+## Display correction: missing numeric glyph (2026-11-08)
+
+The user observed HOME2 appearing as HOME plus empty space and specifically asked to inspect the font. Production LCD `label()` counts all five characters for centering, but its A–Z-only lookup skips the digit2 entirely. Five characters fit its 13-character cap. The E-ink renderer has the same A–Z-only limitation. This is a missing glyph, not evidence of label reversal, string truncation or insufficient buffer width.
+
+Preserve every existing A–Z bitmap, 2x scaling, 12-pixel advance, centering, clipping, colors, rotation and panel compensation. A single compact local font lookup will supply the existing uppercase glyphs and digits0–9 to both renderers; unsupported characters remain blank cells. Do not change network identities, saved settings, navigation or hardware configuration.
+
+Previous HOME2 tests asserted the logical status string using display mocks, not the real rendered pixels, so they missed the absent digit. Add pixel-level tests against the production LCD SPI output after reversing the configured transport transform, and the production E-ink local framebuffer. Assert the final digit cell and expected letter/digit sequence independently of the production lookup, preserve HOME/AWAY output, cover truncation/bounds, and save before/after raster images for visual inspection. Host success remains distinct from viewing the physical panel; parent owns device confirmation.

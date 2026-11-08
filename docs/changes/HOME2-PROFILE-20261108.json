@@ -29,13 +29,14 @@
       ]
     },
     "implementation": {
-      "state": "verified",
+      "state": "in_progress",
       "evidence": [
         "ee29031",
         "5d0a8b0",
         "5fceee8",
         "docs/evidence/HOME2-PROFILE-20261108-host.md",
-        "docs/evidence/HOME2-PROFILE-20261108-integrated.md"
+        "docs/evidence/HOME2-PROFILE-20261108-integrated.md",
+        "User found missing digit2 in actual HOME2 menu; production pixel/font coverage added under the existing HOME2 change."
       ]
     },
     "independent_verification": {
