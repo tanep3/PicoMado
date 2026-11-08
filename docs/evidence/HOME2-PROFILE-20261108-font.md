@@ -35,3 +35,7 @@ Source `29b300092f55f1438d645819fd0d8e63b1224f20` includes the font implementati
 Optional root gate was rerun: 49 tests, the same one pre-existing route-fixture mismatch failed (`test_gate_routes.Routes.test_actual_firmware_build_sdk_flags_and_offline_flash`). No root gate pass is claimed. Log: `/tmp/picomado-home2-font-integrated-gate/structural.log`.
 
 No USB, flash, service, SSH, push or network-setting action was taken by this worker. The parent still needs to confirm the physical NETWORK/HOME2 screen visibly ends in2 after authorized application. These are implementation checks, not independent acceptance.
+
+## LCD application record
+
+The parent worker applied this candidate to LCD serial E661640843239D21 at11:22 JST after checking music was stopped. `/tmp/picomado-home2-font-flash.log` reports flash verification OK for SHA25680367df65f805f004ff5ab74403acdf2025e1d83198d2cf1d09e72d7826d2d50. Selected AWAY and user volume36 were preserved; no music or input command was sent. Passive boot record `/tmp/picomado-power-observe-20261108-112240` shows Wi-Fi retry followed by IP assignment, then EEX1 endpoint discovery with22 sends/0 receives and no candidate. This is an outstanding connection-preparation condition, not proof of a font failure or of network reconnection. Physical sight confirmation of HOME2 remains with the user; rendering-buffer images and tests are not a camera observation.
