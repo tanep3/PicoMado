@@ -30,3 +30,11 @@ Bluetoothスピーカーを常時表示し、端末別の接続・操作設定�
 削除確認への入口を確認した。DOMのopenプロパティを直接変えるため、toggleイベントの非同期発火に依存しない。
 旧UIでは管理detailsが最初のrefreshで閉じる再現を確認した。
 ログ: `/tmp/picomado-device-ui-{frozen,negative}.log`。本番反映と独立確認は別途記録する。
+
+
+## 適用記録
+
+実装 `5cc4d4b` を含むUI専用候補を2026-11-08 13:48:54 JSTに反映した。
+変更前の設定とDB/実行ファイルを保全し、配信HTMLの一致と14UI試験、音量・mute等の
+不変、反映前onlineだったE-ink2台の復帰を確認した。LCDは反映前からofflineだった。
+[検証・適用の全証拠と未完了項目](../evidence/WEB-UI-20261108.md)を参照する。
