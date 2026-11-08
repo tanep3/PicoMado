@@ -22,3 +22,7 @@
 streaming specのframe_countはNone。実source EOF後にのみAudioFinishし、最後のSBC単位へのpaddingは0..127 frameまで。metadataの推定尺まで無音を捏造しない。最大2時間でreaderを終端または失敗させ、未知長の無限再生を許可しない。legacy Some(frame_count)の破損/早すぎるEOF拒否を維持する。最終chunk後にEOF確認が必要でも、creditを超えて送らない。読取・Finish後に既存identity再検証、音量適用後encodeの順序とhistoryを維持する。
 
 試験は実ffmpegの複数形式、非48k/mono→canonical、非ゼロ開始位置、短い/部分chunk、EOF/異常終了、取消/timeout/Drop子process終了、読取中control割込みと再read、端末独立、legacy PCMのみ、metadata不正・symlink・期限・cleanup、自動登録とUIを対象とする。既存SBC/PCM/音量/identity/credit回帰と設定済みCLIで全Cargo回帰、Node、static gateを実施。SSH/push/サービス/USB/音出しは担当範囲外。実装、独立検証、本番反映、実機効果を分離する。
+
+### 位置観測と起動待ち
+
+streaming選曲の位置は開始時点から検証済みconsumed creditで保持し、起動待機・rebufferの壁時計時間を再生済みsampleとして加算しない。Appは現在session/display/plugin/spec一致を確認した観測だけをcontentへ渡す。観測は保存状態やspecのstarted_mono_ms/generationを変更せず、pauseの純粋遷移が最新位置を採用する。末尾paddingは位置表示から除く。既存PCM legacyの位置算出は今回変更しない。初回読取の期限は最初の試行から非延長とし、control割込みや再試行で10秒をリセットしない。
