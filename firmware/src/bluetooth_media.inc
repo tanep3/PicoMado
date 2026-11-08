@@ -3,6 +3,9 @@
 static struct {
     uint64_t inc,session,display,stream,first,accepted,consumed,final_frame,tx_connection;
     uint32_t started_ms,report_ms,diagnostic_ms,blocked_ms;
+    uint64_t codec_epoch;
+    pm_bt_sbc_config config;
+    bool sbc,ready_pending;
     bool active,playing,failed,dirty,finishing,blocked,report_abandoned;
 } bt_media;
 static int16_t bt_media_pcm[512];
@@ -23,7 +26,7 @@ static void bt_media_end(bool failed){
         (unsigned long long)bt_media.stream,(unsigned long long)bt_media.accepted,
         (unsigned long long)bt_media.consumed,failed,bt_media.finishing,(unsigned long long)bt_media.final_frame);
     bt_media_log_runtime();
-    bt_media.active=false;bt_media.playing=false;bt_media.failed=failed;bt_media.dirty=true;
+    bt_media.ready_pending=false;bt_media.active=false;bt_media.playing=false;bt_media.failed=failed;bt_media.dirty=true;
 }
 static pm_api_result api_audio(uint8_t kind,const char *j){
     uint64_t inc,session,display,stream,first,rate;
@@ -32,7 +35,7 @@ static pm_api_result api_audio(uint8_t kind,const char *j){
     if(state!=ACTIVE||inc!=incarnation||session!=session_epoch||display!=display_epoch){
         /* Once per rejected identity, not per PCM packet or polling turn. */
         static uint64_t logged_inc,logged_session,logged_display,logged_stream;
-        if(kind==22&&(inc!=logged_inc||session!=logged_session||display!=logged_display||stream!=logged_stream)){
+        if((kind==22||kind==28)&&(inc!=logged_inc||session!=logged_session||display!=logged_display||stream!=logged_stream)){
             logged_inc=inc;logged_session=session;logged_display=display;logged_stream=stream;
             pm_logf("bt audio ignored stream=%llu requested_inc=%llu current_inc=%llu requested_session=%llu current_session=%llu requested_display=%llu current_display=%llu state=%u\n",
                 (unsigned long long)stream,(unsigned long long)inc,(unsigned long long)incarnation,
@@ -54,7 +57,7 @@ static pm_api_result api_audio(uint8_t kind,const char *j){
         if(inc==bt_media.inc&&session==bt_media.session&&display==bt_media.display&&stream==bt_media.stream)bt_media_end(false);
         return PM_API_COMPLETED;
     }
-    if(kind!=22||!number(j,"first_frame",&first)||!number(j,"rate",&rate)||rate!=48000)return PM_API_REJECTED;
+    if((kind!=22&&kind!=28)||!number(j,"first_frame",&first)||!number(j,"rate",&rate)||rate!=48000)return PM_API_REJECTED;
     if(bt_media.inc==inc&&bt_media.session==session&&stream<=bt_media.stream)return PM_API_IGNORED;
     if(bt_media.active)bt_media_end(false);
     memset(&bt_media,0,sizeof bt_media);
@@ -64,7 +67,10 @@ static pm_api_result api_audio(uint8_t kind,const char *j){
     cyw43_arch_lwip_begin();
     uint32_t negotiated=bt_initialized?pm_bt_runtime_rate():0;
     bool was_active=bt_initialized&&pm_bt_runtime_audio_active();
-    bool ok=bt_initialized&&negotiated==rate&&pm_bt_runtime_audio_begin(stream,first);
+    bt_media.sbc=kind==28;
+    bool ok=bt_initialized&&negotiated==rate&&(bt_media.sbc?
+        pm_bt_runtime_audio_sbc_begin(stream,first,&bt_media.config,&bt_media.codec_epoch):pm_bt_runtime_audio_begin(stream,first));
+    bt_media.ready_pending=ok&&bt_media.sbc;
     cyw43_arch_lwip_end();
     pm_logf("bt audio begin stream=%llu rate=%lu negotiated=%lu init=%u prior_active=%u ok=%u first=%llu\n",
         (unsigned long long)stream,(unsigned long)rate,(unsigned long)negotiated,bt_initialized,was_active,ok,(unsigned long long)first);
@@ -76,6 +82,7 @@ static void process_audio_bytes(const uint8_t *p,size_t n){
     if(!bt_media.active||!bt_media_current()||n<44||n>1064||(n-40)%4)return;
     if(bt_media_be64(p)!=bt_media.inc||bt_media_be64(p+8)!=bt_media.session||
        bt_media_be64(p+16)!=bt_media.display||bt_media_be64(p+24)!=bt_media.stream)return;
+    if(bt_media.sbc){bt_media_end(true);return;}
     uint64_t first=bt_media_be64(p+32);size_t frames=(n-40)/4;
     /* Old retransmissions never become a new discontinuity. */
     if(first<bt_media.accepted)return;
@@ -90,6 +97,24 @@ static void process_audio_bytes(const uint8_t *p,size_t n){
     if(r!=PM_BT_PCM_OK){pm_logf("bt audio push_error stream=%llu result=%u first=%llu frames=%u\n",(unsigned long long)bt_media.stream,(unsigned)r,(unsigned long long)first,(unsigned)frames);bt_media_end(true);}
     bt_media.dirty=true;
 }
+static void process_sbc_bytes(const uint8_t *p,size_t n){
+    if(!bt_media.active||!bt_media_current()||n<32)return;
+    if(bt_media_be64(p)!=bt_media.inc||bt_media_be64(p+8)!=bt_media.session||
+       bt_media_be64(p+16)!=bt_media.display||bt_media_be64(p+24)!=bt_media.stream)return;
+    size_t frames;
+    if(!bt_media.sbc||bt_media.ready_pending||n<=40||
+       !pm_bt_sbc_validate(&bt_media.config,p+40,n-40,&frames)){bt_media_end(true);return;}
+    uint64_t first=bt_media_be64(p+32);
+    if(first>UINT64_MAX-frames||(bt_media.finishing&&first+frames>bt_media.final_frame)){bt_media_end(true);return;}
+    if(first+frames<=bt_media.accepted)return; /* wholly old duplicate, no credit growth */
+    if(first<bt_media.accepted){bt_media_end(true);return;}
+    cyw43_arch_lwip_begin();
+    pm_bluetooth_audio_result r=pm_bt_runtime_audio_sbc_push(bt_media.stream,first,p+40,n-40);
+    if(r==PM_BT_PCM_OK)bt_media.accepted=pm_bt_runtime_audio_next_frame();
+    cyw43_arch_lwip_end();
+    if(r!=PM_BT_PCM_OK)bt_media_end(true);
+    bt_media.dirty=true;
+}
 static void poll_audio(void){
     if(!bt_media.stream)return;
     if(!bt_media_current()){if(bt_media.active)bt_media_end(false);bt_media.dirty=false;return;}
@@ -102,7 +127,7 @@ static void poll_audio(void){
         bool alive=pm_bt_runtime_audio_active();
         uint8_t status=0;bool requested_play=false;
         uint64_t buffered=bt_media.accepted-bt_media.consumed;
-        if(alive&&!bt_media.playing&&(buffered>=PM_BT_PCM_FRAMES||(buffered>=128&&bt_media.finishing&&bt_media.accepted==bt_media.final_frame))){
+        if(alive&&!bt_media.ready_pending&&!bt_media.playing&&(buffered>=pm_bt_runtime_audio_capacity()||(buffered>=128&&bt_media.finishing&&bt_media.accepted==bt_media.final_frame))){
             requested_play=true;status=pm_bt_runtime_play();if(!status)bt_media.playing=true;
         }
         cyw43_arch_lwip_end();
@@ -114,26 +139,36 @@ static void poll_audio(void){
         if(!alive||status)bt_media_end(!(bt_media.finishing&&bt_media.consumed>=bt_media.final_frame));
         else if(bt_media.finishing&&bt_media.final_frame==bt_media.first)bt_media_end(false);
     }
-    if(bt_media.report_abandoned || !bt_media.dirty)return;
+    if(bt_media.report_abandoned || (!bt_media.dirty&&!bt_media.ready_pending))return;
     if(bt_media.blocked && (uint32_t)(now-bt_media.blocked_ms)>=1500){
+        if(bt_media.active)bt_media_end(true);
         bt_media.report_abandoned=true;bt_media.dirty=false;
         pm_net_send_expired(bt_media.tx_connection);return;
     }
     if(now-bt_media.report_ms<10)return;
-    int n=snprintf(outbound_json,sizeof outbound_json,
+    int n;
+    if(bt_media.ready_pending){
+        pm_bt_sbc_config c=bt_media.config;
+        n=snprintf(outbound_json,sizeof outbound_json,
+          "{\"type\":\"audio_sbc_ready\",\"data\":{\"incarnation\":%llu,\"session_epoch\":%llu,\"display_epoch\":%llu,\"stream_id\":%llu,\"first_frame\":%llu,\"codec_epoch\":%llu,\"rate\":%lu,\"channels\":%u,\"blocks\":%u,\"subbands\":%u,\"channel_mode\":%u,\"allocation\":%u,\"bitpool\":%u,\"capacity_frames\":%u}}",
+          (unsigned long long)bt_media.inc,(unsigned long long)bt_media.session,(unsigned long long)bt_media.display,
+          (unsigned long long)bt_media.stream,(unsigned long long)bt_media.first,(unsigned long long)bt_media.codec_epoch,
+          (unsigned long)c.rate,c.channels,c.blocks,c.subbands,c.channel_mode,c.allocation,c.bitpool,PM_BT_SBC_FRAMES);
+    }else n=snprintf(outbound_json,sizeof outbound_json,
       "{\"type\":\"audio_status\",\"data\":{\"incarnation\":%llu,\"session_epoch\":%llu,\"display_epoch\":%llu,\"stream_id\":%llu,\"accepted\":%llu,\"consumed\":%llu,\"failed\":%s}}",
       (unsigned long long)bt_media.inc,(unsigned long long)bt_media.session,(unsigned long long)bt_media.display,
       (unsigned long long)bt_media.stream,(unsigned long long)bt_media.accepted,(unsigned long long)bt_media.consumed,bt_media.failed?"true":"false");
     if(n<=0||(size_t)n>=sizeof outbound_json)return;
     bt_media.report_ms=now;
-    pm_net_tx_result result=pm_net_try_send(25,outbound_json,&bt_media.tx_connection);
-    if(result==PM_NET_TX_COPIED){bt_media.dirty=false;bt_media.blocked=false;}
+    pm_net_tx_result result=pm_net_try_send(bt_media.ready_pending?29:25,outbound_json,&bt_media.tx_connection);
+    if(result==PM_NET_TX_COPIED){bt_media.dirty=bt_media.ready_pending;bt_media.ready_pending=false;bt_media.blocked=false;}
     else if(result==PM_NET_TX_WAIT){
         if(!bt_media.blocked){bt_media.blocked=true;bt_media.blocked_ms=now;}
-    }else{bt_media.report_abandoned=true;bt_media.dirty=false;}
+    }else{if(bt_media.active)bt_media_end(true);bt_media.report_abandoned=true;bt_media.dirty=false;}
 }
 #else
 static pm_api_result api_audio(uint8_t kind,const char *j){(void)kind;(void)j;return PM_API_IGNORED;}
 static void process_audio_bytes(const uint8_t *p,size_t n){(void)p;(void)n;}
+static void process_sbc_bytes(const uint8_t *p,size_t n){(void)p;(void)n;}
 static void poll_audio(void){}
 #endif

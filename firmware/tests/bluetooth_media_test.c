@@ -12,7 +12,7 @@ static int state=ACTIVE;
 static uint64_t incarnation=1,session_epoch=2,display_epoch=3;
 static bool bt_initialized=true,begin_ok=true,send_ok=true;
 static uint32_t now_ms;
-static unsigned locks,reports,plays,ends,expired;
+static unsigned locks,reports,plays,ends,expired,last_kind;
 static bool fatal_send;
 static uint64_t consumed;
 static pm_bluetooth_audio ring;
@@ -27,10 +27,13 @@ void pm_bt_runtime_audio_end(void){assert(locks);++ends;pm_bluetooth_audio_stop(
 pm_bluetooth_audio_result pm_bt_runtime_audio_push(uint64_t gen,uint64_t first,const int16_t *pcm,size_t frames){assert(locks);return pm_bluetooth_audio_push(&ring,gen,first,pcm,frames);}
 uint64_t pm_bt_runtime_audio_next_frame(void){assert(locks);return ring.next_frame;}
 uint64_t pm_bt_runtime_audio_consumed_frames(void){assert(locks);return consumed;}
+size_t pm_bt_runtime_audio_capacity(void){assert(locks);return pm_bluetooth_audio_capacity(&ring);}
+bool pm_bt_runtime_audio_sbc_begin(uint64_t gen,uint64_t first,pm_bt_sbc_config *c,uint64_t *epoch){assert(locks);if(!begin_ok)return false;*c=(pm_bt_sbc_config){48000,2,16,8,3,0,32};*epoch=1;consumed=first;return pm_bluetooth_audio_sbc_start(&ring,gen,first,1,c);}
+pm_bluetooth_audio_result pm_bt_runtime_audio_sbc_push(uint64_t gen,uint64_t first,const uint8_t *bytes,size_t n){assert(locks);return pm_bluetooth_audio_sbc_push(&ring,gen,1,first,bytes,n);}
 bool pm_bt_runtime_audio_active(void){assert(locks);return ring.active;}
 bool pm_bt_runtime_audio_finish(uint64_t gen,uint64_t end){assert(locks);return ring.active&&gen==ring.generation&&end>=ring.next_frame;}
 uint8_t pm_bt_runtime_play(void){assert(locks);++plays;return 0;}
-pm_net_tx_result pm_net_try_send(uint8_t kind,const char *j,uint64_t *connection){assert(connection);*connection=7;assert(!locks&&kind==25);++reports;snprintf(last_report,sizeof last_report,"%s",j);return fatal_send?PM_NET_TX_FAILED:send_ok?PM_NET_TX_COPIED:PM_NET_TX_WAIT;}
+pm_net_tx_result pm_net_try_send(uint8_t kind,const char *j,uint64_t *connection){assert(connection);*connection=7;assert(!locks&&(kind==25||kind==29));last_kind=kind;++reports;snprintf(last_report,sizeof last_report,"%s",j);return fatal_send?PM_NET_TX_FAILED:send_ok?PM_NET_TX_COPIED:PM_NET_TX_WAIT;}
 void pm_net_send_expired(uint64_t connection){assert(connection==7);assert(!locks);++expired;}
 static bool number(const char *j,const char *key,uint64_t *v){char needle[80];snprintf(needle,sizeof needle,"\"%s\":",key);const char *p=strstr(j,needle);if(!p)return false;char *end;*v=strtoull(p+strlen(needle),&end,10);return end!=p+strlen(needle);}
 void pm_bt_runtime_link_snapshot(pm_bt_link_snapshot *out){assert(locks);memset(out,0,sizeof *out);}
@@ -101,4 +104,4 @@ static void test_backpressure(void){
  reset();command(22,1,0);send_ok=false;now_ms=UINT32_MAX-100;poll_audio();now_ms+=1500;
  poll_audio();assert(expired==1);
 }
-int main(void){test_backpressure();test_full_prefill();test_identity_endian_credit();test_finish();test_overflow_gap_start_cancel();test_report_retry();assert(!locks);puts("Bluetooth media: identity, LE PCM, credit, EOF, overflow, start failure, cancellation PASS");}
+int main(void){(void)process_sbc_bytes;test_backpressure();test_full_prefill();test_identity_endian_credit();test_finish();test_overflow_gap_start_cancel();test_report_retry();assert(!locks);puts("Bluetooth media: identity, LE PCM, credit, EOF, overflow, start failure, cancellation PASS");return 0;}

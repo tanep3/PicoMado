@@ -766,7 +766,7 @@ static bool send_hello(void){
         "\"capabilities\":[\"%s\",\"buttons%u\",\"frame-bytes-v1\"%s%s],\"screen_owner_epoch\":%llu}}",
         PM_DEVICE_ID,pm_display_capability(),PM_BUTTON_COUNT,
 #if PM_BLUETOOTH_AUDIO
-        ",\"bluetooth-audio-v1\",\"audio-buffer-4096-v1\",\"media-input-v1\"",
+        ",\"bluetooth-audio-v1\",\"audio-buffer-4096-v1\",\"audio-sbc-v1\",\"media-input-v1\"",
 #else
         "",
 #endif
@@ -1122,7 +1122,7 @@ static pm_api_result api_frame(uint8_t kind,const char *j){
 static const pm_device_api device_apis[]={
 #if PM_BLUETOOTH_AUDIO
     {20,"bluetooth_command",api_bluetooth},
-    {22,"audio_start",api_audio},{23,"audio_stop",api_audio},{26,"audio_finish",api_audio},
+    {22,"audio_start",api_audio},{28,"audio_sbc_start",api_audio},{23,"audio_stop",api_audio},{26,"audio_finish",api_audio},
 #endif
     {2,"welcome",api_welcome},{3,"settings",api_settings},
     {10,"input_accepted",api_input_result},{11,"error",api_error},
@@ -1430,6 +1430,7 @@ int main(void){
                 if(kind==18)process_frame_bytes((const uint8_t *)json,pm_net_payload_length());
 #if PM_BLUETOOTH_AUDIO
                 else if(kind==24)process_audio_bytes((const uint8_t *)json,pm_net_payload_length());
+                else if(kind==30)process_sbc_bytes((const uint8_t *)json,pm_net_payload_length());
 #endif
                 else process(kind,json);
                 pm_stats_note(PM_STAT_PROCESS,process_started);

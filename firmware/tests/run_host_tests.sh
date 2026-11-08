@@ -33,6 +33,7 @@ for home2 in absent partial configured; do
     run "home2-$home2"
 done
 bash tests/run_status_font_tests.sh
+bash tests/run_sbc_tests.sh
 build arp-rx tests/arp_rx_probe_test.c
 run arp-rx
 build bluetooth-input tests/bluetooth_input_test.c

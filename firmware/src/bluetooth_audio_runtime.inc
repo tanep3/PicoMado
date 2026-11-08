@@ -9,15 +9,16 @@ static void media_stop(void){
  pm_bt_rebuffer_reset(&rebuffer,0,0);
 }
 static unsigned ready_packet(void){
- unsigned frames=encoder->num_audio_frames(&encoder_state);
- unsigned reserve=pm_bt_sbc_bytes((unsigned)encoder_state.params.s16BitPool,
+ unsigned frames=audio.sbc?128:encoder->num_audio_frames(&encoder_state);
+ unsigned reserve=audio.sbc?pm_bt_sbc_frame_bytes(&audio.sbc_config):pm_bt_sbc_bytes((unsigned)encoder_state.params.s16BitPool,
      encoder_state.params.s16ChannelMode==SBC_CHANNEL_MODE_JOINT_STEREO);
  int mtu=a2dp_max_media_payload_size(cid,seid);
  unsigned target=pm_bt_packet_frames(rate,frames,reserve,mtu>0?(size_t)mtu:0,sizeof encoded);
  return pm_bt_ready_packet(target,frames,audio.used,pcm_eof,accepted_frames,pcm_end);
 }
 static bool audio_scope_current(void){
- return audio.active&&pm_bt_rebuffer_current(&rebuffer,generation,audio.generation);
+ return audio.active&&pm_bt_rebuffer_current(&rebuffer,generation,audio.generation)&&
+     (!audio.sbc||(audio.codec_epoch==codec_epoch&&pm_bt_sbc_config_equal(&audio.sbc_config,&codec_config)));
 }
 static void rebuffer_fail(pm_bt_rebuffer_result result,uint32_t now){
  diagnostics.rebuffer_failed++;
@@ -46,7 +47,7 @@ static void tick(btstack_timer_source_t *t){
    media_stop();return;
   }
   bool packet_ready=ready_packet()!=0;
-  bool refilled=audio.used>=PM_BT_PCM_FRAMES || (pcm_eof&&accepted_frames==pcm_end&&packet_ready);
+  bool refilled=audio.used>=pm_bluetooth_audio_capacity(&audio) || (pcm_eof&&accepted_frames==pcm_end&&packet_ready);
   bool missed=!clock_started||pm_bt_packet_delay(deadline,samples_sent,rate,now)<0;
   bool was_buffering=rebuffer.buffering;
   pm_bt_rebuffer_result result=pm_bt_rebuffer_step(&rebuffer,now,packet_ready,refilled,missed);
@@ -71,14 +72,15 @@ static void tick(btstack_timer_source_t *t){
 }
 static void prepare_audio(void){
  if(!streaming||!wanted||!encoder||prepared_count)return;
+ if(!audio_scope_current()){media_stop();return;}
  uint32_t send_started=btstack_run_loop_get_time_ms();
- unsigned frames=encoder->num_audio_frames(&encoder_state);
+ unsigned frames=audio.sbc?128:encoder->num_audio_frames(&encoder_state);
  int mtu=a2dp_max_media_payload_size(cid,seid);
  int16_t pcm[256];
  /* Compute exact encoded size from negotiated16x8/stereo and chosen bitpool;
   * SDK packet length is still zero before the first encode. */
  unsigned bytes;
- unsigned reserve=pm_bt_sbc_bytes((unsigned)encoder_state.params.s16BitPool,
+ unsigned reserve=audio.sbc?pm_bt_sbc_frame_bytes(&audio.sbc_config):pm_bt_sbc_bytes((unsigned)encoder_state.params.s16BitPool,
      encoder_state.params.s16ChannelMode==SBC_CHANNEL_MODE_JOINT_STEREO);
  unsigned target=pm_bt_packet_frames(rate,frames,reserve,mtu>0?(size_t)mtu:0,sizeof encoded);
  if(frames!=128||!target){emit((pm_bt_event){.kind=PM_BT_ERROR,.status=0xff01,.detail1=(int32_t)frames,.detail2=(int32_t)reserve,.detail3=mtu});media_stop();return;}
@@ -87,6 +89,10 @@ static void prepare_audio(void){
  target=eligible;
  unsigned count=0,used=1;
  while(count<target&&audio.used>=frames){
+  if(audio.sbc){
+   if(!pm_bluetooth_audio_sbc_pop(&audio,encoded+used,sizeof encoded-used)){media_stop();return;}
+   used+=reserve;count++;continue;
+  }
   if(!pm_bluetooth_audio_pop(&audio,pcm,frames))break;
   uint8_t status=encoder->encode_signed_16(&encoder_state,pcm,encoded+used);
   bytes=encoder->sbc_buffer_length(&encoder_state);
@@ -123,6 +129,7 @@ static void send_audio(void){
  }
  pm_bt_rebuffer_sent(&rebuffer,now);
  prepared_count=prepared_bytes=0;
+ if(audio.sbc&&!pm_bluetooth_audio_sbc_sent(&audio,count*frames)){media_stop();return;}
  consumed_frames+=count*frames; /* Credit/completion never outruns successful RTP send. */
  diagnostics.packets++;diagnostics.frames+=count*frames;
  timestamp+=count*frames;samples_sent+=count*frames;
@@ -145,7 +152,7 @@ bool pm_bt_runtime_audio_begin(uint64_t gen,uint64_t first_frame){
  audio.next_frame=first_frame;accepted_frames=consumed_frames=first_frame;return true;
 }
 bool pm_bt_runtime_audio_finish(uint64_t gen,uint64_t end){
- if(!audio.active||audio.generation!=gen||end<accepted_frames||end<pcm_first||(end-pcm_first)%128)return false;
+ if(!audio_scope_current()||audio.generation!=gen||end<accepted_frames||end<pcm_first||(end-pcm_first)%128)return false;
  if(pcm_eof&&end!=pcm_end)return false;
  pcm_eof=true;pcm_end=end;return true;
 }
@@ -158,9 +165,29 @@ pm_bluetooth_audio_result pm_bt_runtime_audio_push(uint64_t gen,uint64_t frame,c
 }
 uint64_t pm_bt_runtime_audio_next_frame(void){return accepted_frames;}
 uint64_t pm_bt_runtime_audio_consumed_frames(void){return consumed_frames;}
-size_t pm_bt_runtime_audio_free_frames(void){return audio.active?PM_BT_PCM_FRAMES-audio.used:0;}
+size_t pm_bt_runtime_audio_capacity(void){return pm_bluetooth_audio_capacity(&audio);}
+size_t pm_bt_runtime_audio_free_frames(void){return audio.active?pm_bluetooth_audio_capacity(&audio)-(accepted_frames-consumed_frames):0;}
 void pm_bt_runtime_audio_end(void){media_stop();if(cid&&wanted)a2dp_source_pause_stream(cid,seid);}
 uint8_t pm_bt_runtime_play(void){
- if(!wanted||!encoder||!audio.active||audio.used<128)return ERROR_CODE_COMMAND_DISALLOWED;
+ if(!wanted||!encoder||!audio_scope_current()||audio.used<128)return ERROR_CODE_COMMAND_DISALLOWED;
  return a2dp_source_start_stream(cid,seid);
+}
+
+bool pm_bt_runtime_audio_sbc_begin(uint64_t gen,uint64_t first,pm_bt_sbc_config *config,uint64_t *epoch){
+ if(!config||!epoch||!wanted||!cid||!encoder||streaming||!gen||!codec_epoch||!pm_bt_sbc_config_valid(&codec_config))return false;
+ if(!pm_bt_runtime_audio_begin(gen,first))return false;
+ if(!pm_bluetooth_audio_sbc_start(&audio,gen,first,codec_epoch,&codec_config)){media_stop();return false;}
+ *config=audio.sbc_config;*epoch=audio.codec_epoch;return true;
+}
+pm_bluetooth_audio_result pm_bt_runtime_audio_sbc_push(uint64_t gen,uint64_t first,const uint8_t *bytes,size_t n){
+ if(!audio_scope_current())return PM_BT_PCM_INACTIVE;
+ size_t frames;
+ if(!audio.sbc||!n)return PM_BT_PCM_INVALID;
+ unsigned frame_bytes=pm_bt_sbc_frame_bytes(&audio.sbc_config);
+ if(n%frame_bytes||n/frame_bytes>PM_BT_SBC_CHUNK)return PM_BT_PCM_INVALID;
+ frames=n/frame_bytes*128; /* Full CRC/header validation is atomic in the aggregate below. */
+ if(pcm_eof&&(first>pcm_end||frames>pcm_end-first))return PM_BT_PCM_INVALID;
+ pm_bluetooth_audio_result r=pm_bluetooth_audio_sbc_push(&audio,gen,codec_epoch,first,bytes,n);
+ if(r==PM_BT_PCM_OK)accepted_frames=audio.next_frame;
+ return r;
 }

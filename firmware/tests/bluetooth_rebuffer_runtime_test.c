@@ -7,7 +7,8 @@
 #include "bluetooth_rebuffer.h"
 #define SBC_CHANNEL_MODE_JOINT_STEREO 1
 #define ERROR_CODE_COMMAND_DISALLOWED 12
-static uint64_t generation=7;
+static uint64_t generation=7,codec_epoch=1;
+static pm_bt_sbc_config codec_config={48000,2,16,8,3,0,32};
 static bool wanted=true,streaming,pending,input_enabled,clock_started,pcm_eof,timer_scheduled;
 static uint32_t rate=48000,timestamp,deadline,can_requested_ms,timer_due_ms,input_epoch,last_packet_end_ms;
 static uint64_t accepted_frames,consumed_frames,samples_sent,pcm_end,pcm_first;
@@ -43,7 +44,7 @@ static void btstack_run_loop_add_timer(btstack_timer_source_t *t){assert(t==&tim
 static uint8_t a2dp_source_pause_stream(unsigned c,unsigned s){assert(c==cid&&s==seid);pauses++;return 0;}
 static uint8_t a2dp_source_start_stream(unsigned c,unsigned s){assert(c==cid&&s==seid);starts++;return 0;}
 static uint8_t a2dp_source_stream_send_media_payload_rtp(unsigned c,unsigned s,int marker,uint32_t ts,const uint8_t *data,unsigned length){
- assert(c==cid&&s==seid&&!marker&&data==encoded&&length==1u+77u*data[0]);
+ assert(c==cid&&s==seid&&!marker&&data==encoded&&length==1u+(audio.sbc?pm_bt_sbc_frame_bytes(&audio.sbc_config):77u)*data[0]);
  if(send_status)return send_status;
  assert(sends<128);sent_times[sends]=now;sent_timestamps[sends]=ts;sends++;return 0;
 }
@@ -114,4 +115,4 @@ static void test_repeat_budget(void){
  while(audio.used>=1152||prepared_count){at(now+24);}
  at(now+1);at(now+30);assert(!audio.active&&underflows==1&&last_event.detail1==PM_BT_RB_EXHAUSTED);
 }
-int main(void){test_refill_and_clock();test_timely_and_eof();test_deadline_and_cancel();test_repeat_budget();puts("Bluetooth production rebuffer: credit/ring preservation, EOF, sample cadence, deadlines, cancellation and repeat budget PASS");}
+int main(void){test_refill_and_clock();test_timely_and_eof();test_deadline_and_cancel();test_repeat_budget();puts("Bluetooth production rebuffer: credit/ring preservation, EOF, sample cadence, deadlines, cancellation and repeat budget PASS");return 0;}

@@ -698,7 +698,7 @@ again:
         }
         if(app_used>=n+4) {
             if(app_rx[4]!=1 || n-2>=cap){stage=PM_NET_FAILED;return false;}
-            if(app_rx[5]<1 || app_rx[5]>(PM_BLUETOOTH_AUDIO?26:18)){stage=PM_NET_FAILED;return false;}
+            if(app_rx[5]<1 || app_rx[5]>(PM_BLUETOOTH_AUDIO?30:18)){stage=PM_NET_FAILED;return false;}
             last_payload_length=n-2;*kind=app_rx[5];memcpy(json,app_rx+6,n-2);json[n-2]=0;
 #if PM_EVENT_STREAM
             uint32_t first=0,end=0;uint64_t parent=0;

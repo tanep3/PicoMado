@@ -22,6 +22,8 @@ static bool observed_packet_valid,observed_mode_valid;
 #endif
 static uint32_t rate, timestamp, deadline;
 static uint64_t accepted_frames, consumed_frames, samples_sent;
+static uint64_t codec_epoch;
+static pm_bt_sbc_config codec_config;
 static bool streaming, pending, input_enabled;
 static pm_bluetooth_audio audio;
 static btstack_timer_source_t timer;
@@ -140,7 +142,9 @@ static void source_handler(uint8_t type,uint16_t channel,uint8_t *p,uint16_t siz
    if(!pm_bt_accept_peer(wanted,stopping,peer,incoming)||recovery_releasing()){a2dp_source_disconnect(c);return;}
    /* The selected speaker may win simultaneous establishment. Adopt its CID;
     * callbacks for the losing outgoing CID can no longer clear this owner. */
-   uint16_t previous=cid;cid=c;retry_cancel();
+   uint16_t previous=cid;
+   if(previous!=c){media_stop();encoder=NULL;rate=0;codec_config=(pm_bt_sbc_config){0};}
+   cid=c;retry_cancel();
    emit((pm_bt_event){.kind=PM_BT_LINK_DIAGNOSTIC,.detail1=previous,.detail2=c,.detail3=1});
    return;
   }
@@ -155,6 +159,10 @@ static void source_handler(uint8_t type,uint16_t channel,uint8_t *p,uint16_t siz
   break;}
  case A2DP_SUBEVENT_SIGNALING_MEDIA_CODEC_SBC_CONFIGURATION:{
   if(!wanted||recovery_releasing()||a2dp_subevent_signaling_media_codec_sbc_configuration_get_a2dp_cid(p)!=cid)return;
+  /* Every accepted reconfiguration invalidates the audio owner and prepared RTP. */
+  media_stop();codec_config=(pm_bt_sbc_config){0};
+  if(codec_epoch==UINT64_MAX){emit((pm_bt_event){.kind=PM_BT_ERROR,.status=0xff03});pm_bt_runtime_stop(generation);return;}
+  codec_epoch++;
   rate=a2dp_subevent_signaling_media_codec_sbc_configuration_get_sampling_frequency(p);
   unsigned channels=a2dp_subevent_signaling_media_codec_sbc_configuration_get_num_channels(p);
   unsigned mode=a2dp_subevent_signaling_media_codec_sbc_configuration_get_channel_mode(p);
@@ -168,11 +176,18 @@ static void source_handler(uint8_t type,uint16_t channel,uint8_t *p,uint16_t siz
    a2dp_subevent_signaling_media_codec_sbc_configuration_get_min_bitpool_value(p),
    a2dp_subevent_signaling_media_codec_sbc_configuration_get_max_bitpool_value(p));
   if(!bitpool){emit((pm_bt_event){.kind=PM_BT_ERROR,.status=0xff03});pm_bt_runtime_stop(generation);return;}
+  unsigned allocation=a2dp_subevent_signaling_media_codec_sbc_configuration_get_allocation_method(p);
+  if(allocation!=AVDTP_SBC_ALLOCATION_METHOD_LOUDNESS&&allocation!=AVDTP_SBC_ALLOCATION_METHOD_SNR){
+   emit((pm_bt_event){.kind=PM_BT_ERROR,.status=0xff03});pm_bt_runtime_stop(generation);return;
+  }
+  codec_config=(pm_bt_sbc_config){.rate=rate,.channels=2,.blocks=16,.subbands=8,
+   .channel_mode=mode==AVDTP_CHANNEL_MODE_STEREO?2:3,
+   .allocation=allocation==AVDTP_SBC_ALLOCATION_METHOD_LOUDNESS?0:1,.bitpool=(uint8_t)bitpool};
   encoder=btstack_sbc_encoder_bluedroid_init_instance(&encoder_state);
   encoder->configure(&encoder_state,SBC_MODE_STANDARD,
    a2dp_subevent_signaling_media_codec_sbc_configuration_get_block_length(p),
    a2dp_subevent_signaling_media_codec_sbc_configuration_get_subbands(p),
-   (btstack_sbc_allocation_method_t)(a2dp_subevent_signaling_media_codec_sbc_configuration_get_allocation_method(p)-1),rate,
+   allocation==AVDTP_SBC_ALLOCATION_METHOD_LOUDNESS?SBC_ALLOCATION_METHOD_LOUDNESS:SBC_ALLOCATION_METHOD_SNR,rate,
    bitpool,
    mode==AVDTP_CHANNEL_MODE_STEREO?SBC_CHANNEL_MODE_STEREO:SBC_CHANNEL_MODE_JOINT_STEREO);
   emit((pm_bt_event){.kind=PM_BT_CODEC,.rate=rate});break;}

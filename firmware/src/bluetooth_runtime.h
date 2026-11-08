@@ -52,3 +52,7 @@ uint8_t pm_bt_runtime_connect_at(uint64_t generation,const uint8_t address[6],ui
 
 /* Existing same-peer established link only; caller validates session ownership. */
 bool pm_bt_runtime_refresh_connected(uint64_t generation,const uint8_t address[6],uint32_t received_ms);
+
+size_t pm_bt_runtime_audio_capacity(void);
+bool pm_bt_runtime_audio_sbc_begin(uint64_t generation,uint64_t first_frame,pm_bt_sbc_config *config,uint64_t *codec_epoch);
+pm_bluetooth_audio_result pm_bt_runtime_audio_sbc_push(uint64_t generation,uint64_t first_frame,const uint8_t *bytes,size_t size);
