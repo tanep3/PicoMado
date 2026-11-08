@@ -144,3 +144,10 @@ this observation is not live proof of the secondary-resource fix.
 
 Firmware verification and passive observation do not constitute independent
 acceptance or final closure. No network settings, SSH, or push were used.
+
+A further 90-second passive sample at
+`/tmp/picomado-eink-update-observe-20261108-134353/` retained connection1.
+At boot+208 s, lbb/nxt/ack were all8834, unsent/unacked both0; the sampled
+connection recovered without reconnect or terminal cleanup. Bluetooth remained
+reported failed after its earlier connection deadline; no retry or playback
+was started by the observer. USB was closed after the observation interval.
