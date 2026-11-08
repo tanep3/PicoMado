@@ -28,6 +28,14 @@ pm_net_stage pm_net_state(void);
 bool pm_net_take(uint8_t *kind, char *json, size_t cap);
 size_t pm_net_payload_length(void);
 bool pm_net_send(uint8_t kind, const char *json);
+// No payload retained. WAIT means no COPY; caller owns bounded retry/lifetime.
+// COPIED is enqueue acceptance, never delivery; output errors do not undo it.
+typedef enum { PM_NET_TX_FAILED, PM_NET_TX_WAIT, PM_NET_TX_COPIED } pm_net_tx_result;
+// Zero scope binds the first attempt; later attempts refuse another connection.
+pm_net_tx_result pm_net_try_send(uint8_t kind,const char *json,uint64_t *connection);
+// Main-loop owner calls only after checking its current session/stream scope.
+void pm_net_send_expired(uint64_t connection);
+
 #if PM_EVENT_STREAM
 bool pm_net_send_observed(uint8_t kind,const char *json,uint64_t notify,uint64_t parent,uint64_t session);
 void pm_net_observed_api(uint64_t operation,uint64_t frame);

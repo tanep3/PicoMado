@@ -27,6 +27,7 @@ static err_t output_result,write_result;
 static const pm_profile *connecting_profile;
 static uint8_t sent[2048];
 static size_t sent_size;
+static unsigned fake_sndbuf=65535;
 static const pm_profile home={"test","test","192.0.2.1",false,NULL,NULL,NULL,0};
 static const pm_profile away={"test","test","192.0.2.1",true,"198.51.100.2","test","test",1080};
 static unsigned expected_flags(void){
@@ -58,7 +59,7 @@ err_t tcp_connect(struct tcp_pcb *p,const ip_addr_t *address,uint16_t port,tcp_c
     assert(p->so_options&SOF_KEEPALIVE);assert(p->keep_idle==30000 && p->keep_intvl==5000 && p->keep_cnt==3);
     connects++;on_connect=cb;return fail_connect?-5:ERR_OK;
 }
-unsigned tcp_sndbuf(struct tcp_pcb *p){assert(lock_depth==1 && p==&socket_instance);return 65535;}
+unsigned tcp_sndbuf(struct tcp_pcb *p){assert(lock_depth==1 && p==&socket_instance);return fake_sndbuf;}
 err_t tcp_write(struct tcp_pcb *p,const void *bytes,size_t length,int flags){
     assert(lock_depth==1 && p==&socket_instance && flags==TCP_WRITE_FLAG_COPY && length<=sizeof sent);
     if(write_result)return write_result;
@@ -140,7 +141,33 @@ static void snapshot_test(void){
     assert(after.connection_id==before.connection_id+1 && !after.output_valid && after.write_ok==0);
     pm_net_close();
 }
+static void backpressure_test(void){
+ uint64_t scope=0;
+ connecting_profile=&home;pm_net_begin(&home);stage=PM_NET_READY;
+ unsigned output_before=outputs;
+ fake_sndbuf=1;assert(pm_net_try_send(25,"{}",&scope)==PM_NET_TX_WAIT);
+ assert(stage==PM_NET_READY&&outputs==output_before&&tcp_status.write_failed==0);
+ fake_sndbuf=65535;write_result=ERR_MEM;
+ assert(pm_net_try_send(25,"{}",&scope)==PM_NET_TX_WAIT);
+ assert(stage==PM_NET_READY&&outputs==output_before&&tcp_status.write_failed==1);
+ write_result=ERR_OK;output_result=-4;
+ assert(pm_net_try_send(25,"{}",&scope)==PM_NET_TX_COPIED);
+ assert(stage==PM_NET_READY&&outputs==output_before+1&&tcp_status.write_ok==1);
+ assert(tcp_status.output_failed==1); // output failure does not undo COPY
+ output_result=ERR_OK;write_result=-5;
+ assert(pm_net_try_send(25,"{}",&scope)==PM_NET_TX_FAILED&&stage==PM_NET_FAILED);
+ pm_net_close();write_result=ERR_OK;
+ assert(pm_net_try_send(25,"{}",&scope)==PM_NET_TX_FAILED&&stage==PM_NET_DOWN);
+ pm_net_begin(&home);stage=PM_NET_READY;
+ assert(pm_net_try_send(25,"{}",&scope)==PM_NET_TX_FAILED); // stale transport scope
+ pm_net_send_expired(scope);assert(stage==PM_NET_READY); // stale timeout cannot fail new connection
+ scope=0;assert(pm_net_try_send(25,"{}",&scope)==PM_NET_TX_COPIED);
+ stage=PM_NET_DRAINING;assert(pm_net_try_send(25,"{}",&scope)==PM_NET_TX_FAILED);
+ stage=PM_NET_READY;pm_net_send_expired(scope);assert(stage==PM_NET_FAILED);
+ pm_net_close();
+}
 int main(int argc,char **argv){
+    backpressure_test();
     snapshot_test();connects=creates=outputs=closes=0;
     assert(argc==2);
     for(unsigned i=0;i<2;i++){ready(&home);ready(&away);}

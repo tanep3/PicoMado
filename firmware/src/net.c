@@ -308,11 +308,14 @@ static uint16_t ack_probe_flags(void){
  return 0;
 #endif
 }
-static bool send_raw(const void *p, size_t n) {
-    if(!pcb){pm_ack_probe_net(PM_AP_WRITE_REJECT,0,1,(uint32_t)n,0,(uint32_t)stage);pm_logf("%s\n","net send_failed=no_socket");RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,0,);stage=PM_NET_FAILED;return false;}
+static pm_net_tx_result send_raw_attempt(const void *p, size_t n, uint8_t kind, bool retryable) {
+    if(!pcb){pm_ack_probe_net(PM_AP_WRITE_REJECT,0,1,(uint32_t)n,0,(uint32_t)stage);pm_logf("%s\n","net send_failed=no_socket");RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,0,);stage=PM_NET_FAILED;return PM_NET_TX_FAILED;}
     if(n>tcp_sndbuf(pcb)){
+        pm_logf("net send_buffer_full kind=%u bytes=%u sndbuf=%u queue=%u retryable=%u\n",
+            kind,(unsigned)n,(unsigned)tcp_sndbuf(pcb),(unsigned)pcb->snd_queuelen,retryable);
+        if(retryable)return PM_NET_TX_WAIT;
         pm_ack_probe_net(PM_AP_WRITE_REJECT,ack_probe_flags(),2,(uint32_t)n,tcp_sndbuf(pcb),(uint32_t)stage);
-        pm_logf("%s\n","net send_failed=send_buffer_full");RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,0,);stage=PM_NET_FAILED;return false;
+        pm_logf("%s\n","net send_failed=send_buffer_full");RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,0,);stage=PM_NET_FAILED;return PM_NET_TX_FAILED;
     }
     pm_ack_probe_net(PM_AP_WRITE_BEGIN,ack_probe_flags(),
 #if PM_ACK_PATH_PROBE
@@ -337,8 +340,10 @@ static bool send_raw(const void *p, size_t n) {
     pm_trace_event(PM_TRACE_TCP_WRITE,pm_trace_current_frame(),result,
         (uint32_t)(pm_trace_clock()-write_started));
     if(result!=ERR_OK){
-        pm_logf("net tcp_write_failed sdk_result=%d\n",(int)result);
-        RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,(int)result,);stage=PM_NET_FAILED; return false;
+        pm_logf("net tcp_write_failed sdk_result=%d kind=%u bytes=%u sndbuf=%u queue=%u retryable=%u\n",
+            (int)result,kind,(unsigned)n,pcb?(unsigned)tcp_sndbuf(pcb):0,pcb?(unsigned)pcb->snd_queuelen:0,retryable);
+        if(retryable && result==ERR_MEM && !socket_dead && stage!=PM_NET_FAILED)return PM_NET_TX_WAIT;
+        RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,(int)result,);stage=PM_NET_FAILED; return PM_NET_TX_FAILED;
     }
 #if PM_EVENT_STREAM
     uint64_t copy=observe_copy(copy_first,pcb->snd_lbb);
@@ -368,8 +373,9 @@ static bool send_raw(const void *p, size_t n) {
     pm_trace_event(PM_TRACE_TCP_OUTPUT,pm_trace_current_frame(),output_result,
         (uint32_t)(pm_trace_clock()-output_started));
     // Preserve existing queueing semantics; output result is diagnostic, not arrival ACK.
-    return true;
+    return PM_NET_TX_COPIED;
 }
+static bool send_raw(const void *p,size_t n){return send_raw_attempt(p,n,0,false)==PM_NET_TX_COPIED;}
 // A Close reply is optional: sndbuf measures bytes, not lwIP's segment queue
 // or heap. Skip resource shortages once; never retry them or reset a failure.
 static bool send_close_reply(const void *p,size_t n){
@@ -620,9 +626,9 @@ static void poll_unlocked(void) {
 }
 static pm_net_stage state_unlocked(void){return stage;}
 
-static bool send_unlocked(uint8_t kind, const char *json) {
-    if(ws_closed || (stage!=PM_NET_READY && stage!=PM_NET_DRAINING && stage!=PM_NET_DRAINED) || !pcb)return false;
-    size_t n=strlen(json);if(n>1024)return false;
+static pm_net_tx_result send_attempt_unlocked(uint8_t kind, const char *json, bool retryable) {
+    if(ws_closed || (stage!=PM_NET_READY && stage!=PM_NET_DRAINING && stage!=PM_NET_DRAINED) || !pcb)return PM_NET_TX_FAILED;
+    size_t n=strlen(json);if(n>1024)return PM_NET_TX_FAILED;
     pm_ack_probe_encoded(kind,json);
     uint8_t *packet=tx_packet;size_t k=0;
     packet[k++]=0x82;
@@ -636,8 +642,10 @@ static bool send_unlocked(uint8_t kind, const char *json) {
         (uint8_t)((n+2)>>8),(uint8_t)(n+2),1,kind};
     for(size_t i=0;i<6;i++)packet[k++]=header[i]^mask[i&3];
     for(size_t i=0;i<n;i++)packet[k++]=(uint8_t)json[i]^mask[(i+6)&3];
-    return send_raw(packet,k);
+    return send_raw_attempt(packet,k,kind,retryable);
 }
+
+static bool send_unlocked(uint8_t kind,const char *json){return send_attempt_unlocked(kind,json,false)==PM_NET_TX_COPIED;}
 
 // Close reasons use strict UTF-8: reject overlong forms, surrogates and >U+10FFFF.
 static bool close_utf8(const uint8_t *p,size_t n){
@@ -787,6 +795,26 @@ bool pm_net_send(uint8_t kind,const char *json){
     pm_ack_probe_before_lock(kind,json);
     uint64_t started=pm_stats_clock();cyw43_arch_lwip_begin();pm_stats_note(PM_STAT_SDK_WAIT,started);
     pm_ack_probe_locked(kind);tx_sync();bool ok=send_unlocked(kind,json);cyw43_arch_lwip_end();pm_ack_probe_send_return(kind,ok);pm_stats_note(PM_STAT_NET_SEND,started);return ok;
+}
+pm_net_tx_result pm_net_try_send(uint8_t kind,const char *json,uint64_t *connection){
+    cyw43_arch_lwip_begin();
+    check_failure_unlocked();
+    tx_sync();
+    pm_net_tx_result result=PM_NET_TX_FAILED;
+    if(connection && pcb && stage==PM_NET_READY &&
+       (!*connection || *connection==tcp_status.connection_id)){
+        *connection=tcp_status.connection_id;
+        result=send_attempt_unlocked(kind,json,true);
+    }
+    cyw43_arch_lwip_end();return result;
+}
+void pm_net_send_expired(uint64_t connection){
+    cyw43_arch_lwip_begin();
+    if(pcb && stage==PM_NET_READY && connection && connection==tcp_status.connection_id){
+        pm_logf("%s\n","net send_failed=backpressure_timeout");
+        RX_OBSERVE(pm_rx_fault,PM_RX_SEND_ERROR,ERR_MEM,);stage=PM_NET_FAILED;
+    }
+    cyw43_arch_lwip_end();
 }
 #if PM_EVENT_STREAM
 bool pm_net_send_observed(uint8_t kind,const char *json,uint64_t notify,uint64_t parent,uint64_t session){

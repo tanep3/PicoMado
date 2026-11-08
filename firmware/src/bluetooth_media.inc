@@ -1,9 +1,9 @@
 /* BT-AUDIO-20261107: bounded main-loop PCM wire bridge. */
 #if PM_BLUETOOTH_AUDIO
 static struct {
-    uint64_t inc,session,display,stream,first,accepted,consumed,final_frame;
-    uint32_t started_ms,report_ms,diagnostic_ms;
-    bool active,playing,failed,dirty,finishing;
+    uint64_t inc,session,display,stream,first,accepted,consumed,final_frame,tx_connection;
+    uint32_t started_ms,report_ms,diagnostic_ms,blocked_ms;
+    bool active,playing,failed,dirty,finishing,blocked,report_abandoned;
 } bt_media;
 static int16_t bt_media_pcm[512];
 static bool bt_media_current(void){
@@ -95,7 +95,9 @@ static void poll_audio(void){
     uint32_t now=to_ms_since_boot(get_absolute_time());
     if(bt_media.active){
         cyw43_arch_lwip_begin();
-        bt_media.consumed=pm_bt_runtime_audio_consumed_frames();
+        uint64_t consumed=pm_bt_runtime_audio_consumed_frames();
+        if(consumed!=bt_media.consumed)bt_media.dirty=true;
+        bt_media.consumed=consumed;
         bool alive=pm_bt_runtime_audio_active();
         uint8_t status=0;bool requested_play=false;
         uint64_t buffered=bt_media.accepted-bt_media.consumed;
@@ -111,13 +113,23 @@ static void poll_audio(void){
         if(!alive||status)bt_media_end(!(bt_media.finishing&&bt_media.consumed>=bt_media.final_frame));
         else if(bt_media.finishing&&bt_media.final_frame==bt_media.first)bt_media_end(false);
     }
-    if(!bt_media.dirty&&(!bt_media.active||now-bt_media.report_ms<10))return;
+    if(bt_media.report_abandoned || !bt_media.dirty)return;
+    if(bt_media.blocked && (uint32_t)(now-bt_media.blocked_ms)>=1500){
+        bt_media.report_abandoned=true;bt_media.dirty=false;
+        pm_net_send_expired(bt_media.tx_connection);return;
+    }
     if(now-bt_media.report_ms<10)return;
     int n=snprintf(outbound_json,sizeof outbound_json,
       "{\"type\":\"audio_status\",\"data\":{\"incarnation\":%llu,\"session_epoch\":%llu,\"display_epoch\":%llu,\"stream_id\":%llu,\"accepted\":%llu,\"consumed\":%llu,\"failed\":%s}}",
       (unsigned long long)bt_media.inc,(unsigned long long)bt_media.session,(unsigned long long)bt_media.display,
       (unsigned long long)bt_media.stream,(unsigned long long)bt_media.accepted,(unsigned long long)bt_media.consumed,bt_media.failed?"true":"false");
-    if(n>0&&(size_t)n<sizeof outbound_json&&pm_net_send(25,outbound_json)){bt_media.report_ms=now;bt_media.dirty=false;}
+    if(n<=0||(size_t)n>=sizeof outbound_json)return;
+    bt_media.report_ms=now;
+    pm_net_tx_result result=pm_net_try_send(25,outbound_json,&bt_media.tx_connection);
+    if(result==PM_NET_TX_COPIED){bt_media.dirty=false;bt_media.blocked=false;}
+    else if(result==PM_NET_TX_WAIT){
+        if(!bt_media.blocked){bt_media.blocked=true;bt_media.blocked_ms=now;}
+    }else{bt_media.report_abandoned=true;bt_media.dirty=false;}
 }
 #else
 static pm_api_result api_audio(uint8_t kind,const char *j){(void)kind;(void)j;return PM_API_IGNORED;}
