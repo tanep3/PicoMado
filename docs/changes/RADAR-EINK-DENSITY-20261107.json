@@ -34,36 +34,61 @@
       "state": "verified"
     },
     "effectiveness_confirmation": {
-      "evidence": [],
-      "state": "not_started"
+      "evidence": [
+        {
+          "kind": "user_report",
+          "note": "User (parent), 2026-11-07, viewing the physical E-ink panel: 'かなりよくなった。山形県あたりに雨雲がかかっているのが分かる' — the radar is much more readable and the rain cloud over the Yamagata area is identifiable."
+        }
+      ],
+      "state": "verified"
     },
     "implementation": {
       "evidence": [
         {
-          "kind": "commit",
-          "commit": "d8c4297dd7cba1576726d1c5adcbb5a7ba4c9bd7"
+          "commit": "d8c4297dd7cba1576726d1c5adcbb5a7ba4c9bd7",
+          "kind": "commit"
         },
         {
-          "kind": "commit",
-          "commit": "d3a829bbad95dfb11403163308140515213c9d7e"
+          "commit": "d3a829bbad95dfb11403163308140515213c9d7e",
+          "kind": "commit"
         },
         {
-          "kind": "commit",
-          "commit": "afcdb91c892c21882c6087ef3432637cad8fadf9"
+          "commit": "afcdb91c892c21882c6087ef3432637cad8fadf9",
+          "kind": "commit"
+        },
+        {
+          "SHA256": "9bc637edba5b060cfa03824691fcb32df8d31809d46d64890ae53b3b50bcf64a",
+          "kind": "check",
+          "note": "Exact CI command (cargo test --locked --all-features): 337 library tests passed, none failed, one ignored; integration suites passed.",
+          "path": "/tmp/radar-ci-all-features.log"
         }
       ],
-      "state": "in_progress"
+      "state": "verified"
     },
     "independent_verification": {
-      "evidence": [],
-      "state": "not_started"
+      "evidence": [
+        {
+          "kind": "review",
+          "note": "Parent-delegated review by Yuuko (Muse worker), 2026-11-07: diff of d8c4297..b5a2c16 confined to service/src/radar.rs and this change's own documents; LCD renderer functions untouched by the diff; committed preview SHA-256 matches the recorded ce13c35b7aed310bd098f42446823e4561b12f720ea3df80ab9d652cef083d91; reported monotonicity with controls off (0.207/0.321/0.446/0.544/0.674/0.777/0.870/0.969) cross-checked against the pre-implementation host experiment (0.19-0.99). Test-suite results are taken from the worker's recorded logs and were not rerun by the reviewer."
+        }
+      ],
+      "state": "verified"
     },
     "operational_application": {
-      "evidence": [],
-      "state": "not_started"
+      "evidence": [
+        {
+          "commit": "b5a2c160922c95d958f3bfb6c86cb387b4a2c979",
+          "kind": "commit"
+        },
+        {
+          "kind": "note",
+          "note": "Production server installed from afcdb91 build (installed SHA-256 a7ad53e8eb23913e1dfdafcaae8a4ac1234c24bddbf34301a206f607a2da99a7) after full config/SQLite backups (integrity_check ok); service active, API HTTP 200, all three devices hold five 3813-byte E-ink frames with error=false; E-ink heartbeats observed 06:51 JST 2026-11-07. Deployment record in this file's 'Deployment observation and follow-up' section."
+        }
+      ],
+      "state": "verified"
     }
   },
   "standard": "development/standard/v1/standard.md",
-  "status": "in_progress",
+  "status": "completed",
   "title": "Rain radar E-ink: semantic intensity-to-density rendering (method E)"
 }
