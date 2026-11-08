@@ -199,3 +199,40 @@ stopped, and no network settings changed. The device remains on observation
 A, which retains normal startup behavior. B comparison and restoration of
 the ordinary diagnostic-OFF artifact await an idle device. All restarts here
 were USB program/reboot operations, not physical removal of power.
+
+## Completed B and restoration
+
+After the user explicitly allowed diagnostic work to interrupt playback,
+preflight found the song stopped. B was written and verified, then recorded
+for150 seconds at `/tmp/picomado-eink-update-observe-20261108-142927/`.
+The A-complete and B arrival-byte totals match their full USB logs; both have
+dropped=0 and no diagnostic log-limit marker.
+
+B received the command at11505ms, entered the gate at11511ms (ACK6926,
+end7177, queued2, READY), and expired at36506ms, 25.001s after receipt.
+There were zero HCI_ON, HCI_WORKING, connect_begin and audio events throughout
+this B sample. ACK6926 remained unchanged in snapshots received at
+14:29:42.988 through14:30:58.000 JST. At14:31:13.052 the same connection1
+had ACK8149/end8149 and no unacknowledged output. Host state sampled at
+14:31:13.140 showed Receipt/Rendered2440227. The initial host Connected view
+belonged to old frame2440226 and is not evidence of a B Bluetooth connection.
+
+For comparison, A's ACK7177 was fixed across USB snapshots from14:16:51.529
+to14:18:21.414 JST. The kind9 ERR_MEM at uptime105.891520s was followed by
+connection2. Its initial silent stall therefore covers about90 seconds in
+those snapshots, not a proven100-second stall. HCI initialization itself took
+300ms. Additional display traffic began after uptime101.38s, and audio after
+113.020s; those later portions are not identical controlled conditions.
+
+Both samples changed the peer ARP entry from router MAC to actual server MAC
+without immediately restoring ACK progress. B demonstrates that early
+application HCI startup is not a necessary condition for the startup stall,
+and this gate alone does not prevent it. One A/B pair with later operation
+differences does not settle incidence, amplification or a shared root cause.
+SDK common initialization and BT-enabled WLAN firmware remain separate axes.
+
+After B, the ordinary diagnostic-OFF artifact `ecaad23d53a85ef64b042138ed27c2f7655402c231efaf5d8ff8f17cc4d8516a`
+was restored with100% verification. Passive post-restore capture is
+`/tmp/picomado-eink-update-observe-20261108-143235/`. No music or tone was
+started by the investigator. Further same-device BT compile-out comparison
+is prepared separately; no network setting was changed.
