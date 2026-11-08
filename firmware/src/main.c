@@ -1,3 +1,6 @@
+#if PM_CYW43_SLEEP_PROBE
+#include "cyw43_sleep_probe.h"
+#endif
 #if PM_CYW43_CREDIT_PROBE
 #include "cyw43_credit_probe.h"
 #endif
@@ -328,6 +331,12 @@ static void log_usb_snapshot(void){
         pm_logf("credit polls=%lu data=%lu control=%lu event=%lu negative=%lu flow=%u/%u credit=%u/%u seq=%u/%u\n",(unsigned long)row.polls,(unsigned long)row.data,(unsigned long)row.control,(unsigned long)row.event,(unsigned long)row.error,row.flow,row.end_flow,row.credit,row.end_credit,row.sequence,row.end_sequence);
     }
     pm_logf("credit summary count=%lu dropped=%lu\n",(unsigned long)credit_count,(unsigned long)credit_dropped);
+#endif
+#if PM_CYW43_SLEEP_PROBE
+    pm_sleep_status sl;cyw43_arch_lwip_begin();pm_sleep_get(&sl);cyw43_arch_lwip_end();
+    pm_logf("sleep count=%lu wake=%lu before=%u after=%u at_us=%lu duration=%lu\n",(unsigned long)sl.sleep,(unsigned long)sl.wake,sl.before,sl.after,(unsigned long)sl.last_us,(unsigned long)sl.duration_us);
+    pm_logf("kso sleep_ok=%lu sleep_fail=%lu wake_ok=%lu wake_fail=%lu\n",(unsigned long)sl.success[0],(unsigned long)sl.failure[0],(unsigned long)sl.success[1],(unsigned long)sl.failure[1]);
+    pm_logf("kso max_loops=%lu last_read=%ld failure_us=%lu\n",(unsigned long)sl.max_loops,(long)sl.last_read,(unsigned long)sl.last_failure_us);
 #endif
     // Replay cached results for late USB attachment; never repeat radio IOCTLs.
     log_wifi_pm_status();

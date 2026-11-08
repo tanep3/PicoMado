@@ -75,11 +75,29 @@ def generate_credit(source):
  one('    return cyw43_write_bytes(self, WLAN_FUNCTION, 0, CYW43_WRITE_BYTES_PAD(size), buf);', '    int pm_result = cyw43_write_bytes(self, WLAN_FUNCTION, 0, CYW43_WRITE_BYTES_PAD(size), buf);\n    pm_credit_finish(&pm_credit, pm_result, false);\n    return pm_result;')
  return text
 
+def generate_sleep(source):
+ text=generate_credit(source)
+ def one(a,b):
+  nonlocal text
+  if text.count(a)!=1:raise ValueError('ambiguous sleep insertion')
+  text=text.replace(a,b)
+ text='#include "cyw43_sleep_probe_impl.h"\n'+text
+ one('static void cyw43_kso_set(cyw43_int_t *self, int value) {','static void cyw43_kso_set(cyw43_int_t *self, int value) {\n    int pm_last_read = 0;')
+ one('int read_value = cyw43_read_reg_u8(self, BACKPLANE_FUNCTION, SDIO_SLEEP_CSR);','int read_value = cyw43_read_reg_u8(self, BACKPLANE_FUNCTION, SDIO_SLEEP_CSR);\n        pm_last_read = read_value;')
+ one('            return; // success','            pm_sleep_kso(value != 0, true, i + 1, read_value, 0);\n            return; // success')
+ one('    CYW43_WARN("cyw43_kso_set(%d): failed\\n", value);','    pm_sleep_kso(value != 0, false, 64, pm_last_read, cyw43_hal_ticks_us());\n    CYW43_WARN("cyw43_kso_set(%d): failed\\n", value);')
+ one('        self->bus_is_up = false;','        uint32_t pm_start = cyw43_hal_ticks_us();\n        self->bus_is_up = false;')
+ one('        cyw43_ll_bus_sleep_helper(self, true);','        cyw43_ll_bus_sleep_helper(self, true);\n        pm_sleep_transition(true, false, pm_start, cyw43_hal_ticks_us());')
+ one('        cyw43_ll_bus_sleep_helper(self, false);','        uint32_t pm_start = cyw43_hal_ticks_us();\n        cyw43_ll_bus_sleep_helper(self, false);')
+ one('        self->bus_is_up = true;','        self->bus_is_up = true;\n        pm_sleep_transition(false, true, pm_start, cyw43_hal_ticks_us());')
+ return text
+
 def main():
- p=argparse.ArgumentParser();p.add_argument('--source',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--spi-real-size',action='store_true');p.add_argument('--standalone',action='store_true');p.add_argument('--credit-probe',action='store_true');a=p.parse_args();
+ p=argparse.ArgumentParser();p.add_argument('--source',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--spi-real-size',action='store_true');p.add_argument('--standalone',action='store_true');p.add_argument('--credit-probe',action='store_true');p.add_argument('--sleep-probe',action='store_true');a=p.parse_args();
+ if a.sleep_probe and not a.credit_probe:p.error('sleep probe requires credit probe')
  if a.credit_probe and (a.spi_real_size or a.standalone):p.error('credit probe excludes other overlay modes')
- s=a.source.read_text();v=generate_credit(s) if a.credit_probe else generate(s,a.spi_real_size,a.standalone);a.output.parent.mkdir(parents=True,exist_ok=True)
+ s=a.source.read_text();v=generate_sleep(s) if a.sleep_probe else generate_credit(s) if a.credit_probe else generate(s,a.spi_real_size,a.standalone);a.output.parent.mkdir(parents=True,exist_ok=True)
  if not a.output.exists()or a.output.read_text()!=v:a.output.write_text(v)
  (a.output.parent/'cyw43_inner.diff').write_text(''.join(difflib.unified_diff(s.splitlines(True),v.splitlines(True),fromfile='SDK/cyw43_ll.c',tofile='private/cyw43_ll.c')))
- (a.output.parent/'source.json').write_text(json.dumps({'original':str(a.source),'original_SHA256':EXPECTED,'patched':str(a.output),'patched_SHA256':hashlib.sha256(v.encode()).hexdigest(),'spi_real_size':a.spi_real_size,'inner_probe':not a.standalone and not a.credit_probe,'credit_probe':a.credit_probe,'shared_SDK_modified':False},indent=2)+'\n')
+ (a.output.parent/'source.json').write_text(json.dumps({'original':str(a.source),'original_SHA256':EXPECTED,'patched':str(a.output),'patched_SHA256':hashlib.sha256(v.encode()).hexdigest(),'spi_real_size':a.spi_real_size,'inner_probe':not a.standalone and not a.credit_probe,'credit_probe':a.credit_probe,'sleep_probe':a.sleep_probe,'shared_SDK_modified':False},indent=2)+'\n')
 if __name__=='__main__':main()
