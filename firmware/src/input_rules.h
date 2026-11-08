@@ -6,7 +6,7 @@
 typedef enum { WIFI, SERVER, SESSION, ACTIVE, MENU, STANDBY, RETRY, ENDPOINT } app_state;
 typedef struct {app_state state;bool sub_mode;uint8_t operations;bool blocked;} pm_input_view;
 typedef enum {
-    PM_INPUT_IGNORE, PM_INPUT_WAKE, PM_INPUT_MENU_MOVE, PM_INPUT_MENU_ACCEPT,
+    PM_INPUT_IGNORE, PM_INPUT_WAKE, PM_INPUT_MENU_PREV, PM_INPUT_MENU_NEXT, PM_INPUT_MENU_ACCEPT,
     PM_INPUT_MENU, PM_INPUT_STANDBY, PM_INPUT_POWER, PM_INPUT_SUB,
     PM_INPUT_UP, PM_INPUT_DOWN
 } pm_input_action;
@@ -21,7 +21,8 @@ static inline pm_input_plan pm_input_decide(pm_input_view q,pm_operation operati
     if(q.state==STANDBY){
         if(key==2)t->action=PM_INPUT_WAKE;
     }else if(q.state==MENU){
-        if(key==1||key==3)t->action=PM_INPUT_MENU_MOVE;
+        if(key==1)t->action=PM_INPUT_MENU_PREV;
+        else if(key==3)t->action=PM_INPUT_MENU_NEXT;
         else if(key==0)t->action=PM_INPUT_MENU_ACCEPT;
         else if(key==2)t->action=PM_INPUT_WAKE;
     }else if(q.state==ACTIVE){

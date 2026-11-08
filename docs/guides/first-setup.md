@@ -38,6 +38,8 @@ cp firmware/devices/sample-a/profile.txt "firmware/devices/$PM_DEVICE/profile.tx
 
 各端子は [ファームウェアの説明](../../firmware/README.md#配線) を確認します。画面の型番、電圧、端子名を配線前に照合し、通電したまま配線を変更しないでください。サンプルビルドは実機用ではありません。
 
+２つ目の自宅ネットワークを使う場合は、`PM_HOME2_SSID`、`PM_HOME2_PASSWORD`、`PM_HOME2_SERVER_IP` を設定します。いずれかが空なら HOME2 は選択時に飛ばします。HOME2 もサーバへの direct TCP 接続なので、その Wi-Fi から到達できるサーバ IPv4 を指定してください。既存の HOME／AWAY の設定は変えずに追加できます。HOME2 非対応の旧ファームに戻す際は、先に新ファームで HOME または AWAY を保存しないと他の設定も初期化されます。[詳しい操作と復旧上の注意](../../firmware/README.md)を確認してください。
+
 ## 4. HOME 接続を準備する
 
 まず HOME 接続だけを使います。Linux サーバと Pico W が同じ LAN 上で通信でき、端末の `PM_HOME_SERVER_IP` とサーバの `bind` が同じ IPv4 を指すようにします。ファイアウォールで TCP 16153 とサーバの画面を使う端末からのアクセスを確認します。サーバの Web 画面や端末接続には組込みのログイン・API キーがありません。信頼できる LAN の範囲で運用してください。

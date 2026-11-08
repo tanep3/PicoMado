@@ -10,7 +10,8 @@ static pm_api_result extension(uint8_t kind,const char *body){
 static pm_input_action expected(app_state state,unsigned key){
     if(state==STANDBY)return key==2?PM_INPUT_WAKE:PM_INPUT_IGNORE;
     if(state==MENU){
-        if(key==1||key==3)return PM_INPUT_MENU_MOVE;
+        if(key==1)return PM_INPUT_MENU_PREV;
+        if(key==3)return PM_INPUT_MENU_NEXT;
         return key==0?PM_INPUT_MENU_ACCEPT:key==2?PM_INPUT_WAKE:PM_INPUT_IGNORE;
     }
     if(state!=ACTIVE)return key==0?PM_INPUT_MENU:key==2?PM_INPUT_STANDBY:PM_INPUT_IGNORE;

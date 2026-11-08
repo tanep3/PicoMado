@@ -3,6 +3,16 @@
 #define PM_HOME_SSID "EXAMPLE_A_HOME"
 #define PM_HOME_PASSWORD "EXAMPLE_PASSWORD"
 #define PM_HOME_SERVER_IP "192.0.2.1"
+// Optional second direct home network; leave all three empty to skip it.
+#ifndef PM_HOME2_SSID
+#define PM_HOME2_SSID ""
+#endif
+#ifndef PM_HOME2_PASSWORD
+#define PM_HOME2_PASSWORD ""
+#endif
+#ifndef PM_HOME2_SERVER_IP
+#define PM_HOME2_SERVER_IP ""
+#endif
 #define PM_AWAY_SSID "EXAMPLE_A_AWAY"
 #define PM_AWAY_PASSWORD "EXAMPLE_PASSWORD"
 #define PM_AWAY_SERVER_IP "198.51.100.1"

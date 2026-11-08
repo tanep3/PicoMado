@@ -120,7 +120,7 @@ void pm_net_begin(const pm_profile *p){
         assert(p->server_ip==profiles[1].server_ip && p->proxy_port>0);
     }else
 #endif
-    {assert(p==&profiles[0] && !p->socks);}
+    {assert(p==&profiles[active_profile] && !p->socks && active_profile!=PM_PROFILE_AWAY);}
     server_begins++;network_stage=PM_NET_TCP;
 }
 void pm_net_poll(void){if(server_ready)network_stage=PM_NET_READY;}

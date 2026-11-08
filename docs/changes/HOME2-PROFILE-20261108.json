@@ -23,12 +23,16 @@
   ],
   "stages": {
     "design": {
-      "state": "in_progress",
-      "evidence": []
+      "state": "verified",
+      "evidence": [
+        "4ec8f52"
+      ]
     },
     "implementation": {
       "state": "in_progress",
-      "evidence": []
+      "evidence": [
+        "docs/evidence/HOME2-PROFILE-20261108-host.md"
+      ]
     },
     "independent_verification": {
       "state": "not_started",
@@ -42,5 +46,6 @@
       "state": "not_started",
       "evidence": []
     }
-  }
+  },
+  "design_commit": "4ec8f52"
 }

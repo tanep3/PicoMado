@@ -18,4 +18,7 @@ PicoMado firmware runs on Raspberry Pi Pico W. It receives prepared images from 
 
 ソースからのビルドと BOOTSEL ドライブへの UF2 コピーは [初回設定](../docs/guides/first-setup.md#5-ビルドする) の順に行います。既存端末は先に[退避と復旧](../docs/guides/release-and-recovery.md)を確認します。
 
-Pico W は HOME でサーバの `/device` WebSocket に接続します。AWAY には別プロジェクトの Android EEX1 アプリ、テザリング、TailSocks/SOCKS5 経路が必要です。このリポジトリだけでは AWAY の一式は揃いません。実機未確認の構成をビルド成功だけで対応済みとしません。
+Pico W は HOME と任意の HOME2 でサーバの `/device` WebSocket に接続します。AWAY には別プロジェクトの Android EEX1 アプリ、テザリング、TailSocks/SOCKS5 経路が必要です。このリポジトリだけでは AWAY の一式は揃いません。実機未確認の構成をビルド成功だけで対応済みとしません。
+HOME2 は `PM_HOME2_SSID`、`PM_HOME2_PASSWORD`、`PM_HOME2_SERVER_IP` の３つを `config.h` に設定すると利用できます。未定義・空値なら選択時に飛ばします。接続作業中または再試行中に SUB で NETWORK を開き、DOWN は HOME → HOME2 → AWAY、UP は逆順です。SUB で保存して接続、POWER で変更を破棄します。通常接続中の SUB の役割は変更しません。HOME/HOME2 は direct TCP、AWAY だけが EEX1／SOCKS5 です。
+
+**旧ファームに戻す前に:** HOME2 を保存したまま旧版を起動すると、旧版はプロファイル ID 2 を拒否してその他の設定も初期値に戻します。必ず新ファームの NETWORK で HOME または AWAY を選択・保存し、選択結果を確認してから旧 UF2 に戻してください。[保存互換性と試験範囲](../docs/changes/HOME2-PROFILE-20261108.md)も参照してください。

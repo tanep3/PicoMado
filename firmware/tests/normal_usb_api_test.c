@@ -34,6 +34,32 @@ static void finish_remote(void){
 #endif
     if(pending_render_ack)assert(send_pending_render_ack());
 }
+static void network_menu_cases(void){
+    const app_state connect_states[]={WIFI,SERVER,SESSION,RETRY,ENDPOINT};
+    bool home2=profile_ready(PM_PROFILE_HOME2);
+    for(unsigned i=0;i<sizeof connect_states/sizeof connect_states[0];i++){
+        begin();active_profile=settings.profile=PM_PROFILE_HOME;state=connect_states[i];
+        unsigned before=erases;
+        command("INPUT DO 22 1 SUB");assert(state==MENU&&!wifi_enabled&&menu_profile==PM_PROFILE_HOME);
+        assert(!strcmp(last_lcd_one,"NETWORK")&&!strcmp(last_lcd_two,"HOME"));
+        command("INPUT DO 22 2 DOWN");assert(menu_profile==(home2?PM_PROFILE_HOME2:PM_PROFILE_AWAY));
+        command("INPUT DO 22 2 DOWN");assert(menu_profile==(home2?PM_PROFILE_HOME2:PM_PROFILE_AWAY));
+        command("INPUT DO 22 3 UP");assert(menu_profile==PM_PROFILE_HOME);
+        command("INPUT DO 22 4 UP");assert(menu_profile==PM_PROFILE_AWAY);
+        command("INPUT DO 22 5 DOWN");assert(menu_profile==PM_PROFILE_HOME);
+        command("INPUT DO 22 6 DOWN");
+        assert(!strcmp(last_lcd_two,home2?"HOME2":"AWAY"));
+        command("INPUT DO 22 7 POWER");assert(state==WIFI&&active_profile==PM_PROFILE_HOME&&settings.profile==PM_PROFILE_HOME&&erases==before);
+        command("INPUT DO 22 8 SUB");command("INPUT DO 22 9 DOWN");
+        settings.revision=123;settings.wifi_s=42;
+        command("INPUT DO 22 a SUB");assert(state==WIFI&&active_profile==(home2?PM_PROFILE_HOME2:PM_PROFILE_AWAY)&&settings.profile==active_profile&&erases==before+1);
+        assert(settings.revision==123&&settings.wifi_s==42&&!wire_count);
+        command("INPUT DO 22 a SUB");assert(erases==before+1&&state==WIFI);
+        load_settings();assert(settings.profile==active_profile&&settings.revision==123&&settings.wifi_s==42);
+    }
+    active_profile=PM_PROFILE_HOME;
+    printf("PASS standard USB NETWORK: HOME2=%u; connection/retry entry, reverse/wrap/skip, duplicate requests, save/cancel and settings preservation\n",home2);
+}
 int main(void){
     begin();command("INPUT CAPS");expect("input caps b=22 ops=");
 #if PM_INPUT_OPERATIONS_MASK != PM_OPERATION_MASK
@@ -41,6 +67,7 @@ int main(void){
     command("INPUT DO 22 2 SUB");expect("op=SUB status=dispatched");assert(wire_count==1&&wire_kind==14);
     puts("normal USB: capability restriction uses the same application API PASS");return 0;
 #endif
+    network_menu_cases();
     // Logical operations are available with no physical keys and no probes.
     const char *names[]={"SUB","UP","POWER","DOWN"};const unsigned kinds[]={14,15,7,16};
     for(unsigned i=0;i<4;i++){

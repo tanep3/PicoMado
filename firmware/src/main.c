@@ -16,6 +16,7 @@
 #include "bluetooth_input.h"
 #endif
 #include "input_rules.h"
+#include "network_profiles.h"
 #include "switch_feedback.h"
 #include "observation.h"
 #if PM_EVENT_STREAM
@@ -56,10 +57,21 @@
 #define PM_DIAGNOSTIC_STAGE 0
 #endif
 
-static const pm_profile profiles[2]={
-    {PM_HOME_SSID,PM_HOME_PASSWORD,PM_HOME_SERVER_IP,false,NULL,NULL,NULL,0},
-    {PM_AWAY_SSID,PM_AWAY_PASSWORD,PM_AWAY_SERVER_IP,true,
-     PM_AWAY_PROXY_IP,PM_AWAY_PROXY_USER,PM_AWAY_PROXY_PASSWORD,PM_AWAY_PROXY_PORT}
+// Older private configs do not have to define the optional second home.
+#ifndef PM_HOME2_SSID
+#define PM_HOME2_SSID ""
+#endif
+#ifndef PM_HOME2_PASSWORD
+#define PM_HOME2_PASSWORD ""
+#endif
+#ifndef PM_HOME2_SERVER_IP
+#define PM_HOME2_SERVER_IP ""
+#endif
+static const pm_profile profiles[PM_PROFILE_COUNT]={
+    [PM_PROFILE_HOME]={PM_HOME_SSID,PM_HOME_PASSWORD,PM_HOME_SERVER_IP,false,NULL,NULL,NULL,0},
+    [PM_PROFILE_AWAY]={PM_AWAY_SSID,PM_AWAY_PASSWORD,PM_AWAY_SERVER_IP,true,
+     PM_AWAY_PROXY_IP,PM_AWAY_PROXY_USER,PM_AWAY_PROXY_PASSWORD,PM_AWAY_PROXY_PORT},
+    [PM_PROFILE_HOME2]={PM_HOME2_SSID,PM_HOME2_PASSWORD,PM_HOME2_SERVER_IP,false,NULL,NULL,NULL,0}
 };
 static struct {
     uint32_t magic, profile;
@@ -158,11 +170,11 @@ static bool endpoint_initialized;
 static uint64_t endpoint_now(void){return time_us_64()/1000;}
 static void endpoint_reset(void){if(endpoint_initialized)pm_endpoint_client_reset(&endpoint_client);}
 static void endpoint_result(pm_eex_status status,pm_eex_stage stage){
-    if(active_profile && endpoint_initialized)
+    if(active_profile==PM_PROFILE_AWAY && endpoint_initialized)
         pm_endpoint_client_result(&endpoint_client,status,stage,endpoint_now());
 }
 static void endpoint_snapshot(void){
-    if(!endpoint_initialized || !active_profile)return;
+    if(!endpoint_initialized || active_profile!=PM_PROFILE_AWAY)return;
     pm_endpoint_client *c=&endpoint_client;
     uint32_t ip=c->network.local_ipv4,gw=c->network.gateway_ipv4,mask=c->observed.netmask;
     uint32_t proxy=c->cache.valid?c->cache.endpoint.ipv4:
@@ -182,7 +194,7 @@ static void endpoint_snapshot(void){
 #endif
 
 static uint32_t now_ms(void){return to_ms_since_boot(get_absolute_time());}
-static const char *profile_name(void){return active_profile?"AWAY":"HOME";}
+static const char *profile_name(void){return pm_profile_name(active_profile);}
 static const char *link_name(int link){
     switch(link){
     case CYW43_LINK_DOWN:return "DOWN";case CYW43_LINK_JOIN:return "JOIN";
@@ -366,10 +378,11 @@ static void log_wifi_progress(void){
         profile_name(),link_name(wifi),link_name(tcpip),tcpip==CYW43_LINK_UP?1u:0u);
 }
 static bool profile_ready(unsigned index){
+    if(index>=PM_PROFILE_COUNT)return false;
     const pm_profile *p=&profiles[index];
     return p->ssid && p->ssid[0] && p->password && p->password[0] &&
         p->server_ip && p->server_ip[0] &&
-        (!p->socks || (((PM_AWAY_EEX1 && index==1) || (p->proxy_ip && p->proxy_ip[0] && p->proxy_port)) &&
+        (!p->socks || (((PM_AWAY_EEX1 && index==PM_PROFILE_AWAY) || (p->proxy_ip && p->proxy_ip[0] && p->proxy_port)) &&
                        p->proxy_user && p->proxy_user[0] &&
                        p->proxy_password && p->proxy_password[0]));
 }
@@ -386,13 +399,14 @@ static void load_settings(void) {
     if(*magic!=settings.magic)return;
     typeof(settings) copy;memcpy(&copy,p,sizeof copy);
     uint32_t crc=pm_crc32(p,offsetof(typeof(settings),crc));
-    if(copy.crc!=crc || copy.profile>1 || copy.wifi_s<5 || copy.wifi_s>120 ||
+    if(copy.crc!=crc || copy.profile>=PM_PROFILE_COUNT || copy.wifi_s<5 || copy.wifi_s>120 ||
        copy.app_s<3 || copy.app_s>120 || copy.retry_s<1 || copy.retry_s>60 ||
        copy.retry_max_s<copy.retry_s || copy.retry_max_s>300 ||
        copy.heartbeat_s<5 || copy.heartbeat_s>120 ||
        copy.offline_s<2*copy.heartbeat_s || copy.offline_s>600 ||
        copy.long_ms<1500 || copy.long_ms>2000)return;
     settings=copy;
+    settings.profile=pm_profile_restore(settings.profile,profile_ready(PM_PROFILE_HOME2));
 }
 static void store_settings(void) {
     static uint8_t page[FLASH_PAGE_SIZE] __attribute__((aligned(4)));
@@ -493,7 +507,7 @@ static void endpoint_connect(pm_endpoint e){
 #endif
 static void start_server(void){
 #if PM_AWAY_EEX1
-    if(active_profile){
+    if(active_profile==PM_PROFILE_AWAY){
         pm_endpoint e;
         (void)pm_endpoint_client_begin(&endpoint_client,PM_DEVICE_ID,endpoint_now());
         if(pm_endpoint_client_take(&endpoint_client,endpoint_now(),&e)){endpoint_connect(e);return;}
@@ -558,7 +572,7 @@ static bool recover_transport_loss(void){
 #endif
 #if PM_AWAY_EEX1
 static void endpoint_proxy_progress(void){
-    if(!active_profile)return;
+    if(active_profile!=PM_PROFILE_AWAY)return;
     if(pm_net_proxy_target_connected())endpoint_result(PM_EEX_OK,PM_EEX_TARGET_CONNECTED);
     else if(pm_net_state()==PM_NET_FAILED){
         pm_net_failure f=pm_net_last_failure();
@@ -567,7 +581,7 @@ static void endpoint_proxy_progress(void){
     }
 }
 static void poll_endpoint(void){
-    if(!endpoint_initialized)return;
+    if(!endpoint_initialized || active_profile!=PM_PROFILE_AWAY)return;
     pm_endpoint_client_poll(&endpoint_client,endpoint_now());
     bool changed=pm_endpoint_client_network_changed(&endpoint_client);
     if(changed && endpoint_client.network.ipv4_ready && state!=WIFI && state!=MENU && state!=STANDBY){
@@ -587,7 +601,7 @@ static void poll_endpoint(void){
 static void menu(void){
     wifi_off();menu_profile=active_profile;state=MENU;
     pm_logf("net profile=%s menu_open\n",profile_name());
-    local("NETWORK",menu_profile?"AWAY":"HOME");
+    local("NETWORK",pm_profile_name(menu_profile));
 }
 static bool number(const char *object,const char *key,uint64_t *out) {
     char name[64];snprintf(name,sizeof name,"\"%s\"",key);
@@ -1162,11 +1176,13 @@ static bool apply_local_input(pm_input_transition t,uint64_t accepted_us){
     if(t.clear_retained)retained_pixels=false;
     switch(t.action){
     case PM_INPUT_WAKE:start_wifi();break;
-    case PM_INPUT_MENU_MOVE:
-        if(profile_ready(menu_profile^1)){
-            menu_profile^=1;pm_display_status("NETWORK",menu_profile?"AWAY":"HOME");
-        }else pm_display_status("AWAY","UNSET");
+    case PM_INPUT_MENU_PREV:case PM_INPUT_MENU_NEXT:{
+        uint8_t ready=0;
+        for(unsigned i=0;i<PM_PROFILE_COUNT;i++)if(profile_ready(i))ready|=(1u<<i);
+        menu_profile=pm_profile_step(menu_profile,ready,t.action==PM_INPUT_MENU_NEXT);
+        pm_display_status("NETWORK",pm_profile_name(menu_profile));
         break;
+    }
     case PM_INPUT_MENU_ACCEPT:
         active_profile=menu_profile;settings.profile=active_profile;store_settings();
         pm_logf("net profile=%s selected\n",profile_name());start_wifi();break;

@@ -94,5 +94,16 @@ int main(void){
         assert((last_lcd_one==NULL)==(path!=1));
     }
     assert(erases==0);puts("PASS EEX network-change before poll: EOF timeout/current pixels retained, hard error released");
+    // Every HOME2 identity must bypass discovery/reporting, not just HOME=0.
+    active_profile=PM_PROFILE_HOME2;start_wifi();wifi_link=ip_link=CYW43_LINK_UP;
+    unsigned before_opens=udp_opens,before_sends=udp_sends,before_server=server_begins;
+    start_server();assert(state==SERVER&&server_begins==before_server+1&&!udp_open);
+    assert(!profiles[PM_PROFILE_HOME2].socks&&!strcmp(profile_name(),"HOME2"));
+    pm_endpoint_client before_endpoint=endpoint_client;
+    proxy_connected=true;endpoint_proxy_progress();endpoint_result(PM_EEX_OK,PM_EEX_TARGET_CONNECTED);
+    endpoint_snapshot();observed.gateway^=1;clock_ms+=300;poll_endpoint();
+    assert(state==SERVER&&udp_opens==before_opens&&udp_sends==before_sends);
+    assert(!memcmp(&before_endpoint,&endpoint_client,sizeof endpoint_client));
+    assert(erases==0);puts("PASS HOME2 direct: no EEX opens/polls/reports, no endpoint mutation or DHCP side effects");
     puts("PASS production app EEX1 glue: HOME direct, late app, authenticated-target cache, TCP reuse, DHCP invalidation, failed rediscovery, PM retained");
 }
