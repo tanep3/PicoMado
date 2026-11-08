@@ -10,12 +10,24 @@ trap 'rm -rf -- "$work"' EXIT
 base=(-std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -include "$root/profiles/pico_w_lcd_160x80_4.h" -Idevices/sample-a -Iprofiles -Isrc)
 build() { local name=$1; shift; cc "${base[@]}" "$@" -o "$work/$name"; }
 run() { local name=$1; shift; "$work/$name" "$@"; printf 'PASS %s %s\n' "$name" "$*"; }
-# Optional HOME2 has absent, partial and configured fixtures; never real credentials.
+# Optional HOME2 fixtures use flat configs, as required by hardware validation.
+home2_config() {
+    local device=$1 mode=$2 dir="$work/home2-$1-$2"
+    mkdir -p "$dir"
+    if [[ $mode == absent ]]; then
+        sed '/^#define PM_HOME2_/d' "devices/$device/config.sample.h" > "$dir/config.sample.h"
+    else
+        sed 's/^#define PM_HOME2_SSID ""/#define PM_HOME2_SSID "EXAMPLE_HOME2"/' \
+            "devices/$device/config.sample.h" > "$dir/config.sample.h"
+        if [[ $mode == configured ]]; then
+            sed -i -e 's/^#define PM_HOME2_PASSWORD ""/#define PM_HOME2_PASSWORD "EXAMPLE_PASSWORD"/' \
+                -e 's/^#define PM_HOME2_SERVER_IP ""/#define PM_HOME2_SERVER_IP "192.0.2.2"/' "$dir/config.sample.h"
+        fi
+    fi
+}
 for home2 in absent partial configured; do
-    home2_flags=()
-    if [[ $home2 != absent ]]; then home2_flags+=('-DPM_HOME2_SSID="EXAMPLE_HOME2"'); fi
-    if [[ $home2 == configured ]]; then home2_flags+=('-DPM_HOME2_PASSWORD="EXAMPLE_PASSWORD"' '-DPM_HOME2_SERVER_IP="192.0.2.2"'); fi
-    build "home2-$home2" "${home2_flags[@]}" -DPM_NORMAL_BUILD=1 \
+    home2_config sample-a "$home2"
+    build "home2-$home2" -iquote "$work/home2-sample-a-$home2" -DPM_NORMAL_BUILD=1 \
         '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
         -Itests/app_stubs tests/home2_profile_test.c src/core.c src/video.c src/trace.c src/rx_stats.c
     run "home2-$home2"
@@ -220,8 +232,9 @@ run switch-app-trace-off
 
 # Configured HOME2 exercises standard USB selection on LCD and two-button E-ink.
 for device in sample-a E-ink_1; do
+    home2_config "$device" configured
     cc -std=gnu11 -Wall -Wextra -Werror -DPM_USE_SAMPLE_CONFIG=1 -DPM_NORMAL_BUILD=1 \
-        '-DPM_HOME2_SSID="EXAMPLE_HOME2"' '-DPM_HOME2_PASSWORD="EXAMPLE_PASSWORD"' '-DPM_HOME2_SERVER_IP="192.0.2.2"' \
+        -iquote "$work/home2-$device-configured" \
         '-DPM_EXPECTED_BOARD_ID="0000000000000001"' "-DPM_BUILD_DEVICE=\"$device\"" \
         -include "$(pm_test_profile_header "$device")" -I"devices/$device" -Iprofiles -Isrc -Itests/app_stubs \
         tests/normal_usb_api_test.c src/core.c src/video.c src/trace.c src/rx_stats.c src/usb_control.c -o "$work/usb-home2-$device"
@@ -262,7 +275,7 @@ run video
 
 # Exercise production main's EEX1 glue with socket/radio operations mocked.
 build app-eex -DPM_AWAY_EEX1=1 \
-    '-DPM_HOME2_SSID="EXAMPLE_HOME2"' '-DPM_HOME2_PASSWORD="EXAMPLE_PASSWORD"' '-DPM_HOME2_SERVER_IP="192.0.2.2"' -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 \
+    -iquote "$work/home2-sample-a-configured" -DPM_NORMAL_BUILD=1 -DPM_TRACE_ENABLE=1 \
     '-DPM_EXPECTED_BOARD_ID="0000000000000001"' '-DPM_BUILD_DEVICE="sample-a"' \
     -Itests/app_stubs tests/app_endpoint_test.c src/core.c src/video.c src/trace.c \
     src/eex_wire.c src/eex_exchange.c src/endpoint_policy.c src/endpoint_client.c

@@ -17,3 +17,9 @@ The first host attempt used the inherited `PICO_SDK_PATH=/home/tane/pico/pico-sd
 These are worker implementation checks, not independent acceptance. Other Bluetooth workers began changes during the regression run. A final combined source-frozen regression and LCD build will be reported separately. No device flashing, service change, network configuration, SSH or push was performed. Physical HOME2 connectivity and end-to-end effectiveness remain unverified.
 
 Downgrade: old firmware rejects persisted profile2 and discards other settings. Before installing it, confirm HOME or AWAY in this firmware's NETWORK menu and verify the selection. This writes an old-readable 0/1 record preserving other fields. Selecting only a candidate or cancelling does not make the saved profile safe for downgrade. See the specification for recovery limitations.
+
+## Flat-config follow-up
+
+The optional root check caught that conditional HOME2 sample definitions violated the existing hardware-config flat-source contract. The samples now use flat empty definitions; test variants materialize temporary dummy configs, including a legacy config with no HOME2 definitions at all. The validator is unchanged. Hardware profile validation: 11 passed (`/tmp/picomado-home2-validation.log`), and the entire host suite passed again (`/tmp/picomado-home2-flat-host.log`).
+
+The root check remains rejected by two pre-existing, separate issues: public export rejects the hardcoded home path in `cyw43_sleep_test.py` (already in baseline a9b361f); `test_gate_routes` expects a missing approval fixture to reject while the current route returns success. The gate/route implementation and route test were not modified by HOME2. Receipt/logs: `/tmp/picomado-home2-check-flat/`. This is not an aggregate gate pass and those issues are not silently waived.
