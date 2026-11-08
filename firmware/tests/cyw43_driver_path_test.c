@@ -89,6 +89,9 @@ static void fixture_rx_frame(unsigned slot,unsigned kind,unsigned credit){
 int main(void){
  for(unsigned scenario=0;scenario<18;scenario++){
   cyw43_int_t state={0};fixture_self=&state;state.cb_data=&state;memset(state.spid_buf,0xcc,sizeof state.spid_buf);fixture_probe_us=100;fixture_ticks=fixture_trace=fixture_reads=fixture_writes=fixture_callbacks=fixture_nested=fixture_rx_count=fixture_rx_next=fixture_written_n=fixture_spi_n=0;fixture_write_error=0;memset(fixture_rx,0,sizeof fixture_rx);fixture_frame(scenario==11?400:64);
+#if PM_CREDIT_TEST
+  memset(pm_credit_rows,0,sizeof pm_credit_rows);pm_credit_count=pm_credit_dropped=0;
+#endif
   bool stall=(scenario>=1&&scenario<=7)||scenario==9||scenario==10||scenario==15||scenario==16;state.wwd_sdpcm_last_bus_data_credit=stall?0:200;
   if(scenario==16){fixture_rx_frame(0,DATA_HEADER,1);fixture_rx[0].data[16]=1;fixture_rx_count=1;}
   if(scenario==15){state.wwd_sdpcm_last_bus_data_credit=255;state.wwd_sdpcm_packet_transmit_sequence_number=255;fixture_rx_frame(0,3,0);fixture_rx_count=1;}
@@ -106,6 +109,18 @@ int main(void){
   assert(!memcmp(&head,&before_head,sizeof head)&&!memcmp(&tail,&before_tail,sizeof tail)&&!memcmp(saved,fixture_packet,sizeof saved));
   if(scenario==7)assert(result==-110&&!fixture_writes);else if(scenario==12)assert(result==-22&&!fixture_writes);else if(scenario==8)assert(result==-5&&fixture_writes==1);else assert(result==0&&fixture_writes==(scenario==9||scenario==10?2u:1u));
   if(scenario==13){fixture_packet[19]++;assert(cyw43_ll_send_ethernet(&state,0,length,&head,true)==0);assert(fixture_writes==2);}
+#if PM_CREDIT_TEST
+  bool waited=(scenario>=1&&scenario<=7)||scenario==9||scenario==10||scenario==15||scenario==16;
+  assert(pm_credit_count==(waited?1u:0u));
+  if(waited){
+   const pm_credit_row *r=&pm_credit_rows[0];assert(r->complete&&r->covered==64);
+   assert(r->changed==((scenario>=2&&scenario<=6)||scenario==9||scenario==10||scenario==16));
+   assert(r->timeout==(scenario==7));assert(r->result==result);
+   if(scenario==2)assert(r->data==1);
+   if(scenario==3)assert(r->control==1);
+   if(scenario==4||scenario==9||scenario==10)assert(r->event==1);
+  }
+#endif
   printf("wire scenario=%u result=%d reads=%u writes=%u callback=%u trace=%08x bytes=%u data=%08x credit=%u sequence=%u\n",scenario,result,fixture_reads,fixture_writes,fixture_callbacks,fixture_trace,fixture_written_n,fixture_hash_bytes(fixture_written,fixture_written_n),state.wwd_sdpcm_last_bus_data_credit,state.wwd_sdpcm_packet_transmit_sequence_number);
   if(PM_SPI_LENGTH_EXPECT_REAL>=0)for(unsigned i=0;i<fixture_spi_n;i++)printf("spi scenario=%u write=%u real=%u command=%u transfer=%u data=%08x\n",scenario,i,fixture_spi[i].real,fixture_spi[i].command,fixture_spi[i].transfer,fixture_spi[i].data_hash);
 #if PM_CYW43_INNER_PROBE

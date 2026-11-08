@@ -1,3 +1,6 @@
+#if PM_CYW43_CREDIT_PROBE
+#include "cyw43_credit_probe.h"
+#endif
 #include "trace.h"
 #include "ack_probe.h"
 #include "usb_control.h"
@@ -312,6 +315,20 @@ static void log_usb_snapshot(void){
     pm_logf("tcp output conn=%llu valid=%u last=%d write_ok=%lu write_fail=%lu out_ok=%lu out_fail=%lu\n",
         (unsigned long long)tcp.connection_id,tcp.output_valid,tcp.last_output_result,
         (unsigned long)tcp.write_ok,(unsigned long)tcp.write_failed,(unsigned long)tcp.output_ok,(unsigned long)tcp.output_failed);
+#if PM_CYW43_CREDIT_PROBE
+    static unsigned credit_next;
+    uint32_t credit_count=0,credit_dropped=0;
+    for(unsigned n=0;n<PM_CREDIT_CAP;n++){
+        pm_credit_row row;
+        cyw43_arch_lwip_begin();
+        bool got=pm_credit_get(credit_next,&row,&credit_count,&credit_dropped);
+        cyw43_arch_lwip_end();
+        if(!got)break;
+        pm_logf("credit row=%u at_us=%lu wait_us=%lu kind=%u len=%u covered=%u changed=%u timeout=%u result=%ld\n",credit_next++,(unsigned long)row.at_us,(unsigned long)row.wait_us,row.kind,row.length,row.covered,row.changed,row.timeout,(long)row.result);
+        pm_logf("credit polls=%lu data=%lu control=%lu event=%lu negative=%lu flow=%u/%u credit=%u/%u seq=%u/%u\n",(unsigned long)row.polls,(unsigned long)row.data,(unsigned long)row.control,(unsigned long)row.event,(unsigned long)row.error,row.flow,row.end_flow,row.credit,row.end_credit,row.sequence,row.end_sequence);
+    }
+    pm_logf("credit summary count=%lu dropped=%lu\n",(unsigned long)credit_count,(unsigned long)credit_dropped);
+#endif
     // Replay cached results for late USB attachment; never repeat radio IOCTLs.
     log_wifi_pm_status();
     log_radio_defaults_status();

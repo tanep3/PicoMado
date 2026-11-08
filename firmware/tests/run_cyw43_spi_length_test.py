@@ -22,12 +22,13 @@ def fields(line):
     return dict(part.split('=', 1) for part in line.split()[1:] if '=' in part)
 
 
-def build_and_run(source, tag, out, real_size, inner=True):
+def build_and_run(source, tag, out, real_size, inner=True, credit=False):
     directory = out / tag
     directory.mkdir(parents=True, exist_ok=True)
     start = source.index('// Configure the active level of the host interrupt pin.')
     end = source.index('\n#if CYW43_USE_STATS', start)
     chunks = [
+        '#include "cyw43_credit_probe_impl.h"' if credit else '',
         '#define CYW43_PIN_WL_HOST_WAKE 1', source[start:end],
         function(source, 'static int sdpcm_process_rx_packet('),
         function(source, 'static int cyw43_ll_sdpcm_poll_device(', True),
@@ -37,6 +38,7 @@ def build_and_run(source, tag, out, real_size, inner=True):
     (directory / 'generated_sdk_functions.inc').write_text('\n\n'.join(chunks))
     cmd = ['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
            '-DPM_CYW43_INNER_PROBE=' + ('1' if inner else '0'),
+           '-DPM_CREDIT_TEST=' + ('1' if credit else '0'),
            '-DPM_SPI_LENGTH_EXPECT_REAL=' + ('1' if real_size else '0'),
            '-I' + str(directory), '-I' + str(firmware / 'src'),
            '-I' + str(firmware / 'tests/app_stubs'),

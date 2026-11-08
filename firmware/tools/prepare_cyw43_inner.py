@@ -58,9 +58,28 @@ def generate(source, spi_real_size=False, standalone=False):
       'int pm_result = cyw43_write_bytes(self, WLAN_FUNCTION, 0, size, buf);')
  return text
 
+def generate_credit(source):
+ if hashlib.sha256(source.encode()).hexdigest()!=EXPECTED:raise ValueError('installed cyw43_ll.c differs from reviewed source')
+ text=source
+ def one(a,b):
+  nonlocal text
+  if text.count(a)!=1:raise ValueError('ambiguous credit insertion')
+  text=text.replace(a,b)
+ text='#include "cyw43_credit_probe_impl.h"\n'+text
+ one('    // Wait until we are allowed to send', '    pm_credit_call pm_credit = {0};\n    // Wait until we are allowed to send')
+ one('        uint32_t start_us = cyw43_hal_ticks_us();\n        uint32_t last_poke = start_us - 100000;', '        uint32_t start_us = cyw43_hal_ticks_us();\n        pm_credit = pm_credit_begin(kind, len, buf, sizeof(self->spid_buf), self->wlan_flow_control, self->wwd_sdpcm_last_bus_data_credit, self->wwd_sdpcm_packet_transmit_sequence_number, start_us);\n        uint32_t last_poke = start_us - 100000;')
+ one('            if (ret != -1) {', '            pm_credit_poll(&pm_credit, ret);\n            if (ret != -1) {')
+ ready='pm_credit_ready(&pm_credit, buf, self->wlan_flow_control, self->wwd_sdpcm_last_bus_data_credit, self->wwd_sdpcm_packet_transmit_sequence_number, cyw43_hal_ticks_us());'
+ one('                return CYW43_FAIL_FAST_CHECK(-CYW43_ETIMEDOUT);', '                '+ready+'\n                pm_credit_finish(&pm_credit, -CYW43_ETIMEDOUT, true);\n                return CYW43_FAIL_FAST_CHECK(-CYW43_ETIMEDOUT);')
+ one('    size_t size = SDPCM_HEADER_LEN + len;', '    if (pm_credit.row) '+ready+'\n    size_t size = SDPCM_HEADER_LEN + len;')
+ one('    return cyw43_write_bytes(self, WLAN_FUNCTION, 0, CYW43_WRITE_BYTES_PAD(size), buf);', '    int pm_result = cyw43_write_bytes(self, WLAN_FUNCTION, 0, CYW43_WRITE_BYTES_PAD(size), buf);\n    pm_credit_finish(&pm_credit, pm_result, false);\n    return pm_result;')
+ return text
+
 def main():
- p=argparse.ArgumentParser();p.add_argument('--source',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--spi-real-size',action='store_true');p.add_argument('--standalone',action='store_true');a=p.parse_args();s=a.source.read_text();v=generate(s,a.spi_real_size,a.standalone);a.output.parent.mkdir(parents=True,exist_ok=True)
+ p=argparse.ArgumentParser();p.add_argument('--source',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--spi-real-size',action='store_true');p.add_argument('--standalone',action='store_true');p.add_argument('--credit-probe',action='store_true');a=p.parse_args();
+ if a.credit_probe and (a.spi_real_size or a.standalone):p.error('credit probe excludes other overlay modes')
+ s=a.source.read_text();v=generate_credit(s) if a.credit_probe else generate(s,a.spi_real_size,a.standalone);a.output.parent.mkdir(parents=True,exist_ok=True)
  if not a.output.exists()or a.output.read_text()!=v:a.output.write_text(v)
  (a.output.parent/'cyw43_inner.diff').write_text(''.join(difflib.unified_diff(s.splitlines(True),v.splitlines(True),fromfile='SDK/cyw43_ll.c',tofile='private/cyw43_ll.c')))
- (a.output.parent/'source.json').write_text(json.dumps({'original':str(a.source),'original_SHA256':EXPECTED,'patched':str(a.output),'patched_SHA256':hashlib.sha256(v.encode()).hexdigest(),'spi_real_size':a.spi_real_size,'inner_probe':not a.standalone,'shared_SDK_modified':False},indent=2)+'\n')
+ (a.output.parent/'source.json').write_text(json.dumps({'original':str(a.source),'original_SHA256':EXPECTED,'patched':str(a.output),'patched_SHA256':hashlib.sha256(v.encode()).hexdigest(),'spi_real_size':a.spi_real_size,'inner_probe':not a.standalone and not a.credit_probe,'credit_probe':a.credit_probe,'shared_SDK_modified':False},indent=2)+'\n')
 if __name__=='__main__':main()

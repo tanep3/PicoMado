@@ -26,6 +26,7 @@ build bluetooth-connection-policy tests/bluetooth_connection_policy_test.c
 run bluetooth-connection-policy
 python3 tests/bluetooth_pipeline_test.py
 python3 tests/bluetooth_hci_drain_test.py
+python3 tests/cyw43_credit_test.py --sdk "${PICO_SDK_PATH:-$root/../../pico-sdk}" --out "$work/credit"
 build bluetooth-recovery tests/bluetooth_recovery_test.c
 run bluetooth-recovery
 build bluetooth-recovery-runtime tests/bluetooth_recovery_runtime_test.c
