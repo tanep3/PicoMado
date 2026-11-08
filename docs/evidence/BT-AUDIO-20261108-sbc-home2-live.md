@@ -76,3 +76,9 @@ status, not long-duration or acoustic-quality acceptance. The end was not
 initiated by the worker; no cause beyond failed0 is inferred from that fact.
 No further AWAY playback or mobile-data traffic test is authorized by this
 observation alone.
+
+The parent then relayed the user's listening confirmation verbatim:
+「やった！AWAYでもいい感じに音がでてるぞ。いけてるんちゃう？」.
+Together with the finite transport counters, this supports successful short
+AWAY playback and positive listening feedback. It still does not establish
+long-duration stability or authorize automatic further AWAY tests.
