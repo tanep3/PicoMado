@@ -392,3 +392,12 @@ new-start/cancel clearing, nonzero received-time origin, once-only terminal, and
 full-queue terminal detail retention. ARM runtime syntax check with pinned SDK
 passes; git diff --check passes. No device operations or deployment performed.
 HOME2 TCP recovery/notification delay remains independent of MCU failure timing.
+
+
+### Integrated HOME2 application and delayed-success split
+
+At10:58 JST the fixed-source5fceee8 integrated LCD candidate was flashed and verified: SHA256 `582271d1f83bbf7623187cd553a88736cc6406264261acc28599517c16c7e497`, log `/tmp/picomado-home2-flash.log`, prior image/config preserved under `/home/tane/picomado-backups/20261108-pre-home2`. Full host/contract/USB tests passed; root gate retains the separately reported legacy flash-route fixture failure. Server binary was not changed. Music was paused, volume10; settings/BT flash sectors are outside the written UF2 range.
+
+HOME=L13 first encountered two Wi-Fi NOIP retries, then acquired an address and maintained TCP ACK progress. Generation48 failed during DISCOVER recovery/teardown, not SET_CONFIGURATION; `/tmp/picomado-power-observe-20261108-105836` records it. At11:00–11:03 standard USB POWER/wake/SUB/DOWN/SUB opened NETWORK, selected and saved HOME2, and connected Aterm directly (`/tmp/picomado-home2-menu-usb.log`). HOME2 again had an initial TCP ACK stall with router-side ARP mapping, then recovered on the same conn2. This validates real profile selection/connection but not network stability. AWAY/tethering was not exercised.
+
+Server journal for session2512 resolves a misleading Bluetooth failure: generation50 command24 was sent11:01:03, expired11:01:34, and complete_success arrived11:02:04 with outcome=stale. The actual Bluetooth connection succeeded, but the server rejected the delayed report after its30-second deadline. After TCP recovered, one normal SetEnabled(true) request at11:03:19 (generation52 command25) failed immediately, status0x006a on USB. Prior SDK snapshot shows generation50/cid4 configured1/source17/media73. This is an actual-state versus timed-out-command-state split, not evidence that radio pairing itself failed. Current-token/target-aware idempotence or fresh status reconciliation is being investigated; stale success must not be blindly accepted. Records: `/tmp/picomado-home2-bt-reconnect-usb.log`, matching JSON and run log. No music was played in these trials.
