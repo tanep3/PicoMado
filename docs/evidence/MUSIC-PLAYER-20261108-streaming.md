@@ -84,3 +84,18 @@ For each original, its size/SHA256 and the registered name+content key were veri
 - JSON evidence SHA256: `cf9817efb7279aa7fecb8748908d8d8b84632ef7d42620a330d35936dcbfeb92`.
 
 No recoverable backup/quarantine was created or verified here. Before removal the parent must reconfirm unchanged targets, deployed identity and absence of legacy PCM readers. Recoverable quarantine and separately confirmed permanent deletion are distinct options in the retirement guide. The latter frees capacity but cannot be normally undone; original-source regeneration remains conditional on original integrity and decoder availability/version. This preflight is not deletion authorization.
+
+
+## Approved PCM retirement completed (2026-11-08)
+
+After the user explicitly approved permanent deletion of the identified12 PCM files (about653 MiB), with originals/track metadata retained and no normal Trash recovery, only that batch was deleted. A first attempt stopped before unlink because unrelated process descriptors were inaccessible. The parent then authorized the scoped check: deployed server and its own service cgroup, without retrying denied descriptors. Service PID1713701 had17 accessible descriptors, zero target PCM references and no decoder child; its SHA remained a8f944282ef96b78c34cc0e0fd548352b8070ebef7eb896d6c4e48eb18807ccd. Inaccessible other processes could in principle retain an unlinked allocation until closing their descriptors; this limit was recorded rather than bypassed.
+
+Immediately before deletion all12 original/key hashes, PCM hashes, exact inode/size/mtime/ctime, regular/non-symlink/single-link status and streaming metadata were revalidated. Each exact authorized basename was unlinked through the opened cache/audio directory; no broad deletion glob was used. The journal records each completed unlink. Originals were fully rehashed afterward, metadata tracks were unchanged, and all12 PCM paths were absent.
+
+- Deleted logical PCM bytes:684,484,456.
+- Target allocated bytes:684,531,712 before,0 after.
+- Filesystem available bytes:179,824,685,056 before,180,509,196,288 after.
+- Observed free-space gain:684,511,232 bytes (652.80 MiB). The whole-filesystem delta also includes background activity/evidence writes and is not equated to the target allocation sum.
+- With PCM absent, the actual LocalMusicExecutor again decoded all12 originals to normal EOF. Every output matched its deleted PCM's bytes/SHA256, in68.153 seconds total. Output was discarded without playback or new PCM files. Originals and track metadata remained unchanged and private decoder work was cleaned.
+
+Private exact targets, execution journal, helper sources, logs and checksums are retained at `/home/tane/picomado-staging/20261108-streaming-94fde75/pcm-retirement-execution-confirmed/`. No PCM backup or Trash copy was made. Restoration therefore requires verified original-source regeneration; old-server rollback also requires the matching pre-migration DB/config and exact frame counts. The earlier preflight evidence remains retained. This completed batch grants no permission for future deletions.
