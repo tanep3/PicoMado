@@ -85,7 +85,8 @@
         "New volume defaults to mute and new connection-role comparison are implemented on host only; not deployed or audibly validated.",
         "2026-11-08 user-authorized server0742d7b5 and LCDa053c4cf applied; all volume0/music stopped/hash preserved; initial BT reconnect failed, one saved-target retry connected. See docs/evidence/BT-AUDIO-20261108-followup.md.",
         "2026-11-08 08:15-08:17 JST authorized server/LCD applied; all devices online; LBS connection failed; docs/evidence/BT-AUDIO-20261108-followup.md",
-        "2026-11-08: server31fc242 and LCD68ebc52 applied, HOME2 finite30-second SBC playback with no rebuffer/failure and positive user listening feedback; docs/evidence/BT-AUDIO-20261108-sbc-home2-live.md. AWAY not validated in that run; no independent closure."
+        "2026-11-08: server31fc242 and LCD68ebc52 applied, HOME2 finite30-second SBC playback with no rebuffer/failure and positive user listening feedback; docs/evidence/BT-AUDIO-20261108-sbc-home2-live.md. AWAY not validated in that run; no independent closure.",
+        "2026-11-08 subsequent user-operated AWAY trial: passive logs show21.94s SBC, zero rebuffer/failure. No worker playback/network control; docs/evidence/BT-AUDIO-20261108-sbc-home2-live.md. Long-duration acceptance remains pending."
       ]
     },
     "effectiveness_confirmation": {

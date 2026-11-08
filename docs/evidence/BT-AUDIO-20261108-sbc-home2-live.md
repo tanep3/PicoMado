@@ -58,3 +58,21 @@ one fully green run. The existing structural gate result is48/49, with the
 unchanged flash-route expectation failure. Full evidence is in the staged
 manifest and `BT-AUDIO-20261108-sbc-sender.md`. No push, SSH or independent
 stage closure was performed.
+
+## Subsequent user-operated AWAY check
+
+After the HOME2 record above, the user explicitly chose to try AWAY personally.
+The implementation worker only read USB and existing server logs; it did not
+switch profiles, start/stop music or extend playback. Passive evidence:
+`/tmp/picomado-power-observe-20261108-125247` (contains the HOME2-to-AWAY
+transition), server journal at12:53:47 JST. USB confirmed profile=AWAY,
+SOCKS setup succeeded, and the new session2523/display6696/stream1 received
+valid SBC Ready with codec_epoch7 and the same48k joint-stereo/bitpool32 tuple.
+
+The stream ended with1052928 canonical frames (approximately21.94seconds),
+914 RTP packets, rebuffer count0, total wait0ms and failed0. This is positive
+short-duration AWAY transport evidence replacing the prior 'not yet tried'
+status, not long-duration or acoustic-quality acceptance. The end was not
+initiated by the worker; no cause beyond failed0 is inferred from that fact.
+No further AWAY playback or mobile-data traffic test is authorized by this
+observation alone.
