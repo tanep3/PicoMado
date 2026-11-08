@@ -109,3 +109,32 @@ music関連9テスト成功（専用font2試験を含む）。サーバへの反
 - **未解決の既存検査:** 変更していないUIのNode全試験は22 pass / 6 failで、6件は `ui_video_fps.test.cjs` のfixtureに `renderEinkVideoControls` がない問題。fresh-out project_gateは49 structural中1件、既存 `test_actual_firmware_build_sdk_flags_and_offline_flash` の承認削除後return0問題で拒否された。いずれも今回の音楽/media変更に合わせて検査を緩めていない。
 
 最終Cargoログは `/tmp/picomado-media-v2-configured-all-features.log`。無音host検証であり、再生中production・SSH・USB・サービス反映・実音声確認・pushは行っていない。独立検証・運用適用・実機効果確認と変更クローズは親が別途判断する。
+
+## 音声失敗を再生状態へ返す契約（2026-11-08、実装前）
+
+AWAY session 2516 の stream 1/2 は端末 `failed=true` で配送停止した一方、
+local-music の playing と時計由来の位置が進み続けた。既存配送は失敗を socket
+owner 内に保持するだけで、plugin の再生意図へ返す契約が欠けていた。
+既存 `accept_work_plan` の clone → 永続化 → 公開 → 対象描画更新を再利用する。
+
+- 共通 ContentPlugin に音声失敗結果の既定 no-op hook を追加する。具体 plugin ID
+  分岐は追加しない。App が current session/incarnation/display、選択 plugin と
+  AudioPlaybackSpec 全体（asset/generation/start/開始時刻を含む）を再照合して
+  から hook を呼ぶ。spec の開始時刻は固定値であり現在時計ではない。音量/mute は
+  spec/display を変更しないため有効な失敗を捨てない。
+- socket owner は同じ stream identity の credit を従来 AudioSender 規則で検証
+  してから terminal failure を保持する。failed status の有効な consumed も採用し、
+  不正/逆行値は最後の有効 consumed を保持する。sent/accepted/壁時計を停止位置に
+  しない。終端paddingは plugin が曲長へ clamp する。端末消費は出音の証明ではない。
+- 端末 failure、credit 不正、既存3秒credit期限、source read error/既存100ms期限を
+  固定理由 enum で返す。1失敗につき一度採用し、古い/重複/別端末/別曲/再接続結果は
+  現在意図を変更しない。IO stop の成否に依存せず失敗を先に公開する。
+- local-music は一致する端末の playing を false にし、消費位置を固定し、世代を
+  更新して端末別失敗理由を公開する。その端末だけ描画更新し、Webに「再生失敗」・
+  理由・停止位置を表示する。LCD/E-inkは MUSIC FAILED を表示する。既存変換エラー
+  とは分離する。明示play/stop/曲変更はその端末の失敗を解除する。
+- source原本/PCM変更、再接続、autoplay、再試行、期限延長を追加しない。利用者の
+  次の明示playだけが新しい世代で停止位置から再生を要求できる。
+- 無音host試験でApp公開経路の位置固定、端末独立、世代/session/display fence、
+  mute/volume不変、重複拒否、明示再開、terminal credit検証と実service_audio経路を
+  検証する。実機出音/本番適用/独立受入は別段階のまま親が所有する。
