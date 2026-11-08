@@ -68,3 +68,19 @@ Following the parent's explicit playback cue, E-ink_1 ran a 20-second HOME-netwo
 One running rebuffer interval of 89 ms was observed, failed=0. The final counter rose again at stopping, with no added elapsed rebuffer time. This is a successful short data-path trial, not proof of perfectly uninterrupted or long-duration playback. User audible acceptance is separate.
 
 The script paused playback and restored the original volume 34. A subsequent read confirmed E-ink_1 online, Bluetooth connected, playing=false, no music error and position 19944 ms. The decoder process and its private temporary directory had both disappeared. No additional playback or AWAY trial was initiated. Captures and hashes are retained in `/home/tane/picomado-staging/20261108-streaming-94fde75/live-trial-145914`. Intermediate PCM retirement remains a separate, unperformed action pending verification and authorization.
+
+
+## Post-deployment read-only PCM preflight (2026-11-08)
+
+The parent reported deploying the staged a8f94428 binary and successful HOME E-ink playback. This task then independently read the SQLite metadata in read-only/query-only mode: all12 inventoried tracks were streaming=true. No production original, PCM or metadata was modified, moved or deleted.
+
+For each original, its size/SHA256 and the registered name+content key were verified. All12 corresponding PCM files were regular, non-symlink, single-link files with the exact legacy frame length. The final-build LocalMusicExecutor reader decoded each original serially to normal EOF; canonical output was streamed into a hash and discarded, not saved as PCM and not played. Every regenerated output matched the existing PCM byte length and SHA256 exactly. There were no mismatches, missing originals or unmapped PCM files.
+
+- Verified candidates:12 PCM files,684,484,456 bytes (652.78 MiB).
+- Retained originals:60,166,529 bytes.
+- Total decode wall time:64.723 seconds, one decoder at a time with lower priority and single-CPU affinity. This is a host regeneration measurement, not device playback or production load-continuity evidence.
+- Original/PCM inode, size, mtime and ctime and metadata tracks were unchanged after the run; reads can update access times. All private decoder work was removed normally.
+- Exact private paths, original/PCM hashes, frames, per-track output hashes/results, helper source and logs are retained in `/home/tane/picomado-staging/20261108-streaming-94fde75/pcm-retirement-preflight/`. Summary report: `report.md`; machine-readable exact targets: `exact-targets.tsv` and `picomado-pcm-retirement-safety.json`.
+- JSON evidence SHA256: `cf9817efb7279aa7fecb8748908d8d8b84632ef7d42620a330d35936dcbfeb92`.
+
+No recoverable backup/quarantine was created or verified here. Before removal the parent must reconfirm unchanged targets, deployed identity and absence of legacy PCM readers. Recoverable quarantine and separately confirmed permanent deletion are distinct options in the retirement guide. The latter frees capacity but cannot be normally undone; original-source regeneration remains conditional on original integrity and decoder availability/version. This preflight is not deletion authorization.
