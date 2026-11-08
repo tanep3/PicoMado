@@ -66,6 +66,7 @@ static void poll_bluetooth(void){
             last_link_snapshot_ms=now;pm_bt_link_snapshot d;
             cyw43_arch_lwip_begin();pm_bt_runtime_link_snapshot(&d);cyw43_arch_lwip_end();
             pm_logf("bt setup cid=%u exists=%u conn=%d sig=%u source=%d initiator=%d outgoing=%u discover=%u configured=%u have=%u endpoint=%d media=%u\n",d.cid,d.exists,d.connection,d.signaling_cid,d.source,d.initiator,d.outgoing,d.discover,d.configured,d.have_config,d.endpoint,d.media_cid);
+            pm_logf("bt config generation=%llu cid=%u configuration=%d endpoint_valid=%u ep_initiator=%d ep_acceptor=%d seid=%u active_match=%u labels=%u/%u signals=%u/%u packet_labels=%u/%u\n",(unsigned long long)d.generation,d.cid,d.configuration,d.endpoint_valid,d.endpoint_initiator,d.endpoint_acceptor,d.local_seid,d.active_matches,d.initiator_label,d.acceptor_label,d.initiator_signal,d.acceptor_signal,d.initiator_packet_label,d.acceptor_packet_label);
         }
     }
     if(bt_waiting&&(uint32_t)(to_ms_since_boot(get_absolute_time())-bt_received_ms)>=25000){

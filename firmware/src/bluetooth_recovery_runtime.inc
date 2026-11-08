@@ -1,3 +1,18 @@
+/* Scalar SDK snapshot shared by diagnostics and no-progress identity. */
+static pm_bt_setup_progress setup_progress(avdtp_connection_t *c){
+ pm_bt_setup_progress p={0};if(!c)return p;
+ p.connection=c->state;p.initiator=c->initiator_connection_state;p.configuration=c->configuration_state;
+ p.initiator_label=c->initiator_transaction_label;p.acceptor_label=c->acceptor_transaction_label;
+ p.initiator_signal=c->initiator_signaling_packet.signal_identifier;p.acceptor_signal=c->acceptor_signaling_packet.signal_identifier;
+ p.initiator_packet_label=c->initiator_signaling_packet.transaction_label;p.acceptor_packet_label=c->acceptor_signaling_packet.transaction_label;
+ avdtp_stream_endpoint_t *e=c->a2dp_source_config_process.local_stream_endpoint;
+ if(e){p.endpoint_valid=true;p.endpoint=e->state;p.endpoint_initiator=e->initiator_config_state;p.endpoint_acceptor=e->acceptor_config_state;p.local_seid=avdtp_stream_endpoint_seid(e);p.active_matches=c->active_stream_endpoint==e;}
+ if(c->state==AVDTP_SIGNALING_CONNECTION_OPENED){
+  if(c->a2dp_source_config_process.state==A2DP_W4_DISCOVER_SEPS&&c->initiator_connection_state==AVDTP_SIGNALING_CONNECTION_INITIATOR_W4_ANSWER)p.phase=1;
+  else if(c->a2dp_source_config_process.state==A2DP_W4_SET_CONFIGURATION&&e)p.phase=2;
+ }
+ return p;
+}
 /* Actual SDK effect coordinator, shared with host fake-SDK tests. */
 static void recovery_poll(btstack_timer_source_t *t){
  (void)t;
@@ -5,8 +20,9 @@ static void recovery_poll(btstack_timer_source_t *t){
  uint32_t now=btstack_run_loop_get_time_ms();
  avdtp_connection_t *owner=avdtp_get_connection_for_bd_addr(peer);
  avdtp_connection_t *owned=cid?avdtp_get_connection_for_avdtp_cid(cid):NULL;
- bool stall=owned&&owned->a2dp_source_config_process.state==A2DP_W4_DISCOVER_SEPS&&
-     owned->initiator_connection_state==AVDTP_SIGNALING_CONNECTION_INITIATOR_W4_ANSWER;
+ pm_bt_setup_progress progress=setup_progress(owned);
+ pm_bt_recovery_progress(&recovery,&progress,now);
+ bool stall=progress.phase!=0;
  bool connected=owned&&owned->a2dp_source_config_process.state==A2DP_STREAMING_OPENED;
  uint16_t previous=recovery.observed_cid;
  pm_bt_recovery_action action=pm_bt_recovery_step(&recovery,generation,peer,wanted&&!stopping,

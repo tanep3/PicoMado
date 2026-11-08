@@ -380,9 +380,16 @@ void pm_bt_runtime_stop(uint64_t gen){
 bool pm_bt_runtime_audio_active(void){return audio.active;}
 
 void pm_bt_runtime_link_snapshot(pm_bt_link_snapshot *out){
- if(!out)return;memset(out,0,sizeof *out);out->cid=cid;out->endpoint=-1;out->role=out->mode=0xff;out->handle=0xffff;
+ if(!out)return;memset(out,0,sizeof *out);out->cid=cid;out->generation=generation;out->endpoint=-1;out->role=out->mode=0xff;out->handle=0xffff;
  avdtp_connection_t *c=cid?avdtp_get_connection_for_avdtp_cid(cid):NULL;
  if(!c)return;
+ pm_bt_setup_progress progress=setup_progress(c);
+ out->configuration=progress.configuration;out->endpoint_valid=progress.endpoint_valid;
+ out->endpoint_initiator=progress.endpoint_initiator;out->endpoint_acceptor=progress.endpoint_acceptor;
+ out->local_seid=progress.local_seid;out->active_matches=progress.active_matches;
+ out->initiator_label=progress.initiator_label;out->acceptor_label=progress.acceptor_label;
+ out->initiator_signal=progress.initiator_signal;out->acceptor_signal=progress.acceptor_signal;
+ out->initiator_packet_label=progress.initiator_packet_label;out->acceptor_packet_label=progress.acceptor_packet_label;
  out->handle=c->con_handle;
  hci_connection_t *h=hci_connection_for_handle(c->con_handle);
  if(h){out->role=h->role;out->mode=h->connection_mode;}

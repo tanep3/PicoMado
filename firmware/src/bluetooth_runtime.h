@@ -37,6 +37,9 @@ void pm_bt_runtime_audio_diagnostics(pm_bt_audio_diagnostics *out);
 
 /* Read-only SDK connection/configuration state. Never exposes bonding keys. */
 typedef struct {uint16_t cid,signaling_cid,media_cid;int connection,source,initiator,endpoint;
+ uint64_t generation;int configuration,endpoint_initiator,endpoint_acceptor;
+ uint8_t local_seid,initiator_label,acceptor_label,initiator_signal,acceptor_signal,initiator_packet_label,acceptor_packet_label;
+ bool endpoint_valid,active_matches;
  bool exists,outgoing,discover,configured,have_config;
  uint16_t handle,packet_types,mode_interval;uint8_t role,mode;bool packet_types_known,interval_known;} pm_bt_link_snapshot;
 void pm_bt_runtime_link_snapshot(pm_bt_link_snapshot *out);
