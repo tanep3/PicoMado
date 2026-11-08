@@ -112,3 +112,54 @@ All three logs report dropped=0. USB arrival byte counts are retained with compl
 The reversible stall→clear→stall result strongly supports the ARP-selected path through the router as a contributor to this startup failure. It does not identify the router's internal dropping mechanism, prove that every router-MAC path fails, or establish performance under every environment. Earlier successful router-MAC transfers remain valid counterexamples to a blanket claim. No permanent network fix or broad static-MAC rollout is claimed.
 
 The final device is the original normal firmware, online and Bluetooth connected after recovery. USB was closed. The temporary static entry existed only in RAM and was removed by the normal-firmware reboot. Private artifacts, manifests and all three captures are retained under `/home/tane/picomado-staging/20261108-eink1-home-static-arp/`. Independent approval and final issue closure remain parent-owned.
+
+## External DHCP: read-only reconciliation
+
+The user subsequently stated that DHCP on L13 is disabled and dnsmasq on an
+LXD system at 192.168.0.160 manages IP allocation. On 2026-11-08 the investigator
+read only raspi5's already acquired state; no request was sent to that LXD
+system, no remote login/SSH occurred, and no DHCP release/renew, packet capture,
+router login, network setting or device/service change was performed.
+
+- NetworkManager's current eth0 DHCP options identify server 192.168.0.160,
+  address 192.168.0.120, subnet mask 255.255.255.0, router 192.168.0.1 and an
+  86400-second lease. Current LAN routing uses eth0's connected 192.168.0.0/24 route.
+- wlan0 is unmanaged by NetworkManager. Its existing systemd-networkd lease,
+  read from `/run/systemd/netif/leases/<wlan0-ifindex>`, identifies the same
+  DHCP server 192.168.0.160, address 192.168.0.121, mask 255.255.255.0,
+  router 192.168.0.1 and a one-day lifetime. Both management services are active;
+  that fact alone does not establish conflicting management of either NIC.
+- The retained host options/lease and current routes show no classless route
+  that sends Pico LAN traffic through the gateway. This is not a complete
+  capture of every offered DHCP option, nor proof that no other DHCP server
+  exists. A selected lease identifies the selected server only.
+
+Pico's previously captured `peer=192.168.0.120 hop=192.168.0.120` has a narrower
+but useful meaning: `firmware/src/net.c:pm_net_tcp_snapshot` compares the peer
+with the live netif address/mask and substitutes the gateway only for an
+off-subnet target. Thus those samples identify .120 as on-link, rather than
+showing a mistaken subnet mask making Pico ARP for gateway .1. They do not
+retain the exact Pico netmask, selected DHCP server or complete offered options.
+
+The installed SDK's `lib/lwip/src/core/ipv4/dhcp.c` requests/parses the ordinary
+subnet-mask and router options and copies the first offered router. Its parser
+has no option 121/249 classless-route case; unknown options reach the default
+`LWIP_HOOK_DHCP_PARSE_OPTION`, which is a no-op unless overridden. No such
+override or IP-route hook was found in project C/CMake sources or the known
+normal E-ink_1 build's effective definition list. This does not support a
+classless DHCP route having directed this Pico to .1. Host clients can support
+option 121 independently; see [RFC 3442](https://www.rfc-editor.org/rfc/rfc3442).
+
+External DHCP is a normal separation of address allocation from the gateway;
+it does not by itself explain L13 answering .120's ARP request with its own
+MAC. The earlier actual competing replies and reversible static-ARP result
+remain the stronger path evidence. A L13 learning/proxy interaction with
+externally allocated clients remains possible but unverified; no inspected
+official documentation establishes such a dependency. The dnsmasq manual's
+[PXE proxy mode](https://thekelleys.org.uk/dnsmasq/docs/dnsmasq-man.html) is not
+the same as IP-layer proxy ARP.
+
+Still unverified: dnsmasq's actual configuration/host reservations and option
+tags, duplicate allocations or competing DHCP offers, Pico's complete acquired
+DHCP state, and L13's neighbor/proxy/forwarding state. No causal finding against
+external dnsmasq, no configuration correction and no issue closure is claimed.
