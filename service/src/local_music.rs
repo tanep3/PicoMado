@@ -43,12 +43,19 @@ impl Track {
         good_key(&self.key) && good_name(&self.name) && (1..=MAX_FRAMES).contains(&self.frames)
     }
 }
+/// Saved reason why playback is not active. Legacy selections are ambiguous:
+/// preserve a possible explicit pause rather than silently start them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RestingState { Stopped, #[default] Paused, Failed }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Selection {
     incarnation: u64,
     key: String,
     generation: u64,
     position: u64,
+    #[serde(default)]
+    resting: RestingState,
     #[serde(skip)]
     playing: bool,
     #[serde(skip)]
@@ -57,7 +64,7 @@ struct Selection {
     failure: Option<AudioPlaybackFailure>,
     #[serde(skip)]
     consumed: Option<u64>,
-    #[serde(skip)]
+    #[serde(default)]
     ended: bool,
 }
 impl Selection {
@@ -192,24 +199,27 @@ impl LocalMusicContent {
         };
         let mut next = current.clone().unwrap_or(Selection {
             incarnation: ctx.token.incarnation, key: keys[0].clone(), generation: 0,
-            position: 0, playing: false, started: self.clock, failure: None, consumed: None, ended: false,
+            position: 0, resting: RestingState::Stopped, playing: false, started: self.clock, failure: None, consumed: None, ended: false,
         });
         let changed = match operation {
             MusicOperation::Play if playing => false,
             MusicOperation::Play => {
                 next.position = position.filter(|_| !next.ended).filter(|p| self.tracks.get(&next.key).is_some_and(|t| *p < t.limit())).unwrap_or(0);
                 next.playing = true;
+                next.resting = RestingState::Stopped;
                 true
             }
             MusicOperation::Pause if !playing => false,
             MusicOperation::Pause => {
-                next.position = position.unwrap(); next.playing = false; true
+                next.position = position.unwrap(); next.playing = false; next.resting = RestingState::Paused; true
             }
             MusicOperation::Next => {
                 let index = current.as_ref().and_then(|s| keys.iter().position(|key| key == &s.key));
                 let target = index.map(|i| (i + 1) % keys.len()).unwrap_or(0);
                 if current.as_ref().is_some_and(|s| s.key == keys[target]) { false }
-                else { next.key = keys[target].clone(); next.position = 0; next.playing = playing; true }
+                else { next.key = keys[target].clone(); next.position = 0; next.playing = playing;
+                    if next.resting == RestingState::Failed { next.resting = RestingState::Stopped; }
+                    true }
             }
         };
         if changed {
@@ -282,6 +292,31 @@ impl ContentPlugin for LocalMusicContent {
         // Persist selection/position and fence stale Web commands after accepted input.
         Some(PluginWorkPlan::default())
     }
+    fn navigation_changed(&mut self, ctx: &PluginContext, active: bool) -> Result<bool, ContentError> {
+        let Some(current) = self.devices.get(&ctx.token.device_id)
+            .filter(|s| s.incarnation == ctx.token.incarnation) else { return Ok(false); };
+        let Some(track) = self.tracks.get(&current.key) else { return Ok(false); };
+        let position = current.position(self.clock, track.limit());
+        let mut next = current.clone();
+        if active {
+            if ctx.mode != Mode::Normal || next.resting != RestingState::Stopped
+                || (next.playing && !next.ended && position < track.limit()) { return Ok(false); }
+            next.position = if next.ended || position >= track.limit() { 0 } else { position };
+            next.playing = true;
+            next.ended = false;
+            next.started = self.clock;
+            next.consumed = track.streaming.then_some(next.position);
+        } else {
+            if !next.playing { return Ok(false); }
+            next.position = if next.ended || position >= track.limit() { 0 } else { position };
+            next.playing = false;
+            next.ended = false;
+            next.consumed = None;
+        }
+        next.generation = self.generation()?;
+        self.devices.insert(ctx.token.device_id.clone(), next);
+        Ok(true)
+    }
     fn session_reset(&mut self, id: &str, inc: u64) {
         if let Some(s) = self.devices.get_mut(id) {
             if s.incarnation != inc {
@@ -309,10 +344,12 @@ impl ContentPlugin for LocalMusicContent {
             .map(|t| t.name.as_str())
             .unwrap_or("NO MUSIC");
         Some(crate::music_text::lcd(
-            if s.is_some_and(|s| s.failure.is_some()) {
+            if s.is_some_and(|s| s.resting == RestingState::Failed) {
                 "MUSIC FAILED"
             } else if s.is_some_and(|s| s.playing && !s.ended) {
                 "MUSIC REQUESTED"
+            } else if s.is_some_and(|s| s.resting == RestingState::Paused) {
+                "MUSIC PAUSED"
             } else {
                 "MUSIC STOPPED"
             },
@@ -322,7 +359,7 @@ impl ContentPlugin for LocalMusicContent {
     fn eink_frame_for(&self, ctx: &PluginContext, _: &[u8]) -> Option<Vec<u8>> {
         let selection = self.devices.get(&ctx.token.device_id).filter(|s| s.incarnation == ctx.token.incarnation);
         let name = selection.and_then(|s| self.tracks.get(&s.key)).map(|t| t.name.as_str()).unwrap_or("NO MUSIC");
-        Some(crate::music_text::eink(if selection.is_some_and(|s|s.failure.is_some()) {"MUSIC FAILED"} else if selection.is_some_and(|s|s.playing&&!s.ended) {"MUSIC REQUESTED"} else {"MUSIC STOPPED"}, name))
+        Some(crate::music_text::eink(if selection.is_some_and(|s|s.resting == RestingState::Failed) {"MUSIC FAILED"} else if selection.is_some_and(|s|s.playing&&!s.ended) {"MUSIC REQUESTED"} else if selection.is_some_and(|s|s.resting == RestingState::Paused) {"MUSIC PAUSED"} else {"MUSIC STOPPED"}, name))
     }
     fn audio_playback(&self, ctx: &PluginContext) -> Option<AudioPlaybackSpec> {
         self.spec(ctx)
@@ -341,6 +378,7 @@ impl ContentPlugin for LocalMusicContent {
         selection.consumed = None;
         selection.position = consumed_frame.min(self.tracks[&selection.key].limit());
         selection.playing = false;
+        selection.resting = RestingState::Failed;
         selection.generation = generation;
         selection.failure = Some(reason);
         Ok(Some(PluginWorkPlan {
@@ -371,7 +409,7 @@ impl ContentPlugin for LocalMusicContent {
         Ok(())
     }
     fn web_state_at(&self, now: u64) -> Value {
-        json!({"imports":self.imports,"tracks":self.tracks.values().collect::<Vec<_>>(),"devices":self.devices.iter().map(|(id,s)|{let max=self.tracks.get(&s.key).map(|t|t.limit()).unwrap_or(0);(id,json!({"key":s.key,"incarnation":s.incarnation,"playing":s.playing&&!s.ended&&(s.consumed.is_some()||s.position(now,max)<max),"position_ms":s.position(now,max)*1000/SAMPLE_RATE as u64,"error":s.failure.map(|reason|json!({"code":reason,"message":failure_message(reason)}))}))}).collect::<BTreeMap<_,_>>(),"pending":self.pending.is_some(),"error":self.error})
+        json!({"imports":self.imports,"tracks":self.tracks.values().collect::<Vec<_>>(),"devices":self.devices.iter().map(|(id,s)|{let max=self.tracks.get(&s.key).map(|t|t.limit()).unwrap_or(0);(id,json!({"key":s.key,"incarnation":s.incarnation,"resting":s.resting,"playing":s.playing&&!s.ended&&(s.consumed.is_some()||s.position(now,max)<max),"position_ms":s.position(now,max)*1000/SAMPLE_RATE as u64,"error":s.failure.map(|reason|json!({"code":reason,"message":failure_message(reason)}))}))}).collect::<BTreeMap<_,_>>(),"pending":self.pending.is_some(),"error":self.error})
     }
     fn plan_command(
         &mut self,
@@ -435,6 +473,7 @@ impl ContentPlugin for LocalMusicContent {
                                 key: key.into(),
                                 generation: gen,
                                 position: pos,
+                                resting: RestingState::Stopped,
                                 playing: true,
                                 started: ctx.now_mono_ms,
                                 failure: None, consumed: t.streaming.then_some(pos), ended: false,
@@ -453,6 +492,7 @@ impl ContentPlugin for LocalMusicContent {
                             s.position(ctx.now_mono_ms, self.tracks[&s.key].limit())
                         };
                         s.playing = false;
+                        s.resting = if kind == "stop" { RestingState::Stopped } else { RestingState::Paused };
                         s.consumed = None;
                         s.generation = gen;
                         s.failure = None;
@@ -479,7 +519,7 @@ impl ContentPlugin for LocalMusicContent {
                 self.scan_blocked=true;
                 p.cancel_slots.push("scan".into());
                 if let Some(ref key) = key {
-                    for selection in self.devices.values_mut().filter(|s| &s.key == key) { selection.playing = false; }
+                    for selection in self.devices.values_mut().filter(|s| &s.key == key) { selection.playing = false; selection.resting = RestingState::Paused; }
                     p.refresh = RefreshTargets::Selected;
                 }
                 p.jobs.push(request(
@@ -654,7 +694,7 @@ mod tests {
     fn missing_track_selection_is_safe_and_invalid_restore_is_rejected() {
         let mut c = LocalMusicContent::default();
         let x = ctx();
-        c.devices.insert("a".into(), Selection { incarnation:1, key:"b".repeat(64), generation:1, position:123, playing:true, started:0, failure:None, consumed:None, ended:false });
+        c.devices.insert("a".into(), Selection { incarnation:1, key:"b".repeat(64), generation:1, position:123, resting:RestingState::Stopped, playing:true, started:0, failure:None, consumed:None, ended:false });
         c.next_generation=2;
         assert!(c.plan(&x.devices[0].context, ButtonAction::Sub).is_err());
         c.tracks.insert("a".repeat(64), Track {key:"a".repeat(64),name:"valid.wav".into(),frames:48000,streaming:false});
@@ -858,5 +898,112 @@ mod streaming_state_tests {
         let current=c.spec(ctx).unwrap();c.audio_progress(ctx,&current,6500,true);
         c.plan_command(&x,&json!({"kind":"pause","device_id":"a"})).unwrap();
         c.plan_command(&x,&json!({"kind":"play","device_id":"a","key":key})).unwrap();assert_eq!(c.spec(ctx).unwrap().start_frame,0);
+    }
+}
+
+#[cfg(test)]
+mod navigation_tests {
+    use super::*;
+    fn fixture() -> (LocalMusicContent, CommandContext, String) {
+        let mut c = LocalMusicContent::default();
+        let key = "a".repeat(64);
+        c.tracks.insert(key.clone(), Track { key: key.clone(), name: "one.wav".into(), frames: 4800, streaming: true });
+        (c, super::tests::ctx(), key)
+    }
+    #[test]
+    fn navigation_stopped_pause_failure_and_duplicate_entry_are_distinct() {
+        let (mut c, x, key) = fixture(); let ctx = &x.devices[0].context;
+        assert!(!c.navigation_changed(ctx, true).unwrap());
+        c.plan_command(&x, &json!({"kind":"play","device_id":"a","key":key})).unwrap();
+        let first = c.spec(ctx).unwrap();
+        assert!(!c.navigation_changed(ctx, true).unwrap());
+        assert_eq!(c.spec(ctx), Some(first.clone()));
+        c.audio_progress(ctx, &first, 6400, false);
+        assert!(c.navigation_changed(ctx, false).unwrap());
+        assert_eq!(c.devices["a"].position, 6400, "do not clamp to estimated metadata duration");
+        assert!(!c.navigation_changed(ctx, false).unwrap());
+        assert!(c.navigation_changed(ctx, true).unwrap());
+        let resumed = c.spec(ctx).unwrap();
+        assert_eq!(resumed.start_frame, 6400);
+        c.audio_progress(ctx, &first, 7000, false);
+        assert_eq!(c.devices["a"].consumed, Some(6400), "old transfer is fenced");
+        c.plan_control(ctx, MusicControl::Toggle).unwrap();
+        assert_eq!(c.devices["a"].resting, RestingState::Paused);
+        assert!(!c.navigation_changed(ctx, false).unwrap());
+        assert!(!c.navigation_changed(ctx, true).unwrap());
+        c.plan_control(ctx, MusicControl::Toggle).unwrap();
+        let resumed = c.spec(ctx).unwrap();
+        assert_eq!(resumed.start_frame, 6400);
+        c.audio_failed(ctx, &resumed, 6500, AudioPlaybackFailure::DeviceFailed).unwrap();
+        assert!(!c.navigation_changed(ctx, true).unwrap());
+        let mut loaded = LocalMusicContent::default(); loaded.load_state(c.save_state()).unwrap();
+        assert_eq!(loaded.devices["a"].resting, RestingState::Failed);
+        assert!(!loaded.navigation_changed(ctx, true).unwrap());
+        loaded.plan_command(&x, &json!({"kind":"stop","device_id":"a"})).unwrap();
+        assert!(loaded.navigation_changed(ctx, true).unwrap());
+        assert_eq!(loaded.spec(ctx).unwrap().start_frame, 0);
+    }
+    #[test]
+    fn navigation_eof_restarts_only_on_entry_and_explicit_pause_still_wins() {
+        let (mut c, x, key) = fixture(); let ctx = &x.devices[0].context;
+        c.plan_command(&x, &json!({"kind":"play","device_id":"a","key":key})).unwrap();
+        let spec = c.spec(ctx).unwrap(); c.audio_progress(ctx, &spec, 6000, true);
+        assert!(c.spec(ctx).is_none(), "EOF does not loop");
+        assert!(c.navigation_changed(ctx, false).unwrap());
+        assert_eq!(c.devices["a"].position, 0);
+        assert!(c.navigation_changed(ctx, true).unwrap());
+        assert_eq!(c.spec(ctx).unwrap().start_frame, 0);
+        let spec = c.spec(ctx).unwrap(); c.audio_progress(ctx, &spec, 6000, true);
+        c.plan_command(&x, &json!({"kind":"pause","device_id":"a"})).unwrap();
+        assert!(!c.navigation_changed(ctx, false).unwrap());
+        assert!(!c.navigation_changed(ctx, true).unwrap());
+        let mut reloaded = LocalMusicContent::default(); reloaded.load_state(c.save_state()).unwrap();
+        assert!(!reloaded.navigation_changed(ctx, true).unwrap());
+        reloaded.plan_control(ctx, MusicControl::Toggle).unwrap();
+        assert_eq!(reloaded.spec(ctx).unwrap().start_frame, 0);
+    }
+    #[test]
+    fn navigation_during_delete_does_not_reopen_the_source() {
+        let (mut c, x, key) = fixture(); let ctx = &x.devices[0].context;
+        c.plan_command(&x, &json!({"kind":"play","device_id":"a","key":key})).unwrap();
+        c.plan_command(&x, &json!({"kind":"delete","name":"one.wav","confirmation":"one.wav"})).unwrap();
+        assert!(!c.navigation_changed(ctx, false).unwrap());
+        assert!(!c.navigation_changed(ctx, true).unwrap());
+        assert!(c.spec(ctx).is_none());
+        assert!(c.tracks.contains_key(&key), "only a successful delete result removes metadata");
+    }
+    #[test]
+    fn navigation_restore_migration_incarnation_and_generation_failure() {
+        let (mut c, x, key) = fixture(); let ctx = &x.devices[0].context;
+        c.plan_command(&x, &json!({"kind":"play","device_id":"a","key":key})).unwrap();
+        let mut saved = c.save_state();
+        saved["devices"]["a"].as_object_mut().unwrap().remove("resting");
+        let mut loaded = LocalMusicContent::default(); loaded.load_state(saved).unwrap();
+        assert_eq!(loaded.devices["a"].resting, RestingState::Paused);
+        assert!(loaded.spec(ctx).is_none());
+        assert!(!loaded.navigation_changed(ctx, true).unwrap());
+        loaded.plan_command(&x, &json!({"kind":"stop","device_id":"a"})).unwrap();
+        let mut restored = LocalMusicContent::default(); restored.load_state(loaded.save_state()).unwrap();
+        restored.session_reset("a", 1);
+        assert!(restored.spec(ctx).is_none(), "load/Hello alone never plays");
+        let mut stale = ctx.clone(); stale.token.incarnation += 1;
+        assert!(!restored.navigation_changed(&stale, true).unwrap());
+        let before = restored.save_state(); restored.next_generation = u64::MAX;
+        assert!(restored.navigation_changed(ctx, true).is_err());
+        assert_eq!(restored.save_state()["devices"], before["devices"]);
+    }
+    #[test]
+    fn navigation_explicit_pause_survives_next_track_and_save_load() {
+        let (mut c, x, key) = fixture(); let ctx = &x.devices[0].context;
+        let b = "b".repeat(64); c.tracks.insert(b.clone(), Track { key: b.clone(), name: "two.wav".into(), frames: 4800, streaming: true });
+        c.plan_command(&x, &json!({"kind":"play","device_id":"a","key":key})).unwrap();
+        c.plan_command(&x, &json!({"kind":"pause","device_id":"a"})).unwrap();
+        c.plan_control(ctx, MusicControl::Next).unwrap();
+        assert_eq!(c.devices["a"].key, b);
+        let mut loaded = LocalMusicContent::default(); loaded.load_state(c.save_state()).unwrap();
+        assert_eq!(loaded.devices["a"].resting, RestingState::Paused);
+        assert!(!loaded.navigation_changed(ctx, true).unwrap());
+        loaded.plan_control(ctx, MusicControl::Toggle).unwrap();
+        assert_eq!(loaded.spec(ctx).unwrap().asset_id, b);
     }
 }

@@ -113,3 +113,32 @@ test('streaming library has no prepare or conversion cancel action', () => {
   assert.deepEqual(buttons(row).map(button => button.text), ['音源と履歴を削除']);
   assert.deepEqual(f.commands, []);
 });
+
+test('explicit pause and retained failure remain distinct from stop on rerender', () => {
+  const f = fixture(['paused', 'stopped', 'failed']);
+  for (let i = 0; i < 2; ++i) {
+    const sections = f.render({tracks: [track], devices: {
+      paused: {key: 'key', playing: false, resting: 'paused', position_ms: 250},
+      stopped: {key: 'key', playing: false, resting: 'stopped', position_ms: 0},
+      failed: {key: 'key', playing: false, resting: 'failed', position_ms: 100}
+    }});
+    const deviceRows = rows(sections[0]);
+    assert.match(texts(deviceRows[0]), /一時停止中/);
+    assert.match(texts(deviceRows[1]), /停止中/);
+    assert.doesNotMatch(texts(deviceRows[1]), /一時停止中/);
+    assert.match(texts(deviceRows[2]), /再生失敗/);
+    assert.deepEqual(f.commands, []);
+  }
+});
+
+test('changing the Web track selector alone never resumes an explicit pause', () => {
+  const f = fixture(['one']);
+  const sections = f.render({tracks: [track, {...track, key: 'other'}], devices: {
+    one: {key: 'key', playing: false, resting: 'paused', position_ms: 250}
+  }});
+  const row = rows(sections[0])[0];
+  row.children.find(node => node.tag === 'select').value = 'other';
+  assert.deepEqual(f.commands, []);
+  buttons(row)[0].onclick();
+  assert.deepEqual(f.commands, [{plugin: 'local-music', command: {kind: 'play', device_id: 'one', key: 'other'}}]);
+});

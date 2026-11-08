@@ -211,10 +211,8 @@ fn normal_up_down_still_select_channels_without_changing_tracks() {
         Some(PLUGIN)
     );
     let returned = f.app.audio_playback_for(&token).unwrap();
-    assert_eq!(
-        returned.2, first.2,
-        "channel navigation does not skip tracks"
-    );
+    assert_eq!(returned.2.asset_id, first.2.asset_id, "navigation keeps the track");
+    assert!(returned.2.generation > first.2.generation, "reentry resumes a fresh transfer");
     assert!(
         !same_offer(&f.app, &token, &first),
         "display epoch still fences old reads"
@@ -678,4 +676,74 @@ fn failure_clamps_terminal_padding_and_stop_clears_device_error() {
     assert!(f.state("one")["error"].is_null());
     assert_eq!(f.state("one")["position_ms"], 0);
     assert!(f.app.audio_playback_for(&session).is_none());
+}
+
+#[test]
+fn navigation_stopped_autoplays_but_pause_stays_paused_until_avrcp_toggle() {
+    let mut f = Fixture::new(4800000);
+    let a = f.hello_with_caps("a", &["lcd", "bluetooth-audio-v1", "media-input-v1"]);
+    let b = f.hello_with_caps("b", &["lcd", "bluetooth-audio-v1", "media-input-v1"]);
+    f.command("a", "play"); f.command("a", "stop");
+    f.command("b", "play"); let other = f.app.audio_playback_for(&b).unwrap();
+    f.app.media_input(&a, MediaOperation::ChannelNext).unwrap();
+    assert!(f.app.audio_playback_for(&a).is_none());
+    let rev = f.app.plugin_web_view(PLUGIN).unwrap().revision;
+    f.app.media_input(&a, MediaOperation::ChannelPrevious).unwrap();
+    assert_eq!(f.app.audio_playback_for(&a).unwrap().2.start_frame, 0);
+    assert_eq!(f.app.plugin_web_view(PLUGIN).unwrap().revision, rev + 1);
+    assert!(same_offer(&f.app, &b, &other));
+    f.app.media_input(&a, MediaOperation::TogglePlayback).unwrap();
+    let paused = f.state("a"); assert_eq!(paused["resting"], "paused");
+    f.app.media_input(&a, MediaOperation::ChannelNext).unwrap();
+    f.app.media_input(&a, MediaOperation::ChannelPrevious).unwrap();
+    assert!(f.app.audio_playback_for(&a).is_none()); assert_eq!(f.state("a"), paused);
+    f.app.media_input(&a, MediaOperation::TogglePlayback).unwrap();
+    assert!(f.app.audio_playback_for(&a).is_some());
+    assert!(same_offer(&f.app, &b, &other));
+}
+
+#[test]
+fn navigation_failure_no_selection_stale_hello_and_mute_stay_safe() {
+    use picomado_core::{application::BluetoothAction, plugin_jobs::AudioPlaybackFailure};
+    let mut f = Fixture::new(4800000); let a = f.stopped("a");
+    let rev = f.app.bluetooth_view("a").revision;
+    f.app.bluetooth_command("a", a.incarnation, rev, BluetoothAction::SetMuted { muted: true }).unwrap();
+    let bt = f.app.bluetooth_view("a");
+    f.app.button(&a, ButtonAction::Up).unwrap(); f.app.button(&a, ButtonAction::Down).unwrap();
+    assert_eq!(f.app.audio_volume(&a), 0);
+    assert_eq!(f.app.bluetooth_view("a").desired, bt.desired);
+    assert_eq!(f.app.bluetooth_view("a").revision, bt.revision);
+    let spec = f.app.audio_playback_for(&a).unwrap();
+    f.app.audio_playback_failed(&a, &spec.0, &spec.1, &spec.2, 256, AudioPlaybackFailure::DeviceFailed).unwrap();
+    let failed = f.state("a");
+    f.app.button(&a, ButtonAction::Up).unwrap(); f.app.button(&a, ButtonAction::Down).unwrap();
+    assert!(f.app.audio_playback_for(&a).is_none()); assert_eq!(f.state("a"), failed);
+    f.command("a", "stop");
+    let new = f.hello("a"); assert!(f.app.audio_playback_for(&new).is_none());
+    assert!(f.app.button(&a, ButtonAction::Up).is_err());
+    assert!(f.app.audio_playback_for(&new).is_none());
+    let b = f.hello("b");
+    f.app.button(&b, ButtonAction::Up).unwrap(); f.app.button(&b, ButtonAction::Down).unwrap();
+    assert!(f.state("b").is_null()); assert!(f.app.audio_playback_for(&b).is_none());
+}
+
+#[test]
+fn navigation_standby_hello_does_not_autoplay_and_legacy_eof_restarts_on_entry() {
+    let mut f = Fixture::new(48); let a = f.stopped("a");
+    f.app.button(&a, ButtonAction::Power).unwrap();
+    assert_eq!(f.app.session_mode(&a), Some("standby"));
+    f.app.button(&a, ButtonAction::Power).unwrap();
+    assert!(f.app.audio_playback_for(&a).is_none(), "Power in standby is an existing no-op");
+    let a = f.hello("a");
+    assert!(f.app.audio_playback_for(&a).is_none(), "Hello is not deliberate navigation");
+    f.app.button(&a, ButtonAction::Up).unwrap(); f.app.button(&a, ButtonAction::Down).unwrap();
+    let played = f.app.audio_playback_for(&a).unwrap();
+    wait_until(&f.app, played.2.started_mono_ms + 2);
+    assert_eq!(f.state("a")["playing"], false);
+    f.app.button(&a, ButtonAction::Up).unwrap(); f.app.button(&a, ButtonAction::Down).unwrap();
+    let replay = f.app.audio_playback_for(&a).unwrap();
+    assert_eq!(replay.2.start_frame, 0); assert!(replay.2.generation > played.2.generation);
+    f.command("a", "stop");
+    f.app.terminal_event(Event::PluginInput { token: a.clone(), name: "toggle-playback".into() }).unwrap();
+    assert!(f.app.audio_playback_for(&a).is_none(), "redraw event is not a navigation edge");
 }

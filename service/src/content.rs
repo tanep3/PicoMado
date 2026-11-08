@@ -214,6 +214,12 @@ pub trait ContentPlugin: Send + Sync {
     fn button_work(&self, _ctx: &PluginContext, _action: ButtonAction) -> Option<PluginWorkPlan> {
         None
     }
+    /// Pure, clone-only notification for an accepted terminal navigation edge.
+    /// `active` means Normal and selected. Hello, redraw and settings do not call it.
+    /// Return true only when plugin state changed; App commits it with navigation.
+    fn navigation_changed(&mut self, _ctx: &PluginContext, _active: bool) -> Result<bool, ContentError> {
+        Ok(false)
+    }
     fn session_reset(&mut self, device_id: &str, incarnation: u64);
     fn delete_device(&mut self, device_id: &str);
     fn save_state(&self) -> Value {

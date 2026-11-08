@@ -2239,11 +2239,47 @@ impl App {
             self.record_observation(Component::Input, Phase::Completed, operation, 0, self.runtime.world.revision, 0);
             return Ok(false);
         }
+        // Only actual terminal navigation edges may change plugin playback intent.
+        // Prepare clones before committing so navigation, state and Web fences are atomic.
+        let mut navigation_contents = BTreeMap::new();
+        if let Event::Next { token } | Event::Previous { token }
+            | Event::Power { token } | Event::EnterSub { token } = &event
+        {
+            if let (Some(before), Some(after)) = (
+                self.runtime.world.devices.get(&token.device_id),
+                decision.state.devices.get(&token.device_id),
+            ) {
+                let old = before.selected.as_ref().filter(|_| before.mode == Mode::Normal);
+                let new = after.selected.as_ref().filter(|_| after.mode == Mode::Normal);
+                if old != new {
+                    for (id, device, active) in [(old, before, false), (new, after, true)] {
+                        if let Some((id, content)) = id.and_then(|id| self.contents.get(id).map(|p| (id, p))) {
+                            let mut content = content.clone();
+                            content.observe_monotonic_time(self.monotonic_millis());
+                            let ctx = PluginContext { token: token.clone(),
+                                settings_revision: device.settings_revision, mode: device.mode.clone() };
+                            if content.navigation_changed(&ctx, active).map_err(|_| AppError::Conflict("plugin navigation rejected"))? {
+                                navigation_contents.insert(id.clone(), content);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         self.observation_parent = operation;
-        let result = self.change(|_, state| state.accept(decision));
+        let result = self.change(|_, state| {
+            let changed = state.accept(decision)?;
+            for (id, content) in &navigation_contents {
+                state.plugin_states.insert(id.clone(), Arc::new(content.save_state()));
+                let revision = state.managed_revisions.entry(id.clone()).or_insert(1);
+                *revision = revision.checked_add(1).ok_or(AppError::Conflict("plugin revision exhausted"))?;
+            }
+            Ok(changed)
+        });
         self.observation_parent = 0;
         self.record_observation(Component::Input, if result.is_ok() { Phase::Completed } else { Phase::Error }, operation, 0, self.runtime.world.revision, 1);
         let changed = result?;
+        self.contents.extend(navigation_contents);
         if changed && matches!(event, Event::RenderedAck { .. }) {
             self.queue_due_content_refreshes()?;
         }
@@ -3718,3 +3754,7 @@ include!("application_live.rs");
 include!("application_maintenance.rs");
 
 include!("application_bluetooth.rs");
+
+#[cfg(test)]
+#[path = "application_music_navigation_tests.rs"]
+mod music_navigation_tests;
