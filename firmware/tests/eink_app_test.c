@@ -237,3 +237,5 @@ int main(void){
     puts("eink app: negotiated clock metadata, interval changes, same-screen/reset routing, ordinary frame isolation, invalid policy rejection PASS");
     puts("eink app: production mono1 parse/CRC/Receipt, delayed Rendered, failed/stale completion, drain-before-standby, input capability PASS");
 }
+
+void pm_net_tcp_snapshot(pm_net_tcp_status *out){*out=(pm_net_tcp_status){0};}

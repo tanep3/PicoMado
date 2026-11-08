@@ -303,6 +303,15 @@ static void log_usb_snapshot(void){
 #if PM_AWAY_EEX1
     endpoint_snapshot();
 #endif
+    pm_net_tcp_status tcp;pm_net_tcp_snapshot(&tcp);
+    pm_logf("tcp snapshot conn=%llu valid=%u state=%u lbb=%lu nxt=%lu ack=%lu unsent=%u unacked=%u\n",
+        (unsigned long long)tcp.connection_id,tcp.valid,tcp.state,(unsigned long)tcp.snd_lbb,
+        (unsigned long)tcp.snd_nxt,(unsigned long)tcp.lastack,tcp.unsent,tcp.unacked);
+    pm_logf("tcp flow conn=%llu wnd=%lu cwnd=%lu nrtx=%u keep=%u rtime=%d\n",
+        (unsigned long long)tcp.connection_id,(unsigned long)tcp.snd_wnd,(unsigned long)tcp.cwnd,tcp.nrtx,tcp.keep_cnt_sent,tcp.rtime);
+    pm_logf("tcp output conn=%llu valid=%u last=%d write_ok=%lu write_fail=%lu out_ok=%lu out_fail=%lu\n",
+        (unsigned long long)tcp.connection_id,tcp.output_valid,tcp.last_output_result,
+        (unsigned long)tcp.write_ok,(unsigned long)tcp.write_failed,(unsigned long)tcp.output_ok,(unsigned long)tcp.output_failed);
     // Replay cached results for late USB attachment; never repeat radio IOCTLs.
     log_wifi_pm_status();
     log_radio_defaults_status();

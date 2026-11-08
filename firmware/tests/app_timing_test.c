@@ -462,3 +462,5 @@ void pm_net_rx_frame_end(pm_rx_reason reason,int error){
 }
 void pm_net_rx_snapshot(void){}
 #endif
+
+void pm_net_tcp_snapshot(pm_net_tcp_status *out){*out=(pm_net_tcp_status){0};}

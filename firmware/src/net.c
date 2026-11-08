@@ -30,6 +30,26 @@
 _Static_assert(TCP_WND > 4096u * 4u + 512u, "TCP window must fit one image fragment");
 _Static_assert(RX_CAP > TCP_WND, "receive buffer must exceed TCP window");
 static struct tcp_pcb *pcb;
+static pm_net_tcp_status tcp_status;
+static void tcp_count(uint32_t *count){if(*count!=UINT32_MAX)++*count;}
+static void tcp_note_write(err_t result){tcp_count(result==ERR_OK?&tcp_status.write_ok:&tcp_status.write_failed);}
+static void tcp_note_output(err_t result){
+    tcp_status.output_valid=true;tcp_status.last_output_result=(int16_t)result;
+    tcp_count(result==ERR_OK?&tcp_status.output_ok:&tcp_status.output_failed);
+}
+void pm_net_tcp_snapshot(pm_net_tcp_status *out){
+    if(!out)return;
+    cyw43_arch_lwip_begin();
+    *out=tcp_status;out->valid=pcb!=NULL;
+    if(pcb){
+        out->state=(uint8_t)pcb->state;out->snd_lbb=pcb->snd_lbb;
+        out->snd_nxt=pcb->snd_nxt;out->lastack=pcb->lastack;
+        out->snd_wnd=pcb->snd_wnd;out->cwnd=pcb->cwnd;
+        out->unsent=pcb->unsent!=NULL;out->unacked=pcb->unacked!=NULL;
+        out->nrtx=pcb->nrtx;out->keep_cnt_sent=pcb->keep_cnt_sent;out->rtime=pcb->rtime;
+    }
+    cyw43_arch_lwip_end();
+}
 static const pm_profile *profile;
 static pm_net_stage stage;
 static enum { SOCKS_METHOD,SOCKS_AUTH,SOCKS_CONNECT } socks_step;
@@ -285,6 +305,7 @@ static bool send_raw(const void *p, size_t n) {
     uint32_t copy_first=pcb->snd_lbb;
 #endif
     err_t result=tcp_write(pcb,p,n,TCP_WRITE_FLAG_COPY);
+    tcp_note_write(result);
     pm_ack_probe_net(PM_AP_WRITE_END,ack_probe_flags(),(uint32_t)result,tcp_sndbuf(pcb),
 #if PM_ACK_PATH_PROBE
         pcb->snd_queuelen,pcb->snd_lbb
@@ -310,6 +331,7 @@ static bool send_raw(const void *p, size_t n) {
     );
     uint64_t output_started=pm_trace_clock();
     err_t output_result=tcp_output(pcb);
+    tcp_note_output(output_result);
 #if PM_EVENT_STREAM
     if(copy)pm_observe(PM_OB_NETWORK,PM_OB_NET_OUTPUT,output_result==ERR_OK?PM_OB_COMPLETED:PM_OB_ERROR,
         copy,observed_net.notify,observed_net.connection,0,(uint32_t)output_result,
@@ -334,12 +356,13 @@ static bool send_close_reply(const void *p,size_t n){
     if(n>tcp_sndbuf(pcb))return true;
     uint64_t started=pm_trace_clock();
     err_t result=tcp_write(pcb,p,n,TCP_WRITE_FLAG_COPY);
+    tcp_note_write(result);
     pm_trace_event(PM_TRACE_TCP_WRITE,pm_trace_current_frame(),result,
         (uint32_t)(pm_trace_clock()-started));
     if(socket_dead || stage==PM_NET_FAILED || !pcb)return false;
     if(result==ERR_MEM)return true;
     if(result==ERR_OK){
-        started=pm_trace_clock();result=tcp_output(pcb);
+        started=pm_trace_clock();result=tcp_output(pcb);tcp_note_output(result);
         pm_trace_event(PM_TRACE_TCP_OUTPUT,pm_trace_current_frame(),result,
             (uint32_t)(pm_trace_clock()-started));
         if(socket_dead || stage==PM_NET_FAILED || !pcb)return false;
@@ -463,7 +486,10 @@ static void close_unlocked(void) {
     pm_rx_flow_reset(&rx_flow); app_used=0; last_payload_length=0; ws_continuation=false; ws_remaining=0; socket_dead=false;ws_closed=false;eof_started_us=0;
 }
 static void begin_unlocked(const pm_profile *p) {
-    close_unlocked(); profile=p;proxy_target_connected=false;last_failure=PM_NET_FAIL_NONE;
+    close_unlocked();
+    uint64_t next=tcp_status.connection_id==UINT64_MAX?UINT64_MAX:tcp_status.connection_id+1;
+    tcp_status=(pm_net_tcp_status){.connection_id=next};
+    profile=p;proxy_target_connected=false;last_failure=PM_NET_FAIL_NONE;
     if(!p || !p->server_ip || !ipaddr_aton(p->server_ip,&server_addr)) { stage=PM_NET_FAILED;return; }
     if(p->socks && (!p->proxy_ip || !ipaddr_aton(p->proxy_ip,&proxy_addr) ||
                     !p->proxy_user || !p->proxy_password ||

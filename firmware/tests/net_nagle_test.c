@@ -23,6 +23,7 @@ static tcp_recv_fn on_receive;
 static unsigned lock_depth,connects,creates,outputs,closes;
 static unsigned flags_at_connect;
 static bool fail_alloc,fail_connect;
+static err_t output_result,write_result;
 static const pm_profile *connecting_profile;
 static uint8_t sent[2048];
 static size_t sent_size;
@@ -60,9 +61,10 @@ err_t tcp_connect(struct tcp_pcb *p,const ip_addr_t *address,uint16_t port,tcp_c
 unsigned tcp_sndbuf(struct tcp_pcb *p){assert(lock_depth==1 && p==&socket_instance);return 65535;}
 err_t tcp_write(struct tcp_pcb *p,const void *bytes,size_t length,int flags){
     assert(lock_depth==1 && p==&socket_instance && flags==TCP_WRITE_FLAG_COPY && length<=sizeof sent);
+    if(write_result)return write_result;
     assert((p->flags&TF_NODELAY)==expected_flags());memcpy(sent,bytes,length);sent_size=length;return ERR_OK;
 }
-err_t tcp_output(struct tcp_pcb *p){assert(lock_depth==1 && p==&socket_instance);outputs++;return ERR_OK;}
+err_t tcp_output(struct tcp_pcb *p){assert(lock_depth==1 && p==&socket_instance);outputs++;return output_result;}
 err_t tcp_close(struct tcp_pcb *p){assert(lock_depth==1 && p==&socket_instance);closes++;return ERR_OK;}
 void tcp_abort(struct tcp_pcb *p){assert(lock_depth==1 && p==&socket_instance);}
 void tcp_recved(struct tcp_pcb *p,u16_t size){assert(lock_depth==1 && p==&socket_instance);(void)size;}
@@ -102,7 +104,34 @@ static void ready(const pm_profile *profile){
     assert((sent[6]^sent[2])=='O' && (sent[7]^sent[3])=='K');
     pm_net_close();assert(stage==PM_NET_DOWN && !lock_depth);
 }
+static void snapshot_test(void){
+    pm_net_close();pm_net_tcp_status before,after;
+    pm_net_tcp_snapshot(&before);assert(!before.valid);
+    connecting_profile=&home;pm_net_begin(&home);
+    pm_net_tcp_snapshot(&before);assert(before.valid && !before.output_valid && before.write_ok==0);
+    socket_instance.snd_lbb=123;socket_instance.snd_nxt=100;socket_instance.lastack=80;
+    socket_instance.unacked=&socket_instance;socket_instance.rtime=-1;
+    socket_instance.nrtx=2;socket_instance.keep_cnt_sent=3;socket_instance.state=4;
+    struct tcp_pcb unchanged=socket_instance;
+    unsigned previous=outputs;
+    pm_net_tcp_snapshot(&after);
+    assert(!memcmp(&unchanged,&socket_instance,sizeof unchanged));
+    assert(after.nrtx==2 && after.keep_cnt_sent==3 && after.state==4);
+    assert(outputs==previous && after.snd_lbb==123 && after.snd_nxt==100 && after.lastack==80 && after.unacked && after.rtime==-1);
+    output_result=-4;cyw43_arch_lwip_begin();assert(send_raw("x",1));cyw43_arch_lwip_end();
+    pm_net_tcp_snapshot(&after);assert(after.write_ok==1 && after.output_failed==1 && after.last_output_result==-4 && after.output_valid);
+    tcp_status.output_failed=UINT32_MAX;cyw43_arch_lwip_begin();assert(send_raw("x",1));cyw43_arch_lwip_end();
+    pm_net_tcp_snapshot(&after);assert(after.output_failed==UINT32_MAX);
+    write_result=-1;cyw43_arch_lwip_begin();assert(!send_raw("x",1));cyw43_arch_lwip_end();
+    pm_net_tcp_snapshot(&after);assert(after.write_failed==1 && after.output_failed==UINT32_MAX);
+    write_result=0;output_result=0;pm_net_close();pm_net_tcp_snapshot(&after);
+    assert(!after.valid && after.snd_lbb==0 && !after.unacked);
+    pm_net_begin(&home);pm_net_tcp_snapshot(&after);
+    assert(after.connection_id==before.connection_id+1 && !after.output_valid && after.write_ok==0);
+    pm_net_close();
+}
 int main(int argc,char **argv){
+    snapshot_test();connects=creates=outputs=closes=0;
     assert(argc==2);
     for(unsigned i=0;i<2;i++){ready(&home);ready(&away);}
     assert(connects==4 && closes==4);
